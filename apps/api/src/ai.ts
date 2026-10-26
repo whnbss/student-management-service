@@ -1,0 +1,403 @@
+// AI 统一封装：OpenAI 兼容客户端（fetch 实现，无需 SDK）
+// - 多供应商配置存 settings（JSON）
+// - 输出严格 JSON 校验，失败自动重试 2 次（共 3 次尝试），绝不入库脏数据
+// - 每次调用记录 token 用量与费用估算（ai_usage 表）
+import { db, getSetting, nowISO } from './db'
+import type { AiProvider, AiAnalysisResult, Grade } from '@workbench/shared'
+import { ANALYZE_SYSTEM_PROMPT, analyzeUserPrompt, VARIANT_SYSTEM_PROMPT } from '@workbench/shared'
+import path from 'node:path'
+import fs from 'node:fs'
+import { fetch as undiciFetch, ProxyAgent } from 'undici'
+
+// ---------- 网络代理支持 ----------
+// 公司内网通常禁止直连外网（直连会超时报 fetch failed），必须走 HTTP 代理；
+// 代理若做了 HTTPS 中间人签名，还需加载其根证书（NODE_EXTRA_CA_CERTS 或 certs/corporate-ca.pem）。
+let proxyAgentCache: { uri: string; agent: ProxyAgent } | null = null
+
+function loadExtraCa(): string[] | undefined {
+  const candidates = [
+    process.env.NODE_EXTRA_CA_CERTS,
+    path.join(process.cwd(), '..', 'certs', 'corporate-ca.pem'),
+    path.join(process.cwd(), '..', '..', 'certs', 'corporate-ca.pem'), // apps/api 直接启动时项目根在上两级
+    path.join(process.cwd(), 'certs', 'corporate-ca.pem'),
+  ].filter(Boolean) as string[]
+  for (const f of candidates) {
+    try {
+      if (fs.existsSync(f)) return [fs.readFileSync(f, 'utf8')]
+    } catch { /* 读取失败则忽略，走默认证书 */ }
+  }
+  return undefined
+}
+
+function getDispatcher(): ProxyAgent | undefined {
+  const setting = (getSetting('ai_proxy') || '').trim()
+  const uri =
+    setting ||
+    process.env.HTTPS_PROXY || process.env.https_proxy ||
+    process.env.HTTP_PROXY || process.env.http_proxy || ''
+  if (!uri) return undefined
+  if (proxyAgentCache && proxyAgentCache.uri === uri) return proxyAgentCache.agent
+  const ca = loadExtraCa()
+  const agent = new ProxyAgent({ uri, requestTls: ca ? { ca } : undefined })
+  proxyAgentCache = { uri, agent }
+  return agent
+}
+
+// 把底层网络错误翻译成教师能看懂的中文提示
+export function friendlyAiError(e: any): string {
+  const cause = String(e?.cause?.code || e?.cause?.message || '')
+  const msg = String(e?.message || e || '')
+  const all = cause + ' ' + msg
+  if (msg.includes('Content Filter') || msg.includes('Access Denied')) {
+    return '请求被网络内容过滤拦截（403 Access Denied）：当前网络环境不允许访问该 AI 供应商，请改用其它供应商（如阿里云百炼 DashScope）。'
+  }
+  if (msg.includes('aborted due to timeout') || msg.includes('Gateway Time-out') || cause.includes('TIMEOUT')) {
+    return 'AI 服务器响应超时（可能是图片太大或网关繁忙）。可尝试重新拍照（光线充足、单页拍摄）后再试，或到「我的 → AI 配置」更换供应商/模型。'
+  }
+  if (msg.includes('request_too_large') || msg.includes('context_length_exceeded') || msg.includes('prompt is too long')) {
+    return '请求内容超出模型限制。请重新拍照（尽量单页、光线好）后再试。'
+  }
+  if (msg.includes('fetch failed') || /UND_ERR_|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNRESET/.test(cause)) {
+    return `网络无法连接 AI 服务器（${cause || '连接超时'}）。若电脑需要代理才能上外网，请到「我的 → AI 配置」填写网络代理地址（如 http://proxy.xxx:8080），保存后重试。`
+  }
+  if (/SELF_SIGNED_CERT|ERR_TLS|CERT_|SSL/i.test(all)) {
+    return 'TLS 证书校验失败（常见于公司代理对 HTTPS 做了中间人签名）。请在项目目录运行 certs\\export-ca.ps1 导出公司根证书，并用 start.bat 重启服务。'
+  }
+  return e?.message || 'AI 调用失败'
+}
+
+// ---------- 供应商配置 ----------
+export const DEFAULT_PROVIDERS: AiProvider[] = [
+  {
+    id: 'dashscope',
+    name: '阿里云百炼',
+    base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    api_key: '',
+    vision_model: 'qwen-vl-max',
+    text_model: 'qwen-plus',
+    input_price: 0,
+    output_price: 0,
+  },
+]
+
+export function getProviders(): AiProvider[] {
+  const raw = getSetting('ai_providers')
+  if (!raw) return DEFAULT_PROVIDERS
+  try {
+    const list = JSON.parse(raw) as AiProvider[]
+    return Array.isArray(list) ? list : DEFAULT_PROVIDERS
+  } catch {
+    return DEFAULT_PROVIDERS
+  }
+}
+
+export function saveProviders(list: AiProvider[]) {
+  getSetting('ai_providers') // 确保 settings 可用
+  db.prepare('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run('ai_providers', JSON.stringify(list))
+}
+
+// ---------- 当前使用模型（用户可自选）----------
+// active_provider 存的是用户在设置页选中的供应商 id；分析/变式题都用它，
+// 若该供应商不可用（没填 Key 或没模型）则自动回退到第一个可用的，避免直接报错
+export function getActiveProviderId(): string {
+  return (getSetting('ai_active_provider') || '').trim()
+}
+
+export function setActiveProviderId(id: string) {
+  db.prepare('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run('ai_active_provider', String(id || '').trim())
+}
+
+// kind: 'vision' 拍照分析（视觉模型优先、回退文本模型）；'text' 文本任务（变式题等）
+export function pickProvider(kind: 'vision' | 'text'): AiProvider | null {
+  const providers = getProviders()
+  const usable = (p: AiProvider) => !!p.api_key && !!(kind === 'text' ? p.text_model || p.vision_model : p.vision_model || p.text_model)
+  const activeId = getActiveProviderId()
+  const active = providers.find((p) => p.id === activeId && usable(p))
+  if (active) return active
+  return providers.find(usable) || null
+}
+
+// ---------- 用量记录与费用估算 ----------
+export function recordUsage(p: { provider_name: string; model: string; kind: string; prompt_tokens: number; completion_tokens: number; input_price: number; output_price: number }) {
+  const cost =
+    (p.prompt_tokens / 1_000_000) * (p.input_price || 0) +
+    (p.completion_tokens / 1_000_000) * (p.output_price || 0)
+  db.prepare(
+    'INSERT INTO ai_usage(provider_name, model, kind, prompt_tokens, completion_tokens, cost, created_at) VALUES(?,?,?,?,?,?,?)'
+  ).run(p.provider_name, p.model, p.kind, p.prompt_tokens, p.completion_tokens, cost, nowISO())
+  return { prompt_tokens: p.prompt_tokens, completion_tokens: p.completion_tokens, cost: Number(cost.toFixed(6)) }
+}
+
+// ---------- OpenAI 兼容调用 ----------
+interface ChatOptions {
+  model: string
+  system: string
+  user: string
+  images?: string[] // base64 data URL 列表（vision）
+  temperature?: number
+}
+
+interface ChatResult {
+  content: string
+  usage: { prompt_tokens: number; completion_tokens: number }
+}
+
+export async function chat(provider: AiProvider, opts: ChatOptions): Promise<ChatResult> {
+  if (!provider.api_key) throw new Error('AI 供应商未配置 API Key，请到「我的 → AI 配置」填写')
+  const base = provider.base_url.replace(/\/+$/, '')
+  const content: any[] = [{ type: 'text', text: opts.user }]
+  for (const img of opts.images || []) {
+    content.push({ type: 'image_url', image_url: { url: img } })
+  }
+  const messages = [
+    { role: 'system', content: opts.system },
+    { role: 'user', content },
+  ]
+
+  // 统一超时：部分网关对大请求会长时间挂起（或 504），必须设上限，否则前端一直「分析中」
+  const TIMEOUT_MS = 180_000
+
+  const doFetch = (url: string, stream: boolean, withThinking = true) =>
+    undiciFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.api_key}` },
+      body: JSON.stringify({
+        model: opts.model,
+        messages,
+        temperature: opts.temperature ?? 0.2,
+        // 关闭思考模式：思考型模型（GLM/DeepSeek-R 系）对复杂分析任务会先「思考」数千 token，
+        // 网关等待首包超时（504）或流被截断，正文永远出不来。关闭后直接输出结果，速度快一个数量级
+        ...(withThinking ? { thinking: { type: 'disabled' } } : {}),
+        // 默认走流式：部分公司网关（如 APISIX/openresty 前置）对大 body 的非流式请求
+        // 会返回 413 prompt too long 或直接挂起超时，流式则正常响应
+        stream,
+        stream_options: stream ? { include_usage: true } : undefined,
+      }),
+      dispatcher: getDispatcher(),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    } as any)
+
+  let res: Awaited<ReturnType<typeof undiciFetch>>
+  try {
+    let url = `${base}/chat/completions`
+    res = await doFetch(url, true)
+    // 兼容 baseURL 少写 /v1 的供应商：404 时自动补 /v1 重试一次
+    if (res.status === 404 && !/\/v\d+$/.test(base)) {
+      url = `${base}/v1/chat/completions`
+      res = await doFetch(url, true)
+    }
+    // 极少数供应商不认识 thinking 参数：去掉该参数重试一次
+    if (res.status === 400 || res.status === 422) {
+      const errText = await res.text().catch(() => '')
+      if (/thinking|unknown|invalid|unexpected|extra/i.test(errText)) {
+        res = await doFetch(url, true, false)
+      }
+    }
+  } catch (e: any) {
+    throw new Error(friendlyAiError(e))
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    const wrapped = new Error(`AI 接口错误(${res.status})：${text.slice(0, 300)}`)
+    throw new Error(friendlyAiError(wrapped))
+  }
+  const ct = String(res.headers.get('content-type') || '')
+  if (ct.includes('text/event-stream')) return await readStream(res)
+  // 某些网关忽略 stream 参数，直接返回完整 JSON
+  return await readNonStream(res)
+}
+
+// 聚合 SSE 流式响应：拼接 delta.content（忽略 reasoning_content 思考过程）
+async function readStream(res: Awaited<ReturnType<typeof undiciFetch>>): Promise<ChatResult> {
+  const reader = res.body!.getReader()
+  const dec = new TextDecoder()
+  let raw = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    raw += dec.decode(value, { stream: true })
+  }
+  let content = ''
+  let usage = { prompt_tokens: 0, completion_tokens: 0 }
+  for (const line of raw.split('\n')) {
+    const l = line.trim()
+    if (!l.startsWith('data:')) continue
+    const payload = l.slice(5).trim()
+    if (!payload || payload === '[DONE]') continue
+    try {
+      const chunk = JSON.parse(payload)
+      const delta = chunk?.choices?.[0]?.delta
+      if (typeof delta?.content === 'string') content += delta.content
+      if (chunk?.usage?.prompt_tokens) {
+        usage = {
+          prompt_tokens: chunk.usage.prompt_tokens ?? 0,
+          completion_tokens: chunk.usage.completion_tokens ?? 0,
+        }
+      }
+    } catch { /* 跳过无法解析的行 */ }
+  }
+  if (!content.trim()) throw new Error('AI 返回内容为空')
+  return { content, usage }
+}
+
+// 读取非流式完整 JSON 响应
+async function readNonStream(res: Awaited<ReturnType<typeof undiciFetch>>): Promise<ChatResult> {
+  const data: any = await res.json()
+  const contentOut = data?.choices?.[0]?.message?.content
+  if (typeof contentOut !== 'string' || !contentOut.trim()) throw new Error('AI 返回内容为空')
+  return {
+    content: contentOut,
+    usage: {
+      prompt_tokens: data?.usage?.prompt_tokens ?? 0,
+      completion_tokens: data?.usage?.completion_tokens ?? 0,
+    },
+  }
+}
+
+// 连通性测试：发一条极短消息
+export async function testProvider(provider: AiProvider, model: string): Promise<{ reply: string; usage: ChatResult['usage'] }> {
+  const r = await chat(provider, { model, system: '你是连通性测试助手', user: '请只回复：OK' })
+  return { reply: r.content.trim().slice(0, 50), usage: r.usage }
+}
+
+// ---------- JSON 输出解析与校验 ----------
+function extractJson(text: string): string {
+  // 兼容模型偶发的 ```json 包裹
+  let t = text.trim()
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (fence) t = fence[1].trim()
+  // 截取首个 { 或 [ 到最后一个 } 或 ]
+  const start = Math.min(...['{', '['].map((c) => { const i = t.indexOf(c); return i === -1 ? Infinity : i }))
+  const end = Math.max(t.lastIndexOf('}'), t.lastIndexOf(']'))
+  if (start === Infinity || end === -1) throw new Error('AI 输出中未找到 JSON')
+  return t.slice(start, end + 1)
+}
+
+const VERDICTS = ['对', '错', '部分对', '未作答', '无法识别']
+const ERROR_TYPES = ['概念不清', '公式/模型用错', '计算失误', '审题偏差', '过程不规范', '时间分配问题', '其他']
+const SEVERITIES = ['高', '中', '低']
+
+function validateAnalysis(obj: any): AiAnalysisResult {
+  if (!obj || typeof obj !== 'object') throw new Error('分析结果不是对象')
+  const meta = obj.paper_meta || {}
+  const r: AiAnalysisResult = {
+    paper_meta: {
+      type: ['作业', '试卷', '练习'].includes(meta.type) ? meta.type : '作业',
+      grade: (['高一', '高二', '高三'].includes(meta.grade) ? meta.grade : '高一') as Grade,
+      score_estimate: Number(meta.score_estimate) || 0,
+    },
+    items: Array.isArray(obj.items)
+      ? obj.items.map((it: any, i: number) => ({
+          no: Number(it?.no) || i + 1,
+          verdict: VERDICTS.includes(it?.verdict) ? it.verdict : '无法识别',
+          error_step: String(it?.error_step || ''),
+          error_type: ERROR_TYPES.includes(it?.error_type) ? it.error_type : '',
+          knowledge_points: Array.isArray(it?.knowledge_points) ? it.knowledge_points.map(String) : [],
+          comment: String(it?.comment || ''),
+        }))
+      : [],
+    weak_points: Array.isArray(obj.weak_points)
+      ? obj.weak_points.map((w: any) => ({
+          point: String(w?.point || ''),
+          evidence: String(w?.evidence || ''),
+          severity: SEVERITIES.includes(w?.severity) ? w.severity : '中',
+        }))
+      : [],
+    framework: Array.isArray(obj.framework)
+      ? obj.framework.map((f: any) => ({
+          chapter: String(f?.chapter || ''),
+          mastered: Array.isArray(f?.mastered) ? f.mastered.map(String) : [],
+          shaky: Array.isArray(f?.shaky) ? f.shaky.map(String) : [],
+          missing: Array.isArray(f?.missing) ? f.missing.map(String) : [],
+        }))
+      : [],
+    next_class_questions: Array.isArray(obj.next_class_questions) ? obj.next_class_questions.map(String) : [],
+    suggestions: Array.isArray(obj.suggestions) ? obj.suggestions.map(String) : [],
+    overall_comment: String(obj.overall_comment || ''),
+    unrecognized: Array.isArray(obj.unrecognized) ? obj.unrecognized.map(String) : [],
+  }
+  return r
+}
+
+function validateVariants(obj: any): Array<{ stem: string; answer: string; solution: string; pitfall: string; knowledge_points: string[]; difficulty: number; qtype: string }> {
+  const arr = Array.isArray(obj) ? obj : obj?.questions
+  if (!Array.isArray(arr) || arr.length === 0) throw new Error('变式题结果不是非空数组')
+  return arr.slice(0, 3).map((q: any) => ({
+    stem: String(q?.stem || '').trim(),
+    answer: String(q?.answer || '').trim(),
+    solution: String(q?.solution || '').trim(),
+    pitfall: String(q?.pitfall || '').trim(),
+    knowledge_points: Array.isArray(q?.knowledge_points) ? q.knowledge_points.map(String) : [],
+    difficulty: Math.min(5, Math.max(1, Number(q?.difficulty) || 3)),
+    qtype: ['选择', '填空', '实验', '计算'].includes(q?.qtype) ? q.qtype : '计算',
+  })).filter((q) => q.stem)
+}
+
+// 带重试的 JSON 调用：失败自动重试 2 次（共 3 次）
+async function chatJson<T>(provider: AiProvider, opts: ChatOptions, validate: (o: any) => T, kind: string): Promise<{ result: T; usage: ReturnType<typeof recordUsage> }> {
+  let lastErr: Error | null = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await chat(provider, opts)
+      const parsed = validate(JSON.parse(extractJson(r.content)))
+      const usage = recordUsage({
+        provider_name: provider.name,
+        model: opts.model,
+        kind,
+        prompt_tokens: r.usage.prompt_tokens,
+        completion_tokens: r.usage.completion_tokens,
+        input_price: provider.input_price,
+        output_price: provider.output_price,
+      })
+      return { result: parsed, usage }
+    } catch (e: any) {
+      lastErr = e
+      console.error(`[ai] ${kind} 第 ${attempt + 1} 次尝试失败:`, e.message)
+    }
+  }
+  throw lastErr ? new Error(friendlyAiError(lastErr)) : new Error('AI 调用失败')
+}
+
+// ---------- 业务：作业图片分析 ----------
+export async function analyzePaper(
+  provider: AiProvider,
+  images: string[], // base64 data URL
+  student: { name: string; grade: string; textbook: string }
+): Promise<{ result: AiAnalysisResult; usage: ReturnType<typeof recordUsage> }> {
+  if (!images.length) throw new Error('没有可分析的图片')
+  // 模型选择：视觉模型优先；未填视觉模型时回退到文本模型（部分文本模型实际支持多模态输入，交给供应商自行报错）
+  return chatJson(
+    provider,
+    {
+      model: provider.vision_model || provider.text_model,
+      system: ANALYZE_SYSTEM_PROMPT,
+      user: analyzeUserPrompt(student.grade, student.textbook) + ` 学生姓名：${student.name}。`,
+      images,
+      temperature: 0.1,
+    },
+    validateAnalysis,
+    'analyze'
+  )
+}
+
+// ---------- 业务：错题举一反三 ----------
+export async function generateVariants(
+  provider: AiProvider,
+  mistake: { stem: string; correct_solution: string; error_type: string; knowledge_points: string[]; difficulty: number }
+): Promise<{ result: Array<{ stem: string; answer: string; solution: string; pitfall: string; knowledge_points: string[]; difficulty: number; qtype: string }>; usage: ReturnType<typeof recordUsage> }> {
+  const user = `原错题信息：
+- 题干：${mistake.stem}
+- 正确解法：${mistake.correct_solution || '（未填写）'}
+- 错因：${mistake.error_type || '未分类'}
+- 知识点：${mistake.knowledge_points.join('、') || '未标注'}
+- 难度：${mistake.difficulty}（1~5）
+请出 2~3 道变式题。`
+  return chatJson(
+    provider,
+    { model: provider.text_model, system: VARIANT_SYSTEM_PROMPT, user, temperature: 0.7 },
+    validateVariants,
+    'variants'
+  )
+}

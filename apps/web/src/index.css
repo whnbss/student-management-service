@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 中文排版与等宽数字 */
+html {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+  font-family: 'SF Mono', Consolas, 'Courier New', monospace;
+}
+
+body {
+  @apply bg-slate-100 text-slate-900;
+}
+.dark body {
+  @apply bg-slate-950 text-slate-100;
+}
+
+/* 卡片统一样式 */
+.card {
+  @apply bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200/60 dark:border-slate-800;
+}
+.btn-primary {
+  @apply bg-primary-600 text-white rounded-xl px-4 py-2.5 text-sm font-medium active:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:!bg-slate-300 disabled:!text-slate-500 dark:disabled:!bg-slate-700 dark:disabled:!text-slate-400 disabled:shadow-none;
+}
+.btn-outline {
+  @apply border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm active:bg-slate-100 dark:active:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed disabled:!border-slate-200 disabled:!text-slate-400 dark:disabled:!border-slate-700 dark:disabled:!text-slate-500;
+}
+.input {
+  @apply w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20;
+}
+.label {
+  @apply block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5;
+}
+
+/* 物理实验室：拖拽中的对象高亮描边 */
+.lab-dragging {
+  filter: brightness(1.12) drop-shadow(0 0 5px rgba(99, 102, 241, 0.9));
+  cursor: move;
+}

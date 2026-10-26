@@ -1,0 +1,19 @@
+node_modules/
+dist/
+data/
+*.log
+.DS_Store
+
+# --- 隐私与安全:绝不入库 ---
+# 学生数据(SQLite + 作业图片)
+data/
+# 公司根证书与导出脚本产物
+*.pem
+certs/*.pem
+# LIVIS agent 工作上下文
+.agent_context/
+# 迁移包(含学生数据)
+workbench-migrate.zip
+*.zip
+# 根目录日志
+logs-api.txt
