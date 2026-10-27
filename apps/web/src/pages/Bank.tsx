@@ -2,13 +2,15 @@
 // 桌面端两栏：左（筛选+题目列表）/ 右（AI 出题 + 组卷操作区）
 // 组卷：按题型分大题（选择→填空→实验→计算）、组内难度升序、题号连续，可上下调换；含答案版答案集中卷尾
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import {Bot, FileText, FlaskConical, Image, TriangleAlert} from 'lucide-react'
+import {BookOpen, Bot, FileText, FlaskConical, Image, TriangleAlert} from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { get, post, put, del } from '@/lib/api'
 import { useAuthStore, useToastStore } from '@/stores/auth'
 import { compressImage } from '@/lib/image'
 import Katex from '@/components/Katex'
 import QuestionFigure from '@/components/QuestionFigure'
+import TextbookBrowse from '@/components/TextbookBrowse'
+import TextbookPicker from '@/components/TextbookPicker'
 import { printHtml, buildExamHtml, groupByQtype, DEFAULT_SCORES } from '@/lib/print'
 import { specToSvg } from '@/lib/figure'
 import { aggregateKp } from '@/components/Charts'
@@ -63,6 +65,8 @@ export default function Bank() {
   const [draftSrc, setDraftSrc] = useState<Set<number>>(new Set()) // 编辑源码模式（默认渲染预览）
   const [mistakeKps, setMistakeKps] = useState<string[]>([]) // 从错题本聚合的知识点，供一键带入
   const [allKps, setAllKps] = useState<string[]>([]) // 全库知识点（筛选器选项不随过滤缩小）
+  // 「从教材选择」选择器：'gen'=出题器多选录入 / 'filter'=题库筛选单选 / null=关闭
+  const [tbPicker, setTbPicker] = useState<null | 'gen' | 'filter'>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -94,7 +98,10 @@ export default function Bank() {
 
   useEffect(() => { load() }, [load])
 
-  const kpOptions = allKps
+  const kpOptions = useMemo(
+    () => (fKp && !allKps.includes(fKp) ? [fKp, ...allKps] : allKps),
+    [allKps, fKp]
+  )
 
   // 题干提到「如图」但无配图 → 黄条警告
   const mentionsFigure = (stem: string, figure: string | undefined | null) => /如图|如下图|见图/.test(stem) && !figure
@@ -320,7 +327,7 @@ export default function Bank() {
             </Link>
           )}
           {!item.mistake_id && item.source === 'ai_generated' && (
-            <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300">AI 出题</span>
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300">智能出题</span>
           )}
           {item.grade && <span className="text-xs text-slate-400">{item.grade}</span>}
           <span className="flex-1" />
@@ -412,7 +419,7 @@ export default function Bank() {
           <div className="text-[11px] text-amber-600 dark:text-amber-400 space-y-1">
             {rv!.issues.map((iss, k) => <div key={k}><TriangleAlert className="w-4 h-4 inline-block align-[-2px]" /> {iss}</div>)}
             {rv!.fixed && (
-              <button className="btn-outline !px-2 !py-1 text-[11px] text-amber-600" onClick={() => adoptFix(i)}>采纳 AI 修正稿</button>
+              <button className="btn-outline !px-2 !py-1 text-[11px] text-amber-600" onClick={() => adoptFix(i)}>采纳智能修正稿</button>
             )}
           </div>
         )}
@@ -445,7 +452,7 @@ export default function Bank() {
   // 出题表单 + 草稿区（桌面右栏与移动端共用）
   const genPanel = (
     <div className="card p-4 space-y-2.5">
-      <h2 className="font-semibold text-sm"><Bot className="w-4 h-4 inline-block align-[-2px]" /> AI 出题器</h2>
+      <h2 className="font-semibold text-sm"><Bot className="w-4 h-4 inline-block align-[-2px]" /> 智能出题库</h2>
       <div className="flex flex-wrap gap-1">
         <span className="text-[11px] text-slate-400 w-full">从错题薄弱点带入：</span>
         {mistakeKps.slice(0, 8).map((k) => (
@@ -462,7 +469,12 @@ export default function Bank() {
         ))}
         {mistakeKps.length === 0 && <span className="text-[11px] text-slate-300">暂无错题知识点</span>}
       </div>
-      <input className="input" placeholder="知识点（顿号分隔，如：牛顿第二定律、摩擦力）" value={genForm.kps} onChange={(e) => setGenForm({ ...genForm, kps: e.target.value })} />
+      <div className="flex gap-2">
+        <input className="input flex-1 min-w-0" placeholder="知识点（顿号分隔，如：牛顿第二定律、摩擦力）" value={genForm.kps} onChange={(e) => setGenForm({ ...genForm, kps: e.target.value })} />
+        <button className="btn-outline !px-3 !py-1.5 text-xs shrink-0" onClick={() => setTbPicker('gen')}>
+          <BookOpen className="w-4 h-4 inline-block align-[-2px]" /> 从教材选择
+        </button>
+      </div>
       <div className="flex flex-wrap gap-2">
         <select className="input !w-24" value={genForm.grade} onChange={(e) => setGenForm({ ...genForm, grade: e.target.value })}>
           {GRADES.map((g) => <option key={g}>{g}</option>)}
@@ -487,7 +499,7 @@ export default function Bank() {
         ))}
       </div>
       <button className="btn-primary w-full" disabled={generating} onClick={generate}>{generating ? '生成中…（生成 + 自动二审，约需 30~90 秒）' : '开始生成'}</button>
-      <p className="text-[11px] text-slate-400">生成结果为草稿（含自动二审），逐题确认后才会存入题库（带 AI 生成标记）</p>
+      <p className="text-[11px] text-slate-400">生成结果为草稿（含自动二审），逐题确认后才会存入题库（带智能生成标记）</p>
 
       {drafts.length > 0 && (
         <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
@@ -585,6 +597,9 @@ export default function Bank() {
           {kpOptions.map((k) => <option key={k}>{k}</option>)}
         </select>
       )}
+      <button className="btn-outline !py-2 !px-3 text-xs" onClick={() => setTbPicker('filter')}>
+        <BookOpen className="w-4 h-4 inline-block align-[-2px]" /> 从教材选择
+      </button>
       <label className="flex items-center gap-1 text-xs cursor-pointer select-none px-2">
         <input type="checkbox" checked={fFav} onChange={() => setFFav(!fFav)} />只看收藏
       </label>
@@ -598,8 +613,11 @@ export default function Bank() {
         <span className="flex-1" />
         {/* 移动端入口 */}
         <button className="btn-outline !px-3 !py-1.5 text-xs sm:hidden" onClick={() => setShowFilters(!showFilters)}>筛选</button>
-        <button className="btn-primary !px-3 !py-1.5 text-xs lg:hidden" onClick={() => setShowGen(!showGen)}><Bot className="w-4 h-4 inline-block align-[-2px]" /> AI 出题</button>
+        <button className="btn-primary !px-3 !py-1.5 text-xs lg:hidden" onClick={() => setShowGen(!showGen)}><Bot className="w-4 h-4 inline-block align-[-2px]" /> 智能出题</button>
       </div>
+
+      {/* 教材目录浏览卡（可当知识地图用） */}
+      <TextbookBrowse onPickSection={(s) => setFKp(fKp === s ? '' : s)} />
 
       <Link to="/labs" className="card p-4 flex items-center gap-3 hover:border-primary-300 dark:hover:border-primary-700 transition-colors block">
         <FlaskConical className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto" />
@@ -623,9 +641,9 @@ export default function Bank() {
           ) : list.length === 0 ? (
             <div className="card p-10 text-center text-sm text-slate-400">
               题库还是空的
-              <br /><span className="text-xs">用右侧「AI 出题器」生成，或从错题本「举一反三」补充</span>
+              <br /><span className="text-xs">用右侧「智能出题库」生成，或从错题本「举一反三」补充</span>
               <div className="mt-3 lg:hidden">
-                <button className="btn-primary !px-4 !py-2 text-xs" onClick={() => setShowGen(true)}><Bot className="w-4 h-4 inline-block align-[-2px]" /> AI 出题</button>
+                <button className="btn-primary !px-4 !py-2 text-xs" onClick={() => setShowGen(true)}><Bot className="w-4 h-4 inline-block align-[-2px]" /> 智能出题</button>
               </div>
             </div>
           ) : (
@@ -663,6 +681,28 @@ export default function Bank() {
         </div>
       )}
       {paperModal}
+
+      {/* 「从教材选择」级联选择器（出题器多选录入 / 题库筛选单选） */}
+      {tbPicker === 'gen' && (
+        <TextbookPicker
+          mode="multi"
+          initial={genForm.kps.split(/[、,，]/).map((s) => s.trim()).filter(Boolean)}
+          onConfirm={(picked) => {
+            const cur = genForm.kps.split(/[、,，]/).map((s) => s.trim()).filter(Boolean)
+            const merged = [...new Set([...cur, ...picked])]
+            setGenForm((f) => ({ ...f, kps: merged.join('、') }))
+            show(`已带入 ${picked.length} 个教材知识点`)
+          }}
+          onClose={() => setTbPicker(null)}
+        />
+      )}
+      {tbPicker === 'filter' && (
+        <TextbookPicker
+          mode="single"
+          onPick={(s) => setFKp(fKp === s ? '' : s)}
+          onClose={() => setTbPicker(null)}
+        />
+      )}
     </div>
   )
 }

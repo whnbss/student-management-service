@@ -1,11 +1,12 @@
 // 错题本：按状态/知识点分组、重做任务置顶、手动添加、掌握状态流转、举一反三、导出 PDF（打印）
 // 桌面端两栏：左列表 / 右按知识点聚合（备课方向针，点击筛选）+ 导出区
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import {Camera, Search, FlaskConical, FileText, CircleCheck, Pin} from 'lucide-react'
+import {BookOpen, Camera, Search, FlaskConical, FileText, CircleCheck, Pin} from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { get, post, put, del } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
 import Katex from '@/components/Katex'
+import TextbookPicker from '@/components/TextbookPicker'
 import { KpChips } from '@/components/Kp'
 import { aggregateKp, KpMasteryBars, KP_LEGEND } from '@/components/Charts'
 import { matchScene } from '@/labs/registry'
@@ -31,6 +32,7 @@ export default function Mistakes() {
   const [variants, setVariants] = useState<Record<number, Question[]>>({})
   const [busyVariant, setBusyVariant] = useState<number | null>(null)
   const [showAdd, setShowAdd] = useState(false)
+  const [showTbPicker, setShowTbPicker] = useState(false) // 「从教材选择」筛选知识点
   const today = new Date().toISOString().slice(0, 10)
 
   // 手动添加表单
@@ -184,7 +186,7 @@ export default function Mistakes() {
           <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLOR[m.mastery_status]}`}>{m.mastery_status}</span>
           <Link className="text-sm font-medium hover:text-primary-600" to={`/students/${m.student_id}`}>{m.student_name}</Link>
           {m.error_type && <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-500">{m.error_type}</span>}
-          {m.source === 'ai_analysis' && <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300">AI 抽取</span>}
+          {m.source === 'ai_analysis' && <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300">智能抽取</span>}
           <span className="flex-1" />
           {/* 演示该知识点：固定在卡片右上角，知识点命中课件则直达 */}
           <LabLink kps={kps} />
@@ -216,7 +218,7 @@ export default function Mistakes() {
             </div>
             {variants[m.id]?.map((q, i) => (
               <div key={q.id ?? i} className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3">
-                <div className="text-xs text-slate-400 mb-1">变式 {i + 1} · 难度 {q.difficulty} · {q.qtype} · AI 生成</div>
+                <div className="text-xs text-slate-400 mb-1">变式 {i + 1} · 难度 {q.difficulty} · {q.qtype} · 智能生成</div>
                 <div className="text-sm"><Katex text={q.stem} /></div>
                 <details className="mt-1.5 text-sm">
                   <summary className="text-xs text-primary-600 cursor-pointer">查看答案与解析</summary>
@@ -262,7 +264,7 @@ export default function Mistakes() {
         {/* 左栏：筛选 + 列表 */}
         <div className="min-w-0 space-y-4">
           {/* 筛选器 */}
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <select className="input !py-2 text-xs" value={filterStudent} onChange={(e) => setFilterStudent(e.target.value)}>
               <option value="">全部学生</option>
               {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -271,6 +273,17 @@ export default function Mistakes() {
               <option value="">全部状态</option>
               {MASTERY.map((s) => <option key={s}>{s}</option>)}
             </select>
+            <button className="btn-outline !py-2 !px-3 text-xs" onClick={() => setShowTbPicker(true)}>
+              <BookOpen className="w-4 h-4 inline-block align-[-2px]" /> 从教材选择
+            </button>
+            {kpFilter && (
+              <button
+                className="text-xs px-2.5 py-1 rounded-full bg-primary-600 text-white inline-flex items-center gap-1 self-center"
+                onClick={() => setKpFilter('')}
+              >
+                {kpFilter} ✕
+              </button>
+            )}
           </div>
 
           {showAdd && (
@@ -304,7 +317,7 @@ export default function Mistakes() {
           ) : visibleList.length === 0 ? (
             <div className="card p-10 text-center text-sm text-slate-400">
               {kpFilter ? `没有「${kpFilter}」的错题` : '错题本还是空的'}
-              {!kpFilter && <><br /><span className="text-xs">通过「拍作业」AI 分析自动生成，或在上面手动添加</span></>}
+              {!kpFilter && <><br /><span className="text-xs">通过「拍作业」智能分析自动生成，或在上面手动添加</span></>}
               <div className="mt-3">
                 {kpFilter ? (
                   <button className="btn-outline !px-4 !py-2 text-xs" onClick={() => setKpFilter('')}>清除知识点筛选</button>
@@ -354,6 +367,15 @@ export default function Mistakes() {
           </div>
         </aside>
       </div>
+
+      {/* 「从教材选择」筛选知识点（单选） */}
+      {showTbPicker && (
+        <TextbookPicker
+          mode="single"
+          onPick={(s) => setKpFilter(kpFilter === s ? '' : s)}
+          onClose={() => setShowTbPicker(false)}
+        />
+      )}
     </div>
   )
 }

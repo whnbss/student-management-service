@@ -25,7 +25,7 @@ const shiftMonth = (m: string, delta: number) => {
   const d = new Date(y, mo - 1 + delta, 1)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
-const KIND_LABEL: Record<string, string> = { analyze: "拍照分析", variants: "举一反三", quiz: "AI 出题", tiered: "分层练习", report: "家长报告", test: "连通测试" }
+const KIND_LABEL: Record<string, string> = { analyze: "拍照分析", variants: "举一反三", quiz: "智能出题", tiered: "分层练习", report: "家长报告", test: "连通测试" }
 
 // 单价输入：内部用字符串草稿，避免受控 Number 丢小数点（输入 "2.5" 中途变 "2." 的问题）
 function PriceInput({ value, onCommit, placeholder }: { value: number; onCommit: (n: number) => void; placeholder: string }) {
@@ -88,7 +88,7 @@ export default function Settings() {
       setProxy(r.proxy || '')
       setPrivacyNotice(r.privacy_notice || '')
       savedRef.current = JSON.stringify({ providers: r.providers, activeId: r.active_id || '', proxy: r.proxy || '' })
-    } catch (e: any) { show(e.message || '加载 AI 配置失败') }
+    } catch (e: any) { show(e.message || '加载智能服务配置失败') }
   }, [show])
 
   const loadUsage = useCallback(async (m: string) => {
@@ -179,7 +179,7 @@ export default function Settings() {
     setAiSaving(true)
     try {
       await put('/api/settings/ai', { providers, proxy, active_id: active })
-      show('AI 配置已保存')
+      show('智能服务配置已保存')
       loadAi()
     } catch (e: any) {
       show(e.message || '保存失败')
@@ -209,7 +209,7 @@ export default function Settings() {
 
   // 恢复默认供应商配置
   const resetAi = async () => {
-    if (!window.confirm('确定恢复默认 AI 配置吗？现有供应商列表（含 Key）将被覆盖。')) return
+    if (!window.confirm('确定恢复默认智能服务配置吗？现有供应商列表（含 Key）将被覆盖。')) return
     try {
       await post('/api/settings/ai/reset')
       show('已恢复默认配置')
@@ -261,7 +261,7 @@ export default function Settings() {
       setProxy(String(obj.proxy || ''))
       const wanted = String(obj.active_id || '')
       setActiveId(wanted && list.some((p) => p.id === wanted) ? wanted : '')
-      show('已导入到表单，请检查后点「保存 AI 配置」生效')
+      show('已导入到表单，请检查后点「保存智能服务配置」生效')
       setTestResult({})
     } catch {
       show('文件解析失败，请选择本系统导出的 ai-config.json')
@@ -296,7 +296,7 @@ export default function Settings() {
       {/* AI 供应商配置 */}
       <div className="card p-5 space-y-4">
         <div className="flex items-center">
-          <h2 className="font-semibold text-sm">AI 供应商配置</h2>
+          <h2 className="font-semibold text-sm">智能服务配置</h2>
           <span className="flex-1" />
           <button className="text-xs text-primary-600" onClick={addProvider}>＋ 添加供应商</button>
         </div>
@@ -339,7 +339,7 @@ export default function Settings() {
               )
             })}
           </select>
-          <p className="text-[11px] text-slate-400">切换后点「保存 AI 配置」生效；所选供应商缺 Key 或模型时不可选。</p>
+          <p className="text-[11px] text-slate-400">切换后点「保存智能服务配置」生效；所选供应商缺 Key 或模型时不可选。</p>
         </div>
 
         {providers.map((p, i) => {
@@ -386,7 +386,7 @@ export default function Settings() {
 
         {/* 底部操作：保存主按钮 + 显示 Key / 恢复默认 outline 等宽 */}
         <div className="flex gap-2">
-          <button className="btn-primary flex-1 max-w-[220px]" disabled={aiSaving} onClick={saveAi}>{aiSaving ? '保存中…' : '保存 AI 配置'}</button>
+          <button className="btn-primary flex-1 max-w-[220px]" disabled={aiSaving} onClick={saveAi}>{aiSaving ? '保存中…' : '保存智能服务配置'}</button>
           <button className="btn-outline flex-1 !px-3 text-xs" onClick={() => setShowKeys(!showKeys)}>{showKeys ? '隐藏 Key' : '显示 Key'}</button>
           <button className="btn-outline flex-1 !px-3 text-xs" onClick={resetAi}>恢复默认</button>
         </div>
@@ -405,7 +405,7 @@ export default function Settings() {
         {/* 月度用量：可切换月份 + 可折叠明细 */}
         <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-slate-500">AI 用量（费用按单价估算，未填单价则显示 0）</h3>
+            <h3 className="text-xs font-semibold text-slate-500">智能用量（费用按单价估算，未填单价则显示 0）</h3>
             <div className="flex items-center gap-1.5 text-xs">
               <button className="px-1.5 text-slate-500 hover:text-primary-600" onClick={() => { setMonth(shiftMonth(month, -1)); setShowRows(false) }}>‹</button>
               <span className="num text-slate-600 dark:text-slate-300">{month}</span>
@@ -497,7 +497,7 @@ export default function Settings() {
 
       <div className="card p-5 space-y-1">
         <h2 className="font-semibold text-sm mb-1">关于</h2>
-        <p className="text-xs text-slate-500">教学管理工作台 v{__APP_VERSION__} · M2（图片上传 + AI 分析 + 错题本 + 举一反三）</p>
+        <p className="text-xs text-slate-500">教学管理工作台 v{__APP_VERSION__} · M2（图片上传 + 智能分析 + 错题本 + 举一反三）</p>
         {system && (
           <div className="text-xs text-slate-500 num space-y-0.5 mt-2">
             <p>后端端口：{system.port}</p>
@@ -506,7 +506,7 @@ export default function Settings() {
             <p>运行环境：Node {system.node} · {system.platform}</p>
           </div>
         )}
-        <p className="text-xs text-slate-500 mt-2">本地部署，学生数据仅存本机。调用外部 AI 分析作业图片时会将图片传输至所配置的 AI 供应商。</p>
+        <p className="text-xs text-slate-500 mt-2">本地部署，学生数据仅存本机。调用外部智能分析作业图片时会将图片传输至所配置的智能服务供应商。</p>
       </div>
 
       <button

@@ -306,7 +306,7 @@ export function ParentReportModal({ student, onClose }: { student: Student; onCl
         <button className="btn-primary w-full" disabled={generating} onClick={generate}>
           {generating ? '生成中…（汇总学情/错题/出勤，约需 20~60 秒）' : report ? '重新生成' : '开始生成'}
         </button>
-        <p className="text-[11px] text-slate-400">AI 生成仅为草稿，以下内容均可编辑，发送前请终审</p>
+        <p className="text-[11px] text-slate-400">智能生成仅为草稿，以下内容均可编辑，发送前请终审</p>
       </div>
 
       {report && (

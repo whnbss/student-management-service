@@ -1,5 +1,7 @@
 // 共享类型定义：前后端统一引用，保证接口契约一致
 
+export * from './textbook'
+
 export type Grade = '高一' | '高二' | '高三'
 export type StudentStatus = '在读' | '停课' | '结课'
 export type LogType = '上课' | '作业' | '考试' | '其他'

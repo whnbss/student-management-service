@@ -88,8 +88,8 @@ export const useAnalyzeStore = create<AnalyzeState>()(
           }
           set({ uploadedPaths: paths })
           // 第 3 步：AI 分析
-          set({ step: 'analyzing', progress: 'AI 正在识别题目与作答…' })
-          const tips = ['AI 正在识别题目与作答…', 'AI 正在逐题判定对错…', 'AI 正在归类错因与薄弱点…', '即将完成，正在整理建议…']
+          set({ step: 'analyzing', progress: '智能分析正在识别题目与作答…' })
+          const tips = ['智能分析正在识别题目与作答…', '正在逐题判定对错…', '正在归类错因与薄弱点…', '即将完成，正在整理建议…']
           let ti = 0
           const timer = setInterval(() => { ti = (ti + 1) % tips.length; set({ progress: tips[ti] }) }, 4000)
           try {

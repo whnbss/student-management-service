@@ -109,7 +109,7 @@ export default function Analyze() {
                 </div>
               ))}
             </div>
-            <button className="btn-primary w-full mt-4" onClick={start}>开始 AI 分析</button>
+            <button className="btn-primary w-full mt-4" onClick={start}>开始智能分析</button>
           </div>
         )}
 
@@ -126,7 +126,7 @@ export default function Analyze() {
   if (step === 'uploading' || step === 'analyzing') {
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-bold">AI 分析中</h1>
+        <h1 className="text-xl font-bold">智能分析中</h1>
         <div className="card p-5">
           <p className="text-sm text-primary-600 dark:text-primary-400 font-medium">{progress}</p>
           <div className="mt-3 h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
@@ -140,7 +140,7 @@ export default function Analyze() {
               </div>
             ))}
           </div>
-          <p className="text-xs text-slate-400 mt-4">作业图片将传输至 AI 供应商服务器进行分析，数据本身仅存本机。可先切到其它页面，分析完成后回到本页查看结果。</p>
+          <p className="text-xs text-slate-400 mt-4">作业图片将传输至所配置的智能服务供应商进行分析，数据本身仅存本机。可先切到其它页面，分析完成后回到本页查看结果。</p>
         </div>
       </div>
     )
@@ -153,7 +153,7 @@ export default function Analyze() {
         <div>
           <h1 className="text-xl font-bold">分析结果确认</h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            {aiNote} · AI 输出为初稿，请逐项核对后保存
+            {aiNote} · 智能分析结果为初稿，请逐项核对后保存
             {student && <> · 学生：<span className="text-slate-500">{student.name}</span></>}
           </p>
         </div>

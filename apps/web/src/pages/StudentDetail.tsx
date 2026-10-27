@@ -1,10 +1,11 @@
 // 学生详情：看板 / 学情日志 / 课时缴费 / 课表 四个子 Tab
 // 桌面端两栏：左（当前 Tab 内容）/ 右（学情看板 + 快捷入口）
 import { useCallback, useEffect, useState } from 'react'
-import {BarChart3, CalendarClock, Camera, Mail, PenLine, Pin, Wallet} from 'lucide-react'
+import {BarChart3, BookOpen, CalendarClock, Camera, Mail, PenLine, Pin, Wallet} from 'lucide-react'
 import { useParams, Link } from 'react-router-dom'
 import { get, post, del } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
+import TextbookPicker from '@/components/TextbookPicker'
 import { NextKeyText } from '@/components/Kp'
 import { aggregateKp, KpMasteryBars, KP_LEGEND, MistakeTrend, ErrorTypeBars } from '@/components/Charts'
 import { TieredPracticeModal, ParentReportModal } from '@/components/Practice'
@@ -209,7 +210,7 @@ export default function StudentDetail() {
                       <div className="flex items-center gap-2 mb-1.5">
                         <span className="num text-xs text-slate-400">{log.date}</span>
                         <span className={`text-[11px] px-2 py-0.5 rounded-full ${typeColor(log.type)}`}>{log.type}</span>
-                        {log.ai_generated === 1 && <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300">AI 生成</span>}
+                        {log.ai_generated === 1 && <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300">智能生成</span>}
                         <button className="ml-auto text-xs text-slate-400 hover:text-red-500" onClick={() => removeLog(log.id)}>删除</button>
                       </div>
                       <p className="text-sm whitespace-pre-wrap">{log.content}</p>
@@ -228,7 +229,7 @@ export default function StudentDetail() {
                       })()}
                       {log.ai_result && (
                         <details className="mt-2 text-xs">
-                          <summary className="text-primary-600 dark:text-primary-400 cursor-pointer">查看 AI 分析详情</summary>
+                          <summary className="text-primary-600 dark:text-primary-400 cursor-pointer">查看智能分析详情</summary>
                           <div className="mt-1.5 space-y-1 text-slate-500">
                             {(() => {
                               try {
@@ -383,17 +384,31 @@ export default function StudentDetail() {
   )
 }
 
-/** 学情看板：知识点掌握度条形图 + 30 天错题趋势 + 错因分布 */
+/** 学情看板：知识点掌握度条形图 + 30 天错题趋势 + 错因分布；支持「从教材查看」按教材小节定位 */
 function MasteryBoard({ mistakes, compact = false }: { mistakes: Mistake[]; compact?: boolean }) {
+  const [tbKp, setTbKp] = useState('') // 「从教材查看」选中的知识点（空 = 全部）
+  const [showTbPicker, setShowTbPicker] = useState(false)
   const unmastered = mistakes.filter((m) => m.mastery_status === '未掌握').length
   const redone = mistakes.filter((m) => m.mastery_status === '已重做一次').length
   const mastered = mistakes.filter((m) => m.mastery_status === '已掌握').length
+  const allAggs = aggregateKp(mistakes)
+  const aggs = tbKp ? allAggs.filter((a) => a.kp === tbKp) : allAggs
   return (
     <div className="card p-4 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h2 className="font-semibold text-sm">学情看板</h2>
-        <span className="text-[11px] text-slate-400">共 {mistakes.length} 道错题</span>
+        <button className="btn-outline !px-2.5 !py-1 text-[11px]" onClick={() => setShowTbPicker(true)}>
+          <BookOpen className="w-3.5 h-3.5 inline-block align-[-2px]" /> 从教材查看
+        </button>
       </div>
+      {tbKp && (
+        <button
+          className="text-xs px-2.5 py-1 rounded-full bg-primary-600 text-white inline-flex items-center gap-1"
+          onClick={() => setTbKp('')}
+        >
+          {tbKp} ✕
+        </button>
+      )}
       <div className="grid grid-cols-3 gap-2 text-center">
         <div className="rounded-xl bg-red-50 dark:bg-red-900/20 py-2">
           <div className="text-lg font-bold num text-red-500">{unmastered}</div>
@@ -412,7 +427,7 @@ function MasteryBoard({ mistakes, compact = false }: { mistakes: Mistake[]; comp
         <h3 className="text-xs font-semibold text-slate-500 mb-2">知识点掌握度</h3>
         {KP_LEGEND}
         <div className="mt-2">
-          <KpMasteryBars aggs={aggregateKp(mistakes)} maxRows={compact ? 6 : 10} />
+          <KpMasteryBars aggs={aggs} maxRows={compact ? 6 : 10} activeKp={tbKp} onClickKp={(k) => setTbKp(tbKp === k ? '' : k)} />
         </div>
       </div>
       <div>
@@ -420,6 +435,15 @@ function MasteryBoard({ mistakes, compact = false }: { mistakes: Mistake[]; comp
         <MistakeTrend mistakes={mistakes} />
       </div>
       {!compact && <ErrorTypeBars mistakes={mistakes} />}
+
+      {/* 「从教材查看」：按人教版章节树选知识点，定位看板 */}
+      {showTbPicker && (
+        <TextbookPicker
+          mode="single"
+          onPick={(s) => setTbKp(tbKp === s ? '' : s)}
+          onClose={() => setShowTbPicker(false)}
+        />
+      )}
     </div>
   )
 }

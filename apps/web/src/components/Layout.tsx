@@ -78,7 +78,7 @@ export default function Layout() {
         <button
           onClick={() => navigate('/analyze')}
           className="fixed bottom-24 right-5 md:bottom-8 md:right-10 z-20 h-14 px-5 rounded-full bg-primary-600 text-white shadow-lg shadow-primary-600/30 active:scale-95 transition-transform flex items-center gap-2"
-          title="拍作业 / AI 批改分析"
+          title="拍作业 / 智能批改分析"
         >
           <Camera className="w-5 h-5" />
           <span className="text-sm font-semibold">拍作业</span>

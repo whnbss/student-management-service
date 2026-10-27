@@ -56,8 +56,8 @@ export default function Today() {
       >
         <Camera className="w-9 h-9 text-primary-600" />
         <span className="flex-1">
-          <span className="block font-semibold">拍作业 · AI 批改分析</span>
-          <span className="block text-xs text-primary-100 mt-0.5">拍照上传 → AI 逐题分析 → 确认入库</span>
+          <span className="block font-semibold">拍作业 · 智能批改分析</span>
+          <span className="block text-xs text-primary-100 mt-0.5">拍照上传 → 智能逐题分析 → 确认入库</span>
         </span>
         <span className="text-lg">→</span>
       </Link>
@@ -182,7 +182,7 @@ export default function Today() {
                 <Link to="/mistakes" className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 hover:bg-slate-100 dark:hover:bg-slate-800"><CircleX className="w-4 h-4 inline-block align-[-2px]" /> 错题本</Link>
                 <Link to="/labs" className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 hover:bg-slate-100 dark:hover:bg-slate-800"><FlaskConical className="w-4 h-4 inline-block align-[-2px]" /> 物理课件</Link>
                 <Link to="/students" className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 hover:bg-slate-100 dark:hover:bg-slate-800"><Users className="w-4 h-4 inline-block align-[-2px]" /> 学生管理</Link>
-                <Link to="/settings" className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 hover:bg-slate-100 dark:hover:bg-slate-800"><SettingsIcon className="w-4 h-4 inline-block align-[-2px]" /> AI 配置</Link>
+                <Link to="/settings" className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 hover:bg-slate-100 dark:hover:bg-slate-800"><SettingsIcon className="w-4 h-4 inline-block align-[-2px]" /> 智能服务配置</Link>
               </div>
             </div>
           </aside>
