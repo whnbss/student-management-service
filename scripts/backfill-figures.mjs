@@ -127,6 +127,7 @@ const TEMPLATE_DOCS = `- incline：斜面滑块（angle 斜面倾角度数、mu�
 - bridge：桥上的车（kind=convex 拱桥 / concave 凹桥、R、label）
 - field_region：匀强场区/点电荷（kind=uniform|point、charge、label）
 - bowl：光滑半球形碗，绳一端系碗沿 A、另一端系碗内壁小球（angle 小球与碗心连线偏离竖直方向的角（度）、R、label）
+- bowl2balls：光滑半球形碗内两等大球并排相互接触、球心连线水平（angle 球与碗心连线偏离竖直方向的角（度）、R 碗半径（m）、r 球半径（m）、label1、label2）
 - incline_baffle：斜面上小球被竖直挡板挡住（angle 斜面倾角（度）、label）
 - ring_ball：光滑圆环固定，天花板 O 点（环最高点正上方）绳吊小球在环上（angle 小球相对环最高点的方位角（度）、R、d）
 - three_ropes：三绳结点 O（OA 水平向左、OB 与竖直方向夹角 angle 斜右上、OC 竖直向下挂重物；angle、G 重物标注）

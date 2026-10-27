@@ -14,6 +14,7 @@ import aiRoutes from './routes/ai'
 import analysisRoutes from './routes/analysis'
 import mistakeRoutes from './routes/mistakes'
 import questionRoutes from './routes/questions'
+import shareRoutes from './routes/share'
 import { statsRoutes } from './routes/stats'
 
 const app = Fastify({ logger: false })
@@ -31,6 +32,7 @@ await app.register(aiRoutes)
 await app.register(analysisRoutes)
 await app.register(mistakeRoutes)
 await app.register(questionRoutes)
+await app.register(shareRoutes)
 await app.register(statsRoutes)
 
 // 统一错误处理：返回 { error } 而非堆栈

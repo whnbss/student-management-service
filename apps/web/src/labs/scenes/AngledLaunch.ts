@@ -94,7 +94,7 @@ export const launchScene: LabScene = {
     const sy = (m: number) => ORIGIN.y - m * PX
 
     // 地面 + 自适应标尺（约 8 个刻度，取「好数」步长）
-    ctx.set('ground', 'rect', { x: 40, y: ORIGIN.y + 6, width: 580, height: 6, fill: '#94a3b8', rx: 2 })
+    ctx.set('ground', 'rect', { x: 40, y: ORIGIN.y + 6, width: 580, height: 6, fill: C.faint, rx: 2 })
     const stepM = niceStep(R / 8)
     for (let m = 0; m <= R * 1.15; m += stepM) {
       const X = sx(m)
@@ -103,8 +103,8 @@ export const launchScene: LabScene = {
       ctx.set(`gtl${m}`, 'text', { x: X, y: ORIGIN.y + 30, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.45, text: `${Math.round(m)}m` })
     }
     // 发射台（小炮台）
-    ctx.set('cannon', 'rect', { x: ORIGIN.x - 8, y: ORIGIN.y - 10, width: 16, height: 12, fill: '#475569', rx: 2 })
-    ctx.set('cannon-barrel', 'line', { x1: ORIGIN.x, y1: ORIGIN.y - 8, x2: ORIGIN.x + 26 * Math.cos(rad), y2: ORIGIN.y - 8 - 26 * Math.sin(rad), stroke: '#475569', 'stroke-width': 7, 'stroke-linecap': 'round' })
+    ctx.set('cannon', 'rect', { x: ORIGIN.x - 8, y: ORIGIN.y - 10, width: 16, height: 12, fill: C.ink2, rx: 2 })
+    ctx.set('cannon-barrel', 'line', { x1: ORIGIN.x, y1: ORIGIN.y - 8, x2: ORIGIN.x + 26 * Math.cos(rad), y2: ORIGIN.y - 8 - 26 * Math.sin(rad), stroke: C.ink2, 'stroke-width': 7, 'stroke-linecap': 'round' })
 
     // 轨迹族（历史留影，浅色；米制坐标按当前比例换算）
     st.ghosts.forEach((g, i) => {
@@ -128,7 +128,7 @@ export const launchScene: LabScene = {
     const t = Math.min(st.t, tEnd)
     const bx = sx(vx0 * t)
     const by = sy(vy0 * t - 0.5 * G * t * t)
-    const ball = ctx.set('ball', 'circle', { cx: bx, cy: by - 6, r: 8, fill: '#f59e0b', stroke: '#b45309', 'stroke-width': 2 })
+    const ball = ctx.set('ball', 'circle', { cx: bx, cy: by - 6, r: 8, fill: C.amber, stroke: C.amberDeep, 'stroke-width': 2 })
     ctx.drag(ball, (p) => {
       // 拖球：水平方向映射抛射角（v0 不变），直观感受角度影响
       const dx = clamp(p.x - ORIGIN.x, 20, 560)

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LabData, LabScene, LabState, RenderOpts, SceneParams } from './types'
 import { SvgCtx } from './ctx'
 import { FIXED_DT, useAnimationLoop } from './useAnimationLoop'
-import { clamp } from './vec'
+import { clamp, syncLabPalette } from './vec'
 
 const SPEEDS = [0.25, 0.5, 1, 2]
 const PRESET_KEY = (id: string) => `labs-preset-${id}`
@@ -13,6 +13,13 @@ interface CustomPreset {
   name: string
   params: SceneParams
   state?: Record<string, unknown>
+}
+
+/** 实验记录表的一行：参数读数 → 实时数据读数（像真实实验课填写数据表） */
+interface LabRecord {
+  n: number
+  params: Record<string, string>
+  data: Record<string, string>
 }
 
 // 舞台网格（浅色，随深色模式）；默认关闭（PhET 原则：降低装饰对认知负荷的干扰），工具条可开
@@ -44,7 +51,7 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
   const lastParamSync = useRef(0)
   const sceneIdRef = useRef(scene.id)
   // 最新绘制函数（避免闭包过期：requestRender / 动画循环都经 ref 调用）
-  const doRenderRef = useRef<() => void>(() => {})
+  const doRenderRef = useRef<(forceData?: boolean) => void>(() => {})
 
   const [params, setParams] = useState<SceneParams>(() => initialParams(scene))
   const [playing, setPlaying] = useState(false)
@@ -52,6 +59,10 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
   const [fullscreen, setFullscreen] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [data, setData] = useState<LabData>({})
+  // 实验数据记录表（最近 8 组）：dataRef 保存最近一帧实时数据，供记录时读取
+  const dataRef = useRef<LabData>({})
+  const recordsRef = useRef<LabRecord[]>([])
+  const [records, setRecords] = useState<LabRecord[]>([])
   const [opts, setOpts] = useState<RenderOpts>({ showForces: true, showComponents: false, showPoints: true })
   const [showGrid, setShowGrid] = useState(false)
   // 挑战模式（先预测后揭示）：null=未作答；number=已选选项索引
@@ -70,6 +81,27 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
   paramsRef.current = params
   playingRef.current = playing
 
+  // 记录一组实验数据（参数读数 → 实时数据读数）：读数与上一组完全相同则不重复记，最多保留 8 组
+  const commitRecord = useCallback(() => {
+    const p: Record<string, string> = {}
+    for (const d of scene.params) {
+      if (d.key === 'mode' || d.key === 'method') continue // 模式参数不进数据表
+      const val = paramsRef.current[d.key] ?? d.default
+      p[d.label] = d.options ? d.options.find((o) => o.value === val)?.label ?? String(val) : `${fmtNum(val)}${d.unit}`
+    }
+    const data = { ...dataRef.current }
+    const last = recordsRef.current[recordsRef.current.length - 1]
+    if (last && JSON.stringify(last.params) === JSON.stringify(p) && JSON.stringify(last.data) === JSON.stringify(data)) return
+    const row: LabRecord = { n: (last?.n ?? 0) + 1, params: p, data }
+    recordsRef.current = [...recordsRef.current, row].slice(-8)
+    setRecords(recordsRef.current)
+  }, [scene])
+
+  const clearRecords = () => {
+    recordsRef.current = []
+    setRecords([])
+  }
+
   const resetState = useCallback(
     (p: SceneParams, statePatch?: Record<string, unknown>) => {
       stateRef.current = scene.init(p)
@@ -84,6 +116,7 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
       if (!ctx) return
       drawGrid(ctx, gridRef.current)
       const d = scene.render(ctx, paramsRef.current, stateRef.current, optsRef.current)
+      dataRef.current = d
       const now = performance.now()
       if (forceData || now - lastDataTs.current > 100) {
         lastDataTs.current = now
@@ -196,6 +229,7 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
     resetState(paramsRef.current, state)
     ctxRef.current?.gclear()
     doRender(true)
+    commitRecord() // 切换情景 = 完成一次「实验」，自动记录读数
   }
 
   // —— 挑战模式（先预测后揭示）——
@@ -253,6 +287,16 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [fullscreen])
+
+  // 深色/浅色切换：语义色 C 是「读时求值」的代理，切换后重绘一帧即可整体换色
+  useEffect(() => {
+    syncLabPalette()
+    const ob = new MutationObserver(() => {
+      if (syncLabPalette()) doRenderRef.current(true)
+    })
+    ob.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    return () => ob.disconnect()
+  }, [])
 
   const hasStatic = !scene.step
   const stage = (
@@ -318,7 +362,7 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
         d.options ? (
           <div key={d.key}>
             <label className="label">{d.label}</label>
-            <select className="input" value={params[d.key] ?? d.default} onChange={(e) => changeParam(d.key, Number(e.target.value))}>
+            <select className="input" value={params[d.key] ?? d.default} onChange={(e) => { changeParam(d.key, Number(e.target.value)); commitRecord() }}>
               {d.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
@@ -328,7 +372,7 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
               <label className="label !mb-0">{d.label}</label>
               <span className="num text-sm font-medium text-primary-600">{fmtNum(params[d.key] ?? d.default)}{d.unit}</span>
             </div>
-            {/* range 原生支持 ←→ 键盘微调 */}
+            {/* range 原生支持 ←→ 键盘微调；松手/松键即记入实验记录表 */}
             <input
               type="range"
               className="w-full accent-primary-600"
@@ -337,6 +381,8 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
               step={d.step}
               value={params[d.key] ?? d.default}
               onChange={(e) => changeParam(d.key, Number(e.target.value))}
+              onPointerUp={commitRecord}
+              onKeyUp={commitRecord}
             />
           </div>
         )
@@ -356,6 +402,44 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
           </div>
         ))}
       </dl>
+    </div>
+  )
+
+  // 实验数据记录表：拖参数/切情景后自动记录最近 8 组「参数 → 数据」，像真实实验课填写数据表
+  const lastRec = records[records.length - 1]
+  const recParamKeys = lastRec ? Object.keys(lastRec.params) : []
+  const recDataKeys = lastRec ? Object.keys(lastRec.data).slice(0, 4) : []
+  const recordPanel = (
+    <div className="card p-3">
+      <div className="flex items-center mb-2">
+        <div className={`font-semibold text-slate-400 ${fullscreen ? 'text-sm' : 'text-xs'}`}>实验记录（最近 8 组）</div>
+        <span className="flex-1" />
+        {records.length > 0 && <button className="text-[11px] text-slate-400 hover:text-red-500" onClick={clearRecords}>清空</button>}
+      </div>
+      {records.length === 0 ? (
+        <p className="text-xs text-slate-400 leading-relaxed">拖动参数滑块（松手时）或切换情景，会自动把「参数 → 实时数据」记入此表，供课堂读数与找规律</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs num whitespace-nowrap">
+            <thead>
+              <tr className="text-slate-400 border-b border-slate-200 dark:border-slate-700">
+                <th className="text-left font-normal pr-2 py-1">#</th>
+                {recParamKeys.map((k) => <th key={k} className="text-right font-normal px-2 py-1">{k}</th>)}
+                {recDataKeys.map((k) => <th key={k} className="text-right font-normal pl-2 py-1">{k}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {records.map((r) => (
+                <tr key={r.n} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                  <td className="pr-2 py-1 text-slate-400">{r.n}</td>
+                  {recParamKeys.map((k) => <td key={k} className="px-2 py-1 text-right">{r.params[k] ?? '—'}</td>)}
+                  {recDataKeys.map((k) => <td key={k} className="pl-2 py-1 text-right font-medium">{r.data[k] ?? '—'}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 
@@ -427,6 +511,7 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
           {graphPanel}
           <div className="w-72 shrink-0 space-y-4">
             {dataPanel}
+            {recordPanel}
             {!drawerOpen && <div className="card p-4">{paramPanel}</div>}
           </div>
         </div>
@@ -458,6 +543,7 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
         <div className="lab-cell-side space-y-4">
           <div className="card p-4">{paramPanel}</div>
           {dataPanel}
+          {recordPanel}
         </div>
       </div>
       {challengePanel}

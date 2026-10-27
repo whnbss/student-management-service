@@ -96,8 +96,8 @@ export const turntableScene: LabScene = {
     if (mode0) {
       // —— 转盘（俯视圆盘）——
       const R = 1.35 * 130 // 盘边缘像素半径
-      ctx.set('disc', 'circle', { cx: CX, cy: CY, r: R, fill: '#e2e8f0', 'fill-opacity': 0.35, stroke: '#64748b', 'stroke-width': 2 })
-      ctx.set('disc-hub', 'circle', { cx: CX, cy: CY, r: 8, fill: '#475569' })
+      ctx.set('disc', 'circle', { cx: CX, cy: CY, r: R, fill: C.line2, 'fill-opacity': 0.35, stroke: C.muted, 'stroke-width': 2 })
+      ctx.set('disc-hub', 'circle', { cx: CX, cy: CY, r: 8, fill: C.ink2 })
       // 转动参考辐条（随 phi 旋转，直观显示盘在转）
       for (let i = 0; i < 4; i++) {
         const a = st.phi + (i * Math.PI) / 2
@@ -115,7 +115,7 @@ export const turntableScene: LabScene = {
       const py = CY + pr * Math.sin(st.phi)
       const need = params.omega * params.omega * st.rr * params.m // 需要的向心力
       const fmax = params.mu * params.m * G
-      const obj = ctx.set('obj', 'circle', { cx: px, cy: py, r: 11, fill: st.sliding ? C.friction : C.accent, stroke: st.sliding ? '#b45309' : '#312e81', 'stroke-width': 2 })
+      const obj = ctx.set('obj', 'circle', { cx: px, cy: py, r: 11, fill: st.sliding ? C.friction : C.accent, stroke: st.sliding ? C.amberDeep : C.indigoDeep, 'stroke-width': 2 })
       ctx.drag(obj, (p) => {
         const d = Math.hypot(p.x - CX, p.y - CY) / 130
         ctx.setParam('r', clamp(Math.round(d * 20) / 20, 0.2, 1.35))
@@ -157,12 +157,12 @@ export const turntableScene: LabScene = {
       ctx.set('cone-r', 'line', { x1: PIVOT.x, y1: PIVOT.y, x2: PIVOT.x + Rr, y2: bobY, stroke: 'currentColor', 'stroke-opacity': 0.25, 'stroke-dasharray': '5 5' })
       ctx.set('cone-ellipse', 'ellipse', { cx: PIVOT.x, cy: bobY, rx: Rr, ry: Rr * 0.3, fill: 'none', stroke: 'currentColor', 'stroke-opacity': 0.2, 'stroke-dasharray': '4 4' })
       // 悬点
-      ctx.set('pivot', 'rect', { x: PIVOT.x - 14, y: PIVOT.y - 10, width: 28, height: 8, fill: '#475569' })
+      ctx.set('pivot', 'rect', { x: PIVOT.x - 14, y: PIVOT.y - 10, width: 28, height: 8, fill: C.ink2 })
       // 摆球（旋转投影，拖动改 θ）
       const bx = PIVOT.x + Rr * Math.sin(st.phi)
       const by = bobY + Rr * 0.3 * Math.cos(st.phi)
-      ctx.set('string', 'line', { x1: PIVOT.x, y1: PIVOT.y, x2: bx, y2: by, stroke: '#334155', 'stroke-width': 2 })
-      const bob = ctx.set('bob', 'circle', { cx: bx, cy: by, r: 12, fill: C.accent, stroke: '#312e81', 'stroke-width': 2 })
+      ctx.set('string', 'line', { x1: PIVOT.x, y1: PIVOT.y, x2: bx, y2: by, stroke: C.ink, 'stroke-width': 2 })
+      const bob = ctx.set('bob', 'circle', { cx: bx, cy: by, r: 12, fill: C.accent, stroke: C.indigoDeep, 'stroke-width': 2 })
       ctx.drag(bob, (p) => {
         const dx = clamp(p.x - PIVOT.x, -(L * 0.94), L * 0.94)
         const ang = clamp(Math.asin(Math.abs(dx) / L) * (180 / Math.PI), 10, 70)

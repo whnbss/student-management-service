@@ -77,7 +77,7 @@ export const circuitScene: LabScene = {
     // —— 电路图 ——
     const bx = 120
     const by = 300 // 电源位置
-    const wire = '#334155'
+    const wire = C.ink
     // 外框回路
     ctx.set('w-top', 'line', { x1: bx, y1: by, x2: 90, y2: by, stroke: wire, 'stroke-width': 2 })
     ctx.set('w-left', 'line', { x1: 90, y1: by, x2: 90, y2: 120, stroke: wire, 'stroke-width': 2 })
@@ -92,26 +92,26 @@ export const circuitScene: LabScene = {
     const bulbX = 300
     const bulbY = 120
     const glowR = clamp(10 + Pbulb * 22, 8, 46)
-    ctx.set('bulb-glow', 'circle', { cx: bulbX, cy: bulbY - 22, r: glowR, fill: '#fde047', 'fill-opacity': clamp(0.15 + Pbulb / 3, 0.1, 0.85) })
-    ctx.set('bulb', 'circle', { cx: bulbX, cy: bulbY - 22, r: 14, fill: '#fef9c3', stroke: '#a16207', 'stroke-width': 2 })
+    ctx.set('bulb-glow', 'circle', { cx: bulbX, cy: bulbY - 22, r: glowR, fill: C.yellow, 'fill-opacity': clamp(0.15 + Pbulb / 3, 0.1, 0.85) })
+    ctx.set('bulb', 'circle', { cx: bulbX, cy: bulbY - 22, r: 14, fill: C.fillYellow, stroke: C.yellowDeep, 'stroke-width': 2 })
     ctx.set('bulb-l', 'text', { x: bulbX, y: bulbY + 16, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.7, text: `灯 ${R_BULB}Ω` })
     // 变阻器（右侧竖直，四端示意）
     const rx = 500
     const ry0 = 140
     const rh = 150
-    ctx.set('rh-body', 'rect', { x: rx - 8, y: ry0, width: 16, height: rh, fill: '#cbd5e1', stroke: '#64748b', rx: 3 })
+    ctx.set('rh-body', 'rect', { x: rx - 8, y: ry0, width: 16, height: rh, fill: C.line, stroke: C.muted, rx: 3 })
     // 绕线纹理
     for (let i = 0; i < 8; i++) {
-      ctx.set(`rh-w${i}`, 'line', { x1: rx - 8, y1: ry0 + (i * rh) / 8, x2: rx + 8, y2: ry0 + ((i + 1) * rh) / 8, stroke: '#64748b', 'stroke-width': 1 })
+      ctx.set(`rh-w${i}`, 'line', { x1: rx - 8, y1: ry0 + (i * rh) / 8, x2: rx + 8, y2: ry0 + ((i + 1) * rh) / 8, stroke: C.muted, 'stroke-width': 1 })
     }
     // 滑块（拖拽）
     const sy = ry0 + x * rh
-    const slider = ctx.set('rh-slider', 'rect', { x: rx - 20, y: sy - 6, width: 40, height: 12, fill: '#f59e0b', stroke: '#b45309', rx: 3 })
+    const slider = ctx.set('rh-slider', 'rect', { x: rx - 20, y: sy - 6, width: 40, height: 12, fill: C.amber, stroke: C.amberDeep, rx: 3 })
     ctx.drag(slider, (p) => {
       ctx.setParam('slider', clamp((p.y - ry0) / rh, 0, 1))
       ctx.requestRender()
     })
-    ctx.set('rh-l', 'text', { x: rx + 28, y: sy + 4, 'font-size': 13, fill: '#b45309', text: `滑片 x=${fmt(x, 2)}` })
+    ctx.set('rh-l', 'text', { x: rx + 28, y: sy + 4, 'font-size': 13, fill: C.amberDeep, text: `滑片 x=${fmt(x, 2)}` })
 
     if (mode === 0) {
       // 限流：变阻器下端接回路，滑片经上部导线到灯
@@ -129,8 +129,8 @@ export const circuitScene: LabScene = {
 
     // 电流方向箭头
     const ia = clamp(I / 0.6, 0.15, 1)
-    ctx.set('i-arrow', 'polygon', { points: `200,120 188,115 188,125`, fill: '#059669', 'fill-opacity': ia })
-    ctx.set('i-label', 'text', { x: 205, y: 112, 'font-size': 13, fill: '#059669', text: `I=${fmt(I, 3)}A` })
+    ctx.set('i-arrow', 'polygon', { points: `200,120 188,115 188,125`, fill: C.greenDeep, 'fill-opacity': ia })
+    ctx.set('i-label', 'text', { x: 205, y: 112, 'font-size': 13, fill: C.greenDeep, text: `I=${fmt(I, 3)}A` })
 
     // 提示
     ctx.set('tip', 'text', {

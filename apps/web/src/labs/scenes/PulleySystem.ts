@@ -87,13 +87,13 @@ export const pulleyScene: LabScene = {
     const data: LabData = {}
 
     // 桌面与滑轮
-    ctx.set('table', 'rect', { x: 60, y: TABLE_Y + 22, width: 390, height: 10, fill: '#94a3b8', rx: 3 })
+    ctx.set('table', 'rect', { x: 60, y: TABLE_Y + 22, width: 390, height: 10, fill: C.faint, rx: 3 })
     ctx.set('table-leg', 'line', { x1: 90, y1: TABLE_Y + 32, x2: 90, y2: 380, stroke: 'currentColor', 'stroke-opacity': 0.4 })
     ctx.set('table-leg2', 'line', { x1: 420, y1: TABLE_Y + 32, x2: 420, y2: 380, stroke: 'currentColor', 'stroke-opacity': 0.4 })
-    ctx.set('pulley', 'circle', { cx: PULLEY.x, cy: PULLEY.y, r: 14, fill: '#cbd5e1', stroke: '#475569', 'stroke-width': 2 })
-    ctx.set('pulley-hub', 'circle', { cx: PULLEY.x, cy: PULLEY.y, r: 3, fill: '#475569' })
-    ctx.set('pulley-arm', 'line', { x1: PULLEY.x, y1: PULLEY.y - 14, x2: PULLEY.x, y2: 70, stroke: '#475569', 'stroke-width': 3 })
-    ctx.set('pulley-mount', 'rect', { x: PULLEY.x - 16, y: 58, width: 32, height: 12, fill: '#475569' })
+    ctx.set('pulley', 'circle', { cx: PULLEY.x, cy: PULLEY.y, r: 14, fill: C.line, stroke: C.ink2, 'stroke-width': 2 })
+    ctx.set('pulley-hub', 'circle', { cx: PULLEY.x, cy: PULLEY.y, r: 3, fill: C.ink2 })
+    ctx.set('pulley-arm', 'line', { x1: PULLEY.x, y1: PULLEY.y - 14, x2: PULLEY.x, y2: 70, stroke: C.ink2, 'stroke-width': 3 })
+    ctx.set('pulley-mount', 'rect', { x: PULLEY.x - 16, y: 58, width: 32, height: 12, fill: C.ink2 })
 
     // m1 位置与绳
     const x1 = M1_START + st.x * PX_PER_M
@@ -101,15 +101,15 @@ export const pulleyScene: LabScene = {
     const hangerY = PULLEY.y + 16 + st.x * 24 // 比例缩小，保证 m2 终点不出画
     // 绳从 m1 右缘中点连出（不再悬空）
     const bw0 = 56 + params.m1 * 18
-    ctx.set('rope1', 'line', { x1: x1 + bw0 / 2, y1: y1, x2: PULLEY.x, y2: PULLEY.y, stroke: '#334155', 'stroke-width': 2 })
-    ctx.set('rope2', 'line', { x1: PULLEY.x, y1: PULLEY.y, x2: PULLEY.x, y2: hangerY, stroke: '#334155', 'stroke-width': 2 })
+    ctx.set('rope1', 'line', { x1: x1 + bw0 / 2, y1: y1, x2: PULLEY.x, y2: PULLEY.y, stroke: C.ink, 'stroke-width': 2 })
+    ctx.set('rope2', 'line', { x1: PULLEY.x, y1: PULLEY.y, x2: PULLEY.x, y2: hangerY, stroke: C.ink, 'stroke-width': 2 })
 
     // m1 滑块（拖动本体 = 摆放位移，拖内部手柄 = 改质量）
     const bw = 56 + params.m1 * 18
-    const m1el = ctx.set('m1', 'rect', { x: x1 - bw / 2, y: y1 - 22, width: bw, height: 44, rx: 6, fill: '#4f46e5', stroke: '#312e81', 'stroke-width': 2 })
-    ctx.set('m1-t', 'text', { x: x1, y: y1 + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: `m1=${fmt(params.m1, 1)}` })
-    const m1h = ctx.set('m1-handle', 'circle', { cx: x1 - bw / 4, cy: y1, r: 11, fill: '#fff', 'fill-opacity': 0.9, stroke: '#312e81', 'stroke-width': 2 })
-    ctx.set('m1h-t', 'text', { x: x1 - bw / 4, y: y1 + 3, 'font-size': 13, 'text-anchor': 'middle', fill: '#312e81', text: '↕' })
+    const m1el = ctx.set('m1', 'rect', { x: x1 - bw / 2, y: y1 - 22, width: bw, height: 44, rx: 6, fill: C.accentDeep, stroke: C.indigoDeep, 'stroke-width': 2 })
+    ctx.set('m1-t', 'text', { x: x1, y: y1 + 4, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: `m1=${fmt(params.m1, 1)}` })
+    const m1h = ctx.set('m1-handle', 'circle', { cx: x1 - bw / 4, cy: y1, r: 11, fill: C.surface, 'fill-opacity': 0.9, stroke: C.indigoDeep, 'stroke-width': 2 })
+    ctx.set('m1h-t', 'text', { x: x1 - bw / 4, y: y1 + 3, 'font-size': 13, 'text-anchor': 'middle', fill: C.indigoDeep, text: '↕' })
     ctx.drag(m1el, (p) => {
       st.x = clamp((p.x - M1_START) / PX_PER_M, 0, 4)
       ctx.requestRender()
@@ -118,8 +118,8 @@ export const pulleyScene: LabScene = {
       ctx.setParam('m1', clamp(Math.round((params.m1 - (p.y - y1) * 0.02) * 10) / 10, 0.2, 3))
     })
     // m2 悬挂物（拖动改质量）
-    const m2el = ctx.set('m2', 'rect', { x: PULLEY.x - 16, y: hangerY, width: 32, height: 30 + params.m2 * 12, rx: 4, fill: '#f59e0b', stroke: '#b45309', 'stroke-width': 2 })
-    ctx.set('m2-t', 'text', { x: PULLEY.x, y: hangerY + 22 + params.m2 * 6, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: `m2=${fmt(params.m2, 2)}` })
+    const m2el = ctx.set('m2', 'rect', { x: PULLEY.x - 16, y: hangerY, width: 32, height: 30 + params.m2 * 12, rx: 4, fill: C.amber, stroke: C.amberDeep, 'stroke-width': 2 })
+    ctx.set('m2-t', 'text', { x: PULLEY.x, y: hangerY + 22 + params.m2 * 6, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: `m2=${fmt(params.m2, 2)}` })
     ctx.drag(m2el, (p) => {
       ctx.setParam('m2', clamp(Math.round((params.m2 - (p.y - hangerY) * 0.008) * 100) / 100, 0.05, 1.5))
     })
@@ -149,8 +149,8 @@ export const pulleyScene: LabScene = {
         drawArrow(ctx, 'isoF2', c2, add(c2, v(0, params.m2 * G * 0.9)), { color: C.gravity, label: `m2g=${fmt(params.m2 * G, 2)}N` })
       }
       if (opts.showPoints) {
-        ctx.set('dot1', 'circle', { cx: x1, cy: y1 + 6, r: 4, fill: '#111827' })
-        ctx.set('dot2', 'circle', { cx: PULLEY.x, cy: hangerY + 16, r: 4, fill: '#111827' })
+        ctx.set('dot1', 'circle', { cx: x1, cy: y1 + 6, r: 4, fill: C.inkStrong })
+        ctx.set('dot2', 'circle', { cx: PULLEY.x, cy: hangerY + 16, r: 4, fill: C.inkStrong })
       } else ctx.remove('dot1', 'dot2')
     } else {
       ctx.remove('sys-box', 'sys-label', 'wDrive', 'wDrive-head', 'wDrive-label', 'wRes2', 'wRes2-head', 'wRes2-label', 'isoT1', 'isoT1-head', 'isoT1-label', 'isoF1', 'isoF1-head', 'isoF1-label', 'isoT2', 'isoT2-head', 'isoT2-label', 'isoF2', 'isoF2-head', 'isoF2-label', 'dot1', 'dot2')

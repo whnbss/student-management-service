@@ -89,33 +89,33 @@ export const cartScene: LabScene = {
     const data: LabData = {}
 
     // 导轨
-    ctx.set('track', 'rect', { x: 60, y: TRACK_Y + 18, width: 420, height: 10, fill: '#94a3b8', rx: 3 })
+    ctx.set('track', 'rect', { x: 60, y: TRACK_Y + 18, width: 420, height: 10, fill: C.faint, rx: 3 })
     ctx.set('track-legs', 'line', { x1: 80, y1: TRACK_Y + 28, x2: 80, y2: 380, stroke: 'currentColor', 'stroke-opacity': 0.4 })
     ctx.set('track-leg2', 'line', { x1: 460, y1: TRACK_Y + 28, x2: 460, y2: 380, stroke: 'currentColor', 'stroke-opacity': 0.4 })
     // 滑轮
-    ctx.set('pulley', 'circle', { cx: PULLEY.x, cy: PULLEY.y, r: 14, fill: '#cbd5e1', stroke: '#475569', 'stroke-width': 2 })
-    ctx.set('pulley-hub', 'circle', { cx: PULLEY.x, cy: PULLEY.y, r: 3, fill: '#475569' })
-    ctx.set('pulley-arm', 'line', { x1: PULLEY.x, y1: PULLEY.y - 14, x2: PULLEY.x, y2: 70, stroke: '#475569', 'stroke-width': 3 })
-    ctx.set('pulley-mount', 'rect', { x: PULLEY.x - 16, y: 58, width: 32, height: 12, fill: '#475569' })
+    ctx.set('pulley', 'circle', { cx: PULLEY.x, cy: PULLEY.y, r: 14, fill: C.line, stroke: C.ink2, 'stroke-width': 2 })
+    ctx.set('pulley-hub', 'circle', { cx: PULLEY.x, cy: PULLEY.y, r: 3, fill: C.ink2 })
+    ctx.set('pulley-arm', 'line', { x1: PULLEY.x, y1: PULLEY.y - 14, x2: PULLEY.x, y2: 70, stroke: C.ink2, 'stroke-width': 3 })
+    ctx.set('pulley-mount', 'rect', { x: PULLEY.x - 16, y: 58, width: 32, height: 12, fill: C.ink2 })
 
     // 小车位置
     const cx = CART_START.x + st.x * PX_PER_M
     const cy = CART_Y(params.M)
     // 绳：车 → 滑轮 → 钩码（钩码随小车前进而下降，比例单独调小便于观看）
     const hangerY = PULLEY.y + 16 + st.x * 30
-    ctx.set('rope1', 'line', { x1: cx + 52, y1: cy, x2: PULLEY.x, y2: PULLEY.y, stroke: '#334155', 'stroke-width': 2 })
-    ctx.set('rope2', 'line', { x1: PULLEY.x, y1: PULLEY.y, x2: PULLEY.x, y2: hangerY, stroke: '#334155', 'stroke-width': 2 })
+    ctx.set('rope1', 'line', { x1: cx + 52, y1: cy, x2: PULLEY.x, y2: PULLEY.y, stroke: C.ink, 'stroke-width': 2 })
+    ctx.set('rope2', 'line', { x1: PULLEY.x, y1: PULLEY.y, x2: PULLEY.x, y2: hangerY, stroke: C.ink, 'stroke-width': 2 })
     // 钩码下方的地面（钩码到 x=2m 时恰好触地 = 行程终点）
-    ctx.set('hanger-ground', 'rect', { x: PULLEY.x - 40, y: 380, width: 80, height: 8, fill: '#94a3b8' })
+    ctx.set('hanger-ground', 'rect', { x: PULLEY.x - 40, y: 380, width: 80, height: 8, fill: C.faint })
     ctx.set('hanger-ground-l', 'text', { x: PULLEY.x, y: 376, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.45, text: '地面' })
     // 小车本体（宽度随质量微变，体现"质量"）
     const bw = 70 + params.M * 20
-    const cart = ctx.set('cart', 'rect', { x: cx - bw / 2, y: cy - 24, width: bw, height: 46, rx: 8, fill: '#4f46e5', stroke: '#312e81', 'stroke-width': 2 })
-    ctx.set('cart-wheel1', 'circle', { cx: cx - bw / 4, cy: cy + 24, r: 6, fill: '#1e293b' })
-    ctx.set('cart-wheel2', 'circle', { cx: cx + bw / 4, cy: cy + 24, r: 6, fill: '#1e293b' })
+    const cart = ctx.set('cart', 'rect', { x: cx - bw / 2, y: cy - 24, width: bw, height: 46, rx: 8, fill: C.accentDeep, stroke: C.indigoDeep, 'stroke-width': 2 })
+    ctx.set('cart-wheel1', 'circle', { cx: cx - bw / 4, cy: cy + 24, r: 6, fill: C.navy })
+    ctx.set('cart-wheel2', 'circle', { cx: cx + bw / 4, cy: cy + 24, r: 6, fill: C.navy })
     // 质量拖拽手柄（小车内部 ↕）
-    const mHandle = ctx.set('m-handle', 'circle', { cx: cx, cy: cy - 2, r: 13, fill: '#fff', 'fill-opacity': 0.9, stroke: '#312e81', 'stroke-width': 2 })
-    ctx.set('m-handle-t', 'text', { x: cx, y: cy + 2, 'font-size': 13, 'text-anchor': 'middle', fill: '#312e81', text: 'M↕' })
+    const mHandle = ctx.set('m-handle', 'circle', { cx: cx, cy: cy - 2, r: 13, fill: C.surface, 'fill-opacity': 0.9, stroke: C.indigoDeep, 'stroke-width': 2 })
+    ctx.set('m-handle-t', 'text', { x: cx, y: cy + 2, 'font-size': 13, 'text-anchor': 'middle', fill: C.indigoDeep, text: 'M↕' })
     ctx.drag(mHandle, (p) => {
       // 竖直拖动调质量
       const dy = p.y - cy
@@ -127,7 +127,7 @@ export const cartScene: LabScene = {
       ctx.requestRender()
     })
     // 钩码（可拖 ↕ 改质量）
-    const hanger = ctx.set('hanger', 'rect', { x: PULLEY.x - 14, y: hangerY, width: 28, height: 26, rx: 4, fill: '#f59e0b', stroke: '#b45309' })
+    const hanger = ctx.set('hanger', 'rect', { x: PULLEY.x - 14, y: hangerY, width: 28, height: 26, rx: 4, fill: C.amber, stroke: C.amberDeep })
     ctx.drag(hanger, (p) => {
       const dy = p.y - hangerY
       ctx.setParam('m', clamp(round2(params.m - dy * 0.002), 0.02, 0.5))
@@ -142,7 +142,7 @@ export const cartScene: LabScene = {
       else ctx.remove('fF', 'fF-head', 'fF-label')
       // 钩码受力
       drawArrow(ctx, 'fhG', v(PULLEY.x, hangerY + 13), add(v(PULLEY.x, hangerY + 13), v(0, params.m * G * k)), { color: C.gravity, label: `mg=${fmt(params.m * G, 2)}N` })
-      if (opts.showPoints) ctx.set('dot-c', 'circle', { cx: center.x, cy: center.y, r: 4, fill: '#111827' })
+      if (opts.showPoints) ctx.set('dot-c', 'circle', { cx: center.x, cy: center.y, r: 4, fill: C.inkStrong })
       else ctx.remove('dot-c')
     } else {
       ctx.remove('fT', 'fT-head', 'fT-label', 'fF', 'fF-head', 'fF-label', 'fhG', 'fhG-head', 'fhG-label', 'dot-c')

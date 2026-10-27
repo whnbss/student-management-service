@@ -113,15 +113,15 @@ export const frictionScene: LabScene = {
     const fk = params.muk * params.m * G
 
     // 地面
-    ctx.set('ground', 'rect', { x: 40, y: GROUND_Y + 26, width: 560, height: 8, fill: '#94a3b8', rx: 2 })
+    ctx.set('ground', 'rect', { x: 40, y: GROUND_Y + 26, width: 560, height: 8, fill: C.faint, rx: 2 })
     // 滑块
     const bx = START_X + st.x * PX_PER_M
     const bw = 50 + params.m * 4
-    const block = ctx.set('block', 'rect', { x: bx - bw / 2, y: GROUND_Y - 18, width: bw, height: 44, rx: 6, fill: st.moving ? C.friction : '#4f46e5', stroke: st.moving ? '#b45309' : '#312e81', 'stroke-width': 2 })
-    ctx.set('block-t', 'text', { x: bx, y: GROUND_Y + 8, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: `${fmt(params.m, 1)}kg` })
+    const block = ctx.set('block', 'rect', { x: bx - bw / 2, y: GROUND_Y - 18, width: bw, height: 44, rx: 6, fill: st.moving ? C.friction : C.accentDeep, stroke: st.moving ? C.amberDeep : C.indigoDeep, 'stroke-width': 2 })
+    ctx.set('block-t', 'text', { x: bx, y: GROUND_Y + 8, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: `${fmt(params.m, 1)}kg` })
     // 推力手柄：拖动改 F（↔）
-    const handle = ctx.set('handle', 'circle', { cx: bx + 40, cy: GROUND_Y + 4, r: 13, fill: '#fff', 'fill-opacity': 0.95, stroke: C.tension, 'stroke-width': 2 })
-    ctx.set('handle-t', 'text', { x: bx + 40, y: GROUND_Y + 8, 'font-size': 13, 'text-anchor': 'middle', fill: '#065f46', text: 'F↔' })
+    const handle = ctx.set('handle', 'circle', { cx: bx + 40, cy: GROUND_Y + 4, r: 13, fill: C.surface, 'fill-opacity': 0.95, stroke: C.tension, 'stroke-width': 2 })
+    ctx.set('handle-t', 'text', { x: bx + 40, y: GROUND_Y + 8, 'font-size': 13, 'text-anchor': 'middle', fill: C.greenInk, text: 'F↔' })
     ctx.drag(handle, (p) => {
       ctx.setParam('F', clamp(Math.round((p.x - START_X) * 0.08 * 5) / 5, 0, 30))
     })

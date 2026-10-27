@@ -91,8 +91,8 @@ export const orbitScene: LabScene = {
     const circular = params.mode === 0
 
     // 地球
-    ctx.set('earth', 'circle', { cx: CENTER.x, cy: CENTER.y, r: EARTH_R, fill: '#3b82f6', stroke: '#1d4ed8', 'stroke-width': 2 })
-    ctx.set('earth-l', 'text', { x: CENTER.x, y: CENTER.y + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: '地球' })
+    ctx.set('earth', 'circle', { cx: CENTER.x, cy: CENTER.y, r: EARTH_R, fill: C.normal, stroke: C.blueDeep, 'stroke-width': 2 })
+    ctx.set('earth-l', 'text', { x: CENTER.x, y: CENTER.y + 4, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: '地球' })
 
     // 圆轨道参考圈（圆轨道模式）
     if (circular) {
@@ -120,7 +120,7 @@ export const orbitScene: LabScene = {
     } else ctx.remove('trail')
 
     // 卫星（拖动改 r，仅圆轨道模式）
-    const sat = ctx.set('sat', 'circle', { cx: satP.x, cy: satP.y, r: 7, fill: '#f59e0b', stroke: '#b45309', 'stroke-width': 2 })
+    const sat = ctx.set('sat', 'circle', { cx: satP.x, cy: satP.y, r: 7, fill: C.amber, stroke: C.amberDeep, 'stroke-width': 2 })
     ctx.drag(sat, (p) => {
       const d = Math.hypot(p.x - CENTER.x, p.y - CENTER.y)
       // 反解像素 → km：r = R_E * (d/55)^(1/0.38)
@@ -139,7 +139,7 @@ export const orbitScene: LabScene = {
       const vl = Math.hypot(velV.x, velV.y)
       if (vl > 0.01) drawArrow(ctx, 'fv', satP, add(satP, { x: (velV.x / vl) * 34, y: -(velV.y / vl) * 34 }), { color: C.tension, label: `v=${fmt(vl, 2)}km/s` })
       else ctx.remove('fv', 'fv-head', 'fv-label')
-      if (opts.showPoints) ctx.set('dot-s', 'circle', { cx: satP.x, cy: satP.y, r: 2.5, fill: '#111827' })
+      if (opts.showPoints) ctx.set('dot-s', 'circle', { cx: satP.x, cy: satP.y, r: 2.5, fill: C.inkStrong })
       else ctx.remove('dot-s')
     } else {
       ctx.remove('fg', 'fg-head', 'fg-label', 'fv', 'fv-head', 'fv-label', 'dot-s')

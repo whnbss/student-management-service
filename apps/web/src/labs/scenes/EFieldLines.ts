@@ -88,15 +88,15 @@ export const efieldScene: LabScene = {
     for (let i = 0; i < sources.length; i++) {
       const s = sources[i]
       const pos = s.q >= 0
-      ctx.set(`src${i}`, 'circle', { cx: s.pos.x, cy: s.pos.y, r: 15, fill: pos ? '#ef4444' : '#3b82f6', stroke: pos ? '#b91c1c' : '#1d4ed8', 'stroke-width': 2 })
-      ctx.set(`src${i}-t`, 'text', { x: s.pos.x, y: s.pos.y + 5, 'font-size': 14, 'text-anchor': 'middle', fill: '#fff', text: pos ? '+' : '−' })
+      ctx.set(`src${i}`, 'circle', { cx: s.pos.x, cy: s.pos.y, r: 15, fill: pos ? C.gravity : C.normal, stroke: pos ? C.redDeep : C.blueDeep, 'stroke-width': 2 })
+      ctx.set(`src${i}-t`, 'text', { x: s.pos.x, y: s.pos.y + 5, 'font-size': 14, 'text-anchor': 'middle', fill: C.dash, text: pos ? '+' : '−' })
     }
 
     // 试探电荷（自由拖动）
     const qt = params.qt * 1e-9
     const posQ = params.qt >= 0
-    const tc = ctx.set('tc', 'circle', { cx: st.pos.x, cy: st.pos.y, r: 11, fill: posQ ? '#f59e0b' : '#0ea5e9', stroke: posQ ? '#b45309' : '#0284c7', 'stroke-width': 2, 'fill-opacity': 0.95 })
-    ctx.set('tc-t', 'text', { x: st.pos.x, y: st.pos.y + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: posQ ? '+' : '−' })
+    const tc = ctx.set('tc', 'circle', { cx: st.pos.x, cy: st.pos.y, r: 11, fill: posQ ? C.amber : C.sky, stroke: posQ ? C.amberDeep : C.skyDeep, 'stroke-width': 2, 'fill-opacity': 0.95 })
+    ctx.set('tc-t', 'text', { x: st.pos.x, y: st.pos.y + 4, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: posQ ? '+' : '−' })
     ctx.drag(tc, (p) => {
       st.pos = v(clamp(p.x, 14, ctx.w - 14), clamp(p.y, 14, ctx.h - 14))
       ctx.requestRender()
@@ -122,7 +122,7 @@ export const efieldScene: LabScene = {
         const fdir = qt >= 0 ? 1 : -1 // 负电荷受力与 E 反向
         drawArrow(ctx, 'fF', from, add(from, { x: (fdir * E.x / Emag) * k * 0.7, y: (fdir * E.y / Emag) * k * 0.7 }), { color: C.net, dashed: true, label: `F=${sciFmt(F)}N` })
       } else ctx.remove('fF', 'fF-head', 'fF-label')
-      if (opts.showPoints) ctx.set('dot-t', 'circle', { cx: st.pos.x, cy: st.pos.y, r: 2.5, fill: '#111827' })
+      if (opts.showPoints) ctx.set('dot-t', 'circle', { cx: st.pos.x, cy: st.pos.y, r: 2.5, fill: C.inkStrong })
       else ctx.remove('dot-t')
     } else {
       ctx.remove('fE', 'fE-head', 'fE-label', 'fF', 'fF-head', 'fF-label', 'dot-t')

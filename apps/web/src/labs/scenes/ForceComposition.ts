@@ -71,8 +71,8 @@ export const compositionScene: LabScene = {
       // 合力：黑色粗虚线
       drawArrow(ctx, 'fR', O, add(O, R), { color: C.net, dashed: true, width: 4, label: `R=${fmt(len(R), 1)}N` })
       // 两个分力（可拖拽端点）
-      const e1 = ctx.set('e1', 'circle', { cx: O.x + st.f1.x, cy: O.y + st.f1.y, r: 11, fill: '#fff', stroke: C.gravity, 'stroke-width': 3 })
-      const e2 = ctx.set('e2', 'circle', { cx: O.x + st.f2.x, cy: O.y + st.f2.y, r: 11, fill: '#fff', stroke: C.tension, 'stroke-width': 3 })
+      const e1 = ctx.set('e1', 'circle', { cx: O.x + st.f1.x, cy: O.y + st.f1.y, r: 11, fill: C.surface, stroke: C.gravity, 'stroke-width': 3 })
+      const e2 = ctx.set('e2', 'circle', { cx: O.x + st.f2.x, cy: O.y + st.f2.y, r: 11, fill: C.surface, stroke: C.tension, 'stroke-width': 3 })
       drawArrow(ctx, 'f1', O, add(O, st.f1), { color: C.gravity, label: `F1=${fmt(len(st.f1), 1)}N` })
       drawArrow(ctx, 'f2', O, add(O, st.f2), { color: C.tension, label: `F2=${fmt(len(st.f2), 1)}N` })
       ctx.drag(e1, (p) => {
@@ -106,7 +106,7 @@ export const compositionScene: LabScene = {
       const F2 = sub(R, F1)
       // 合力（锁定，黑色粗虚线，端点可拖拽调大小方向）
       drawArrow(ctx, 'fR', O, add(O, R), { color: C.net, dashed: true, width: 4, label: `R=${fmt(params.resMag, 0)}N` })
-      const rGrip = ctx.set('r-grip', 'circle', { cx: O.x + R.x, cy: O.y + R.y, r: 10, fill: '#fff', stroke: C.net, 'stroke-width': 3 })
+      const rGrip = ctx.set('r-grip', 'circle', { cx: O.x + R.x, cy: O.y + R.y, r: 10, fill: C.surface, stroke: C.net, 'stroke-width': 3 })
       ctx.drag(rGrip, (p) => {
         const d = sub(p, O)
         ctx.setParam('resMag', clamp(Math.round(len(d)), 40, 260))
@@ -115,7 +115,7 @@ export const compositionScene: LabScene = {
       })
       // F1（自由拖动端点）与 F2（自动补齐，端点小标记）
       // 手柄外移 26px 再叠一层同方向偏移，避免压住「F1=…」标签
-      const e1 = ctx.set('e1', 'circle', { cx: O.x + F1.x, cy: O.y + F1.y, r: 11, fill: '#fff', stroke: C.gravity, 'stroke-width': 3 })
+      const e1 = ctx.set('e1', 'circle', { cx: O.x + F1.x, cy: O.y + F1.y, r: 11, fill: C.surface, stroke: C.gravity, 'stroke-width': 3 })
       drawArrow(ctx, 'f1', O, add(O, F1), { color: C.gravity, label: `F1=${fmt(len(F1), 1)}N` })
       drawArrow(ctx, 'f2', O, add(O, F2), { color: C.tension, label: `F2=${fmt(len(F2), 1)}N` })
       ctx.set('e2-auto', 'circle', { cx: O.x + F2.x, cy: O.y + F2.y, r: 7, fill: C.tension, 'fill-opacity': 0.5 })
@@ -133,7 +133,7 @@ export const compositionScene: LabScene = {
       // 提示：分力可以大于合力（F1 自由拖动后夹角为钝角时成立）
       const big = Math.max(len(F1), len(F2)) > len(R) * 1.001
       ctx.set('hint', 'text', {
-        x: 30, y: 32, 'font-size': 14, fill: big ? C.warn : '#059669',
+        x: 30, y: 32, 'font-size': 14, fill: big ? C.warn : C.greenDeep,
         text: big ? '看到了吗？分力比合力还大！（两分力夹角越钝分力越大）' : '拖动红色端点改变 F1（大小方向均可），观察分力变化',
       })
       data['|R|（锁定）'] = `${fmt(len(R), 1)} N`
@@ -150,7 +150,7 @@ export const compositionScene: LabScene = {
       }
     }
     if (opts.showPoints) {
-      ctx.set('dot-o', 'circle', { cx: O.x, cy: O.y, r: 5, fill: '#111827' })
+      ctx.set('dot-o', 'circle', { cx: O.x, cy: O.y, r: 5, fill: C.inkStrong })
     } else {
       ctx.remove('dot-o')
     }

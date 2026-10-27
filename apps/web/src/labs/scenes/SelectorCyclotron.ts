@@ -98,8 +98,8 @@ export const selectorScene: LabScene = {
       const px0 = 120
       const px1 = 480
       const cy = 210
-      ctx.set('plate-t', 'rect', { x: px0, y: cy - 62, width: px1 - px0, height: 8, fill: '#8b5cf6' })
-      ctx.set('plate-b', 'rect', { x: px0, y: cy + 54, width: px1 - px0, height: 8, fill: '#8b5cf6' })
+      ctx.set('plate-t', 'rect', { x: px0, y: cy - 62, width: px1 - px0, height: 8, fill: C.field })
+      ctx.set('plate-b', 'rect', { x: px0, y: cy + 54, width: px1 - px0, height: 8, fill: C.field })
       ctx.set('plate-t-l', 'text', { x: px0 - 6, y: cy - 50, 'font-size': 13, 'text-anchor': 'end', fill: C.field, text: '+' })
       ctx.set('plate-b-l', 'text', { x: px0 - 6, y: cy + 62, 'font-size': 13, 'text-anchor': 'end', fill: C.field, text: '−' })
       for (let i = 0; i < 4; i++) {
@@ -115,11 +115,11 @@ export const selectorScene: LabScene = {
       }
       for (let i = idx; i < 20; i++) ctx.remove(`b${i}`)
 
-      ctx.set('slit', 'line', { x1: px0 - 26, y1: cy - 14, x2: px0 - 26, y2: cy + 14, stroke: '#94a3b8', 'stroke-width': 5 })
+      ctx.set('slit', 'line', { x1: px0 - 26, y1: cy - 14, x2: px0 - 26, y2: cy + 14, stroke: C.faint, 'stroke-width': 5 })
       ctx.set('slit-l', 'text', { x: px0 - 30, y: cy + 32, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: '入口' })
       const pX = px0 - 20 + Math.min(st.selX + 20, 360)
       const pY = cy + clamp(st.selY, -60, 60)
-      ctx.set('p', 'circle', { cx: pX, cy: pY, r: 7, fill: '#f59e0b', stroke: '#b45309' })
+      ctx.set('p', 'circle', { cx: pX, cy: pY, r: 7, fill: C.amber, stroke: C.amberDeep })
       if (opts.showForces) {
         const pC = { x: pX, y: pY }
         drawArrow(ctx, 'fE', pC, { x: pC.x, y: pC.y + 24 }, { color: C.field, label: 'qE↓' })
@@ -129,7 +129,7 @@ export const selectorScene: LabScene = {
       const result = st.selAbsorbed ? (tooFast ? '被上板吸收' : '被下板吸收') : st.selDone ? '直线通过' : '飞行中'
       ctx.set('tip', 'text', {
         x: 44, y: 44, 'font-size': 13,
-        fill: st.selAbsorbed ? C.warn : st.selDone ? '#059669' : 'currentColor',
+        fill: st.selAbsorbed ? C.warn : st.selDone ? C.greenDeep : 'currentColor',
         'fill-opacity': st.selDone ? 1 : 0.55,
         text: st.selDone
           ? result === '直线通过'
@@ -155,10 +155,10 @@ export const selectorScene: LabScene = {
       const vN = Math.sqrt((2 * Math.max(n, 1) * Q_E * U) / M_P)
 
       // 两个 D 形盒（左上 / 右下，竖直缝隙）
-      ctx.set('d1', 'path', { d: 'M320,210 L320,80 A130,130 0 0,0 190,210 Z', fill: '#e2e8f0', 'fill-opacity': 0.4, stroke: '#64748b', 'stroke-width': 2 })
-      ctx.set('d2', 'path', { d: 'M320,210 L320,340 A130,130 0 0,1 450,210 Z', fill: '#cbd5e1', 'fill-opacity': 0.4, stroke: '#64748b', 'stroke-width': 2 })
-      ctx.set('d-l', 'text', { x: 245, y: 145, 'font-size': 13, fill: '#475569', text: 'D₁' })
-      ctx.set('d-l2', 'text', { x: 398, y: 285, 'font-size': 13, fill: '#475569', text: 'D₂' })
+      ctx.set('d1', 'path', { d: 'M320,210 L320,80 A130,130 0 0,0 190,210 Z', fill: C.line2, 'fill-opacity': 0.4, stroke: C.muted, 'stroke-width': 2 })
+      ctx.set('d2', 'path', { d: 'M320,210 L320,340 A130,130 0 0,1 450,210 Z', fill: C.line, 'fill-opacity': 0.4, stroke: C.muted, 'stroke-width': 2 })
+      ctx.set('d-l', 'text', { x: 245, y: 145, 'font-size': 13, fill: C.ink2, text: 'D₁' })
+      ctx.set('d-l2', 'text', { x: 398, y: 285, 'font-size': 13, fill: C.ink2, text: 'D₂' })
       ctx.set('gap-l', 'text', { x: 312, y: 210, 'font-size': 13, 'text-anchor': 'end', fill: C.warn, text: '缝隙' })
 
       // 螺旋轨迹：每半圈半径按 r_n 增长
@@ -178,12 +178,12 @@ export const selectorScene: LabScene = {
       const phNow = Math.min(st.phi, n * Math.PI)
       const pXc = 320 + RpNow * Math.cos(phNow)
       const pYc = 210 - RpNow * Math.sin(phNow)
-      ctx.set('pc', 'circle', { cx: pXc, cy: pYc, r: 6, fill: '#f59e0b', stroke: '#b45309' })
+      ctx.set('pc', 'circle', { cx: pXc, cy: pYc, r: 6, fill: C.amber, stroke: C.amberDeep })
 
       if (reachedMax || st.done) {
-        ctx.set('exit', 'rect', { x: 442, y: 200, width: 34, height: 18, fill: '#059669', rx: 3 })
-        ctx.set('exit-l', 'text', { x: 459, y: 194, 'font-size': 13, 'text-anchor': 'middle', fill: '#059669', text: '引出口' })
-        ctx.set('tip', 'text', { x: 44, y: 44, 'font-size': 13, fill: '#059669', text: `★ 达到最大半径 R=${fmt(Rmax, 2)}m，引出射出！共加速 ${n} 次` })
+        ctx.set('exit', 'rect', { x: 442, y: 200, width: 34, height: 18, fill: C.greenDeep, rx: 3 })
+        ctx.set('exit-l', 'text', { x: 459, y: 194, 'font-size': 13, 'text-anchor': 'middle', fill: C.greenDeep, text: '引出口' })
+        ctx.set('tip', 'text', { x: 44, y: 44, 'font-size': 13, fill: C.greenDeep, text: `★ 达到最大半径 R=${fmt(Rmax, 2)}m，引出射出！共加速 ${n} 次` })
       } else {
         ctx.remove('exit', 'exit-l')
         ctx.set('tip', 'text', { x: 44, y: 44, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.6, text: '螺旋半径渐增：每经过缝隙加速一次，r=mv/(qB) 随之变大' })

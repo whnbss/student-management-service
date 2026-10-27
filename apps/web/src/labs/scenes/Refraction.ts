@@ -49,8 +49,8 @@ export const refractionScene: LabScene = {
     const data: LabData = {}
 
     // 上下介质区域与标注
-    ctx.set('med1', 'rect', { x: 40, y: 40, width: 560, height: O.y - 40, fill: params.n1 > 1.05 ? '#38bdf8' : '#f8fafc', 'fill-opacity': params.n1 > 1.05 ? 0.10 : 0.02 })
-    ctx.set('med2', 'rect', { x: 40, y: O.y, width: 560, height: 340, fill: params.n2 > 1.05 ? '#38bdf8' : '#f8fafc', 'fill-opacity': params.n2 > 1.05 ? 0.14 : 0.02 })
+    ctx.set('med1', 'rect', { x: 40, y: 40, width: 560, height: O.y - 40, fill: params.n1 > 1.05 ? C.skyLight : C.paper, 'fill-opacity': params.n1 > 1.05 ? 0.10 : 0.02 })
+    ctx.set('med2', 'rect', { x: 40, y: O.y, width: 560, height: 340, fill: params.n2 > 1.05 ? C.skyLight : C.paper, 'fill-opacity': params.n2 > 1.05 ? 0.14 : 0.02 })
     ctx.set('if', 'line', { x1: 40, y1: O.y, x2: 600, y2: O.y, stroke: 'currentColor', 'stroke-opacity': 0.6, 'stroke-width': 2 })
     ctx.set('med1-l', 'text', { x: 52, y: 58, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.7, text: `介质1  n₁=${fmt(params.n1, 2)}` })
     ctx.set('med2-l', 'text', { x: 52, y: 380, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.7, text: `介质2  n₂=${fmt(params.n2, 2)}` })
@@ -62,14 +62,14 @@ export const refractionScene: LabScene = {
     // 入射光线：从左上方射向 O（θ₁ 相对法线）
     const incDir = v(-Math.sin((params.th1 * Math.PI) / 180), -Math.cos((params.th1 * Math.PI) / 180))
     const incStart = add(O, scale(incDir, -RAY_L))
-    ctx.set('incident', 'line', { x1: incStart.x, y1: incStart.y, x2: O.x, y2: O.y, stroke: '#f59e0b', 'stroke-width': 3 })
+    ctx.set('incident', 'line', { x1: incStart.x, y1: incStart.y, x2: O.x, y2: O.y, stroke: C.amber, 'stroke-width': 3 })
     // 入射角标注
     const arcR = 56
-    ctx.set('arc1', 'path', { d: describeArc(O.x, O.y, arcR, 270, 270 + params.th1), fill: 'none', stroke: '#f59e0b', 'stroke-width': 1.5 })
-    ctx.set('arc1-l', 'text', { x: O.x - 74, y: O.y - 12, 'font-size': 13, fill: '#f59e0b', text: `θ₁=${fmt(params.th1, 0)}°` })
+    ctx.set('arc1', 'path', { d: describeArc(O.x, O.y, arcR, 270, 270 + params.th1), fill: 'none', stroke: C.amber, 'stroke-width': 1.5 })
+    ctx.set('arc1-l', 'text', { x: O.x - 74, y: O.y - 12, 'font-size': 13, fill: C.amber, text: `θ₁=${fmt(params.th1, 0)}°` })
 
     // 可拖手柄：在入射光线上，拖动改变 θ₁
-    const handle = ctx.set('handle', 'circle', { cx: add(O, scale(incDir, -RAY_L * 0.7)).x, cy: add(O, scale(incDir, -RAY_L * 0.7)).y, r: 9, fill: '#f59e0b', stroke: '#fff', 'stroke-width': 2 })
+    const handle = ctx.set('handle', 'circle', { cx: add(O, scale(incDir, -RAY_L * 0.7)).x, cy: add(O, scale(incDir, -RAY_L * 0.7)).y, r: 9, fill: C.amber, stroke: C.dash, 'stroke-width': 2 })
     ctx.drag(handle, (p) => {
       const d = { x: p.x - O.x, y: p.y - O.y }
       // 只允许左半平面拖动，角度相对竖直法线
@@ -78,14 +78,14 @@ export const refractionScene: LabScene = {
       ctx.setParam('th1', Math.round(th))
       ctx.requestRender()
     })
-    ctx.set('handle-l', 'text', { x: incStart.x - 4, y: incStart.y - 12, 'font-size': 13, fill: '#f59e0b', 'text-anchor': 'middle', text: '↔ 拖我改入射角' })
+    ctx.set('handle-l', 'text', { x: incStart.x - 4, y: incStart.y - 12, 'font-size': 13, fill: C.amber, 'text-anchor': 'middle', text: '↔ 拖我改入射角' })
 
     // 反射光线（右侧对称）
     const reflDir = v(Math.sin((params.th1 * Math.PI) / 180), -Math.cos((params.th1 * Math.PI) / 180))
     const total = params.n1 > params.n2 && params.th1 >= criticalDeg(params.n1, params.n2)
     ctx.set('refl', 'line', {
       x1: O.x, y1: O.y, x2: O.x + reflDir.x * RAY_L, y2: O.y + reflDir.y * RAY_L,
-      stroke: total ? C.warn : '#94a3b8', 'stroke-width': total ? 3.5 : 1.5,
+      stroke: total ? C.warn : C.faint, 'stroke-width': total ? 3.5 : 1.5,
       ...(total ? {} : { 'stroke-dasharray': '5 4' }),
     })
 
@@ -96,9 +96,9 @@ export const refractionScene: LabScene = {
       const th2 = (Math.asin(sin2) * 180) / Math.PI
       dataTheta2 = `${fmt(th2, 1)}°`
       const refrDir = v(Math.sin((th2 * Math.PI) / 180), Math.cos((th2 * Math.PI) / 180))
-      ctx.set('refr', 'line', { x1: O.x, y1: O.y, x2: O.x + refrDir.x * RAY_L, y2: O.y + refrDir.y * RAY_L, stroke: '#0ea5e9', 'stroke-width': 3 })
-      ctx.set('arc2', 'path', { d: describeArc(O.x, O.y, arcR, 90, 90 - th2), fill: 'none', stroke: '#0ea5e9', 'stroke-width': 1.5 })
-      ctx.set('arc2-l', 'text', { x: O.x + 60, y: O.y + 22, 'font-size': 13, fill: '#0ea5e9', text: `θ₂=${fmt(th2, 1)}°` })
+      ctx.set('refr', 'line', { x1: O.x, y1: O.y, x2: O.x + refrDir.x * RAY_L, y2: O.y + refrDir.y * RAY_L, stroke: C.sky, 'stroke-width': 3 })
+      ctx.set('arc2', 'path', { d: describeArc(O.x, O.y, arcR, 90, 90 - th2), fill: 'none', stroke: C.sky, 'stroke-width': 1.5 })
+      ctx.set('arc2-l', 'text', { x: O.x + 60, y: O.y + 22, 'font-size': 13, fill: C.sky, text: `θ₂=${fmt(th2, 1)}°` })
       ctx.remove('total-tip')
     } else {
       ctx.remove('refr', 'arc2', 'arc2-l')
@@ -118,7 +118,7 @@ export const refractionScene: LabScene = {
         ctx.set(`wf${i}`, 'line', {
           x1: pw.x + fromDeg(90).x * 14, y1: pw.y + fromDeg(90).y * 14,
           x2: pw.x - fromDeg(90).x * 14, y2: pw.y - fromDeg(90).y * 14,
-          stroke: '#f59e0b', 'stroke-opacity': 0.4, 'stroke-width': 1.5,
+          stroke: C.amber, 'stroke-opacity': 0.4, 'stroke-width': 1.5,
         })
       }
     } else ctx.remove('wf1', 'wf2', 'wf3')

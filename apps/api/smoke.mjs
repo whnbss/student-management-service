@@ -341,6 +341,35 @@ await req('DELETE', `/api/questions/${qidSan}`)
 await req('DELETE', `/api/questions/${dupId}`)
 await req('DELETE', `/api/questions/${dupFirst}`)
 
+// ==================== P2 冒烟：H5 只读分享链接 ====================
+
+// 31m. 生成分享链接：报告结构不完整拒绝 / 正常生成返回 token 与过期时间
+r = await req('POST', '/api/reports/share', { student_id: sid, report: { summary: 'x' } })
+log('分享报告结构不完整拒绝', r.status === 400)
+const shareReport = { summary: '总体进步明显', glow: ['受力分析更规范'], grow: ['计算准确率待提升'], plan: ['下周做力学综合卷'], payment_hint: '' }
+r = await req('POST', '/api/reports/share', { student_id: sid, report: shareReport, range: { from: date, to: date }, expires_hours: 24 })
+const shareToken = r.data?.token
+log('生成分享链接', r.status === 200 && !!shareToken && !!r.data?.expires_at, `expires=${r.data?.expires_at}`)
+
+// 31n. 公开访问：免登录（无 token）可读 / 错误 token 404
+const savedTok = token
+token = ''
+r = await req('GET', `/api/public/share/${shareToken}`)
+log('公开访问分享报告', r.status === 200 && r.data?.ok && r.data?.report?.summary === '总体进步明显' && r.data?.student_name === '张小明')
+r = await req('GET', '/api/public/share/not-a-real-token')
+log('错误 token 404', r.status === 404)
+token = savedTok
+
+// 31o. 分享列表 + 撤销：列表含该分享，删除后公开访问 404
+r = await req('GET', `/api/reports/share?student_id=${sid}`)
+const shareId = r.data?.shares?.[0]?.id
+log('分享列表可查', r.status === 200 && r.data?.shares?.some((s) => s.token === shareToken) && r.data.shares[0].expired === false)
+r = await req('DELETE', `/api/reports/share/${shareId}`)
+token = ''
+r = await req('GET', `/api/public/share/${shareToken}`)
+log('撤销后公开访问 404', r.status === 404)
+token = savedTok
+
 // 31. 恢复测试前的 AI 配置 + 清理测试数据（不能 reset 成默认值，会清掉用户真实填写的 Key）
 await req('PUT', '/api/settings/ai', { providers: savedProviders || [], proxy: savedProxy, active_id: savedActiveId })
 r = await req('GET', '/api/settings/ai')

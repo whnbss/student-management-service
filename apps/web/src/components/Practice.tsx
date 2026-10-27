@@ -1,8 +1,8 @@
 // P1 内容生产组件：分层练习生成（模仿 Brisk Change Level）+ 家长阶段报告（模仿 MagicSchool Report Card）
 // 两者都走既有 AI 管线（/api/practice/tiered、/api/reports/parent），结果先草稿、教师终审后使用
 import { useState } from 'react'
-import {Printer, ClipboardCopy, Sprout, Wrench, CalendarDays, MessageCircle} from 'lucide-react'
-import { post } from '@/lib/api'
+import {Printer, ClipboardCopy, Sprout, Wrench, CalendarDays, MessageCircle, Link2} from 'lucide-react'
+import { get, post } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
 import Katex from '@/components/Katex'
 import QuestionFigure from '@/components/QuestionFigure'
@@ -186,6 +186,11 @@ export function ParentReportModal({ student, onClose }: { student: Student; onCl
   const [generating, setGenerating] = useState(false)
   const [report, setReport] = useState<ParentReport | null>(null)
   const [range, setRange] = useState({ from: '', to: '' })
+  // H5 只读分享
+  const [expires, setExpires] = useState(72) // 有效期（小时）
+  const [sharing, setSharing] = useState(false)
+  const [shareUrl, setShareUrl] = useState('')
+  const [expiresAt, setExpiresAt] = useState('')
 
   const applyPreset = (p: '2w' | '1m' | 'custom') => {
     setPreset(p)
@@ -195,6 +200,7 @@ export function ParentReportModal({ student, onClose }: { student: Student; onCl
 
   const generate = async () => {
     setGenerating(true)
+    setShareUrl('') // 重新生成后旧链接内容已过时，需重新生成分享
     try {
       const r = await post<{ report: ParentReport; range: { from: string; to: string } }>('/api/reports/parent', { student_id: student.id, from, to })
       setReport(r.report)
@@ -231,6 +237,47 @@ export function ParentReportModal({ student, onClose }: { student: Student; onCl
       show('已复制到剪贴板，可直接粘贴发给家长')
     } catch {
       show('复制失败，请手动选择文字复制')
+    }
+  }
+
+  // —— H5 只读分享链接（P2）：随机 token + 有效期，家长免登录查看 ——
+
+  // 分享链接指向前端 /share/:token 页面；本机（localhost）操作时换成后端局域网地址，保证手机能打开
+  const buildShareUrl = async (token: string): Promise<string> => {
+    let host = window.location.hostname
+    if (host === 'localhost' || host === '127.0.0.1') {
+      try {
+        const sys = await get<{ lan: string }>('/api/settings/system')
+        if (sys.lan) host = sys.lan
+      } catch { /* 拿不到局域网地址就保持原样 */ }
+    }
+    return `http://${host}${window.location.port ? ':' + window.location.port : ''}/share/${token}`
+  }
+
+  const makeShare = async () => {
+    if (!report) return
+    setSharing(true)
+    try {
+      const r = await post<{ token: string; expires_at: string }>('/api/reports/share', {
+        student_id: student.id, report, range, expires_hours: expires,
+      })
+      setShareUrl(await buildShareUrl(r.token))
+      setExpiresAt(r.expires_at)
+      show('分享链接已生成，复制发给家长即可（到期自动失效）')
+    } catch (e: any) {
+      show(e.message || '生成分享链接失败')
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  const copyShare = async () => {
+    if (!shareUrl) return
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      show('链接已复制，可直接发给家长')
+    } catch {
+      show('复制失败，请长按链接手动复制')
     }
   }
 
@@ -287,6 +334,31 @@ export function ParentReportModal({ student, onClose }: { student: Student; onCl
           <div className="flex flex-wrap gap-2 pt-1">
             <button className="btn-primary flex-1 min-w-32" onClick={printReport}><Printer className="w-4 h-4 inline-block align-[-2px]" /> 导出 PDF</button>
             <button className="btn-outline flex-1 min-w-32" onClick={copyHint}><ClipboardCopy className="w-4 h-4 inline-block align-[-2px]" /> 复制催缴话术</button>
+          </div>
+          {/* H5 只读分享：随机 token 链接，家长免登录查看，到期自动失效 */}
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+            <label className="label"><Link2 className="w-4 h-4 inline-block align-[-2px]" /> 分享给家长（只读 H5 链接）</label>
+            <div className="flex gap-2">
+              <select className="input !w-28" value={expires} onChange={(e) => setExpires(Number(e.target.value))}>
+                <option value={24}>24 小时</option>
+                <option value={72}>3 天</option>
+                <option value={168}>7 天</option>
+                <option value={720}>30 天</option>
+              </select>
+              <button className="btn-outline flex-1" disabled={sharing} onClick={makeShare}>
+                {sharing ? '生成中…' : shareUrl ? '重新生成链接' : '生成分享链接'}
+              </button>
+            </div>
+            {shareUrl && (
+              <div className="flex gap-2 items-center">
+                <input className="input !py-1.5 text-xs num" readOnly value={shareUrl} onFocus={(e) => e.currentTarget.select()} />
+                <button className="btn-primary !px-3 !py-1.5 text-xs shrink-0" onClick={copyShare}>复制</button>
+              </div>
+            )}
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              链接免登录、仅能查看本报告，到期自动失效（{shareUrl && expiresAt ? `本次至 ${new Date(expiresAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : '生成后见提示'}）。
+              家长手机需与电脑连接同一网络（或自行做外网映射后替换地址）。
+            </p>
           </div>
         </div>
       )}

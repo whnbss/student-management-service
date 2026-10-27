@@ -107,12 +107,12 @@ export const hangingScene: LabScene = {
         }
       }
       // 两根绳
-      ctx.set('rope1', 'line', { x1: A1.x, y1: A1.y, x2: p.x, y2: p.y, stroke: '#334155', 'stroke-width': 2.5 })
-      ctx.set('rope2', 'line', { x1: A2.x, y1: A2.y, x2: p.x, y2: p.y, stroke: '#334155', 'stroke-width': 2.5 })
-      ctx.set('anchor1', 'circle', { cx: A1.x, cy: A1.y, r: 5, fill: '#334155' })
-      ctx.set('anchor2', 'rect', { x: A2.x - 6, y: A2.y - 5, width: 12, height: 10, fill: '#334155' })
+      ctx.set('rope1', 'line', { x1: A1.x, y1: A1.y, x2: p.x, y2: p.y, stroke: C.ink, 'stroke-width': 2.5 })
+      ctx.set('rope2', 'line', { x1: A2.x, y1: A2.y, x2: p.x, y2: p.y, stroke: C.ink, 'stroke-width': 2.5 })
+      ctx.set('anchor1', 'circle', { cx: A1.x, cy: A1.y, r: 5, fill: C.ink })
+      ctx.set('anchor2', 'rect', { x: A2.x - 6, y: A2.y - 5, width: 12, height: 10, fill: C.ink })
       // 小球（可拖拽）
-      const ball = ctx.set('ball', 'circle', { cx: p.x, cy: p.y, r: 20, fill: '#4f46e5', stroke: '#312e81', 'stroke-width': 2 })
+      const ball = ctx.set('ball', 'circle', { cx: p.x, cy: p.y, r: 20, fill: C.accentDeep, stroke: C.indigoDeep, 'stroke-width': 2 })
       ctx.drag(ball, (pt) => {
         st.p = v(clamp(pt.x, 160, 600), clamp(pt.y, 70, 390))
         ctx.requestRender()
@@ -134,7 +134,7 @@ export const hangingScene: LabScene = {
         } else {
           ctx.remove('cT1x', 'cT1x-head', 'cT1x-label', 'cT1y', 'cT1y-head', 'cT1y-label', 'cT2x', 'cT2x-head', 'cT2x-label', 'cT2y', 'cT2y-head', 'cT2y-label')
         }
-        if (opts.showPoints) ctx.set('dot-p', 'circle', { cx: p.x, cy: p.y, r: 4, fill: '#111827' })
+        if (opts.showPoints) ctx.set('dot-p', 'circle', { cx: p.x, cy: p.y, r: 4, fill: C.inkStrong })
         else ctx.remove('dot-p')
       } else {
         ctx.remove('fG', 'fG-head', 'fG-label', 'fT1', 'fT1-head', 'fT1-label', 'fT2', 'fT2-head', 'fT2-label', 'cT1x', 'cT1x-head', 'cT1x-label', 'cT1y', 'cT1y-head', 'cT1y-label', 'cT2x', 'cT2x-head', 'cT2x-label', 'cT2y', 'cT2y-head', 'cT2y-label', 'dot-p')
@@ -166,7 +166,7 @@ export const hangingScene: LabScene = {
       const beta = Math.abs((Math.atan2(Math.abs(A1.x - p.x), Math.abs(A1.y - p.y)) * 180) / Math.PI)
       if (slack) {
         warn = '绳 2 松弛（拉力为 0）：把球拖回绳 2 顶点右下方试试'
-        ctx.set('warn', 'text', { x: 150, y: 32, 'font-size': 14, fill: '#059669', text: warn })
+        ctx.set('warn', 'text', { x: 150, y: 32, 'font-size': 14, fill: C.greenDeep, text: warn })
       } else if (T2 > 2 * mg) {
         warn = `绳很平：β=${fmt(beta, 0)}°，T2=${fmt(T2, 1)}N ≈ ${fmt(T2 / mg, 1)} 倍重力，绳快到极限了！`
         ctx.set('warn', 'text', { x: 150, y: 32, 'font-size': 14, fill: C.warn, text: warn })
@@ -199,12 +199,12 @@ export const hangingScene: LabScene = {
       for (let i = 0; i < 14; i++) {
         ctx.set(`rail-h${i}`, 'line', { x1: 118 + i * 32, y1: 150, x2: 108 + i * 32, y2: 138, stroke: 'currentColor', 'stroke-opacity': 0.35 })
       }
-      ctx.set('rope-l', 'line', { x1: L.x, y1: L.y, x2: mid.x, y2: mid.y, stroke: '#334155', 'stroke-width': 2.5 })
-      ctx.set('rope-r', 'line', { x1: R.x, y1: R.y, x2: mid.x, y2: mid.y, stroke: '#334155', 'stroke-width': 2.5 })
-      ctx.set('anchor-l', 'circle', { cx: L.x, cy: L.y, r: 5, fill: '#334155' })
-      ctx.set('anchor-r', 'circle', { cx: R.x, cy: R.y, r: 5, fill: '#334155' })
+      ctx.set('rope-l', 'line', { x1: L.x, y1: L.y, x2: mid.x, y2: mid.y, stroke: C.ink, 'stroke-width': 2.5 })
+      ctx.set('rope-r', 'line', { x1: R.x, y1: R.y, x2: mid.x, y2: mid.y, stroke: C.ink, 'stroke-width': 2.5 })
+      ctx.set('anchor-l', 'circle', { cx: L.x, cy: L.y, r: 5, fill: C.ink })
+      ctx.set('anchor-r', 'circle', { cx: R.x, cy: R.y, r: 5, fill: C.ink })
       // 重物（可拖拽改变下垂量）
-      const w = ctx.set('weight', 'rect', { x: mid.x - 22, y: mid.y, width: 44, height: 30, rx: 4, fill: '#4f46e5', stroke: '#312e81' })
+      const w = ctx.set('weight', 'rect', { x: mid.x - 22, y: mid.y, width: 44, height: 30, rx: 4, fill: C.accentDeep, stroke: C.indigoDeep })
       const onDrag = (pt: { x: number; y: number }) => {
         st.sag = clamp(pt.y - L.y, 8, 230)
         ctx.requestRender()
@@ -229,7 +229,7 @@ export const hangingScene: LabScene = {
         ctx.remove('fG', 'fG-head', 'fG-label', 'fT', 'fT-head', 'fT-label', 'fTr', 'fTr-head', 'fTr-label', 'cTly', 'cTly-head', 'cTry', 'cTry-head')
       }
       ctx.set('hint2', 'text', {
-        x: 30, y: 40, 'font-size': 14, fill: T > W * 2 ? C.warn : '#059669',
+        x: 30, y: 40, 'font-size': 14, fill: T > W * 2 ? C.warn : C.greenDeep,
         text: T > W * 2 ? `绳很平：α=${fmt(alpha, 1)}°，T=${fmt(T, 1)}N ≈ ${fmt(T / W, 1)} 倍物重！` : `α=${fmt(alpha, 1)}°，T=${fmt(T, 1)}N（绳越平张力越大）`,
       })
       data['下垂量'] = `${fmt(st.sag, 0)} px`

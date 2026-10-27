@@ -90,7 +90,7 @@ export const freeFallScene: LabScene = {
     const data: LabData = {}
 
     // 地面与标尺
-    ctx.set('ground', 'rect', { x: 40, y: GROUND_Y, width: 560, height: 8, fill: '#94a3b8', rx: 2 })
+    ctx.set('ground', 'rect', { x: 40, y: GROUND_Y, width: 560, height: 8, fill: C.faint, rx: 2 })
     ctx.set('ground-hatch', 'line', { x1: 40, y1: GROUND_Y + 8, x2: 600, y2: GROUND_Y + 8, stroke: 'currentColor', 'stroke-opacity': 0.15, 'stroke-width': 6 })
     for (let m = 0; m <= 45; m += 5) {
       const y = GROUND_Y - m * PX_PER_M
@@ -109,7 +109,7 @@ export const freeFallScene: LabScene = {
 
     // 小球（可竖直拖动改 h；拖动只对未开始时生效——用 t 判断）
     const by = ballY(st.y)
-    const ball = ctx.set('ball', 'circle', { cx: BALL_X, cy: by, r: 13, fill: '#4f46e5', stroke: '#312e81', 'stroke-width': 2 })
+    const ball = ctx.set('ball', 'circle', { cx: BALL_X, cy: by, r: 13, fill: C.accentDeep, stroke: C.indigoDeep, 'stroke-width': 2 })
     ctx.drag(ball, (p) => {
       const h = clamp((GROUND_Y - p.y) / PX_PER_M, 0, 45)
       ctx.setParam('h', Math.round(h * 2) / 2)
@@ -127,7 +127,7 @@ export const freeFallScene: LabScene = {
       if (Math.abs(st.vy) > 0.3) drawArrow(ctx, 'fv', center, add(center, v(0, -st.vy * 3.5)), { color: C.normal, label: `v=${fmt(st.vy, 1)}m/s` })
       else ctx.remove('fv', 'fv-head', 'fv-label')
       drawArrow(ctx, 'fg', add(center, v(22, 0)), add(add(center, v(22, 0)), v(0, 64)), { color: C.gravity, label: 'g=9.8m/s²' })
-      if (opts.showPoints) ctx.set('dot-b', 'circle', { cx: BALL_X, cy: by, r: 3, fill: '#111827' })
+      if (opts.showPoints) ctx.set('dot-b', 'circle', { cx: BALL_X, cy: by, r: 3, fill: C.inkStrong })
       else ctx.remove('dot-b')
     } else {
       ctx.remove('fv', 'fv-head', 'fv-label', 'fg', 'fg-head', 'fg-label', 'dot-b')

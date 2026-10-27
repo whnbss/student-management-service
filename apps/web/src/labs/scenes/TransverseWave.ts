@@ -81,7 +81,7 @@ export const transverseWaveScene: LabScene = {
     ctx.set('base-l', 'text', { x: X0 + N * GAP + 14, y: BASE_Y + 4, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.45, text: '平衡位置' })
 
     // 波源（小圆块）
-    ctx.set('src', 'circle', { cx: X0 - 26, cy: BASE_Y - dispAt(0, st, params) * PX_PER_M, r: 9, fill: '#4f46e5' })
+    ctx.set('src', 'circle', { cx: X0 - 26, cy: BASE_Y - dispAt(0, st, params) * PX_PER_M, r: 9, fill: C.accentDeep })
     ctx.set('src-l', 'text', { x: X0 - 26, y: BASE_Y + 26, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: '波源' })
 
     // 各质点小圆点 + 观察质点高亮（可沿绳水平拖动换观察对象）
@@ -89,12 +89,12 @@ export const transverseWaveScene: LabScene = {
       const x = X0 + i * GAP
       const y = BASE_Y - dispAt(i, st, params) * PX_PER_M
       if (i === st.obs) continue
-      ctx.set(`p${i}`, 'circle', { cx: x, cy: y, r: 4, fill: '#64748b' })
+      ctx.set(`p${i}`, 'circle', { cx: x, cy: y, r: 4, fill: C.muted })
     }
     const ox = X0 + st.obs * GAP
     const oy = BASE_Y - dispAt(st.obs, st, params) * PX_PER_M
     ctx.remove(`p${st.obs}`)
-    const obsEl = ctx.set('obs', 'circle', { cx: ox, cy: oy, r: 8, fill: '#ef4444', stroke: '#991b1b', 'stroke-width': 2 })
+    const obsEl = ctx.set('obs', 'circle', { cx: ox, cy: oy, r: 8, fill: C.gravity, stroke: C.redInk, 'stroke-width': 2 })
     ctx.drag(obsEl, (p) => {
       st.obs = clamp(Math.round((p.x - X0) / GAP), 1, N - 1)
       st.trace = []

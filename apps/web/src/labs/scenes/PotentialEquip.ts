@@ -78,13 +78,13 @@ export const potentialScene: LabScene = {
     }
 
     // 源电荷
-    ctx.set('src', 'circle', { cx: CENTER.x, cy: CENTER.y, r: 16, fill: '#ef4444', stroke: '#b91c1c', 'stroke-width': 2 })
-    ctx.set('src-t', 'text', { x: CENTER.x, y: CENTER.y + 5, 'font-size': 14, 'text-anchor': 'middle', fill: '#fff', text: '+' })
+    ctx.set('src', 'circle', { cx: CENTER.x, cy: CENTER.y, r: 16, fill: C.gravity, stroke: C.redDeep, 'stroke-width': 2 })
+    ctx.set('src-t', 'text', { x: CENTER.x, y: CENTER.y + 5, 'font-size': 14, 'text-anchor': 'middle', fill: C.dash, text: '+' })
     ctx.set('src-l', 'text', { x: CENTER.x, y: CENTER.y + 32, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: 'Q=4μC' })
 
     // 试探电荷（拖动：guide=1 时锁定到最近的等势面）
-    const tc = ctx.set('tc', 'circle', { cx: st.pos.x, cy: st.pos.y, r: 12, fill: params.qt >= 0 ? '#f59e0b' : '#0ea5e9', stroke: params.qt >= 0 ? '#b45309' : '#0284c7', 'stroke-width': 2 })
-    ctx.set('tc-t', 'text', { x: st.pos.x, y: st.pos.y + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: params.qt >= 0 ? '+' : '−' })
+    const tc = ctx.set('tc', 'circle', { cx: st.pos.x, cy: st.pos.y, r: 12, fill: params.qt >= 0 ? C.amber : C.sky, stroke: params.qt >= 0 ? C.amberDeep : C.skyDeep, 'stroke-width': 2 })
+    ctx.set('tc-t', 'text', { x: st.pos.x, y: st.pos.y + 4, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: params.qt >= 0 ? '+' : '−' })
     ctx.drag(
       tc,
       (p) => {
@@ -116,7 +116,7 @@ export const potentialScene: LabScene = {
       const sgn = params.qt >= 0 ? 1 : -1
       const from = st.pos
       drawArrow(ctx, 'fF', from, add(from, { x: sgn * u.x * F * k, y: sgn * u.y * F * k }), { color: C.field, label: `F=${fmt(F, 2)}N` })
-      if (opts.showPoints) ctx.set('dot-t', 'circle', { cx: st.pos.x, cy: st.pos.y, r: 2.5, fill: '#111827' })
+      if (opts.showPoints) ctx.set('dot-t', 'circle', { cx: st.pos.x, cy: st.pos.y, r: 2.5, fill: C.inkStrong })
       else ctx.remove('dot-t')
     } else {
       ctx.remove('fF', 'fF-head', 'fF-label', 'dot-t')

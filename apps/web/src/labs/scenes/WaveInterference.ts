@@ -95,7 +95,7 @@ export const waveInterferenceScene: LabScene = {
         if (st.destructive[idx]) {
           ctx.set(`d${idx}`, 'circle', { cx: x, cy: y, r: 2.4, fill: C.warn, 'fill-opacity': 0.35 })
         } else if (st.dotOn[idx]) {
-          ctx.set(`d${idx}`, 'circle', { cx: x, cy: y, r: 2.4, fill: '#10b981', 'fill-opacity': 0.28 })
+          ctx.set(`d${idx}`, 'circle', { cx: x, cy: y, r: 2.4, fill: C.tension, 'fill-opacity': 0.28 })
         } else {
           ctx.remove(`d${idx}`)
         }
@@ -130,8 +130,8 @@ export const waveInterferenceScene: LabScene = {
     const nearHalf = Math.min(Math.abs(kk - 0.5), Math.abs(kk - 1.5), Math.abs(kk - 2.5)) < 0.18
     const probeEl = ctx.set('probe', 'circle', {
       cx: p.x, cy: p.y, r: 8,
-      fill: nearInt ? '#10b981' : nearHalf ? C.warn : '#94a3b8',
-      stroke: '#fff', 'stroke-width': 2,
+      fill: nearInt ? C.tension : nearHalf ? C.warn : C.faint,
+      stroke: C.dash, 'stroke-width': 2,
     })
     ctx.drag(probeEl, (pt) => {
       st.probe = { x: clamp(pt.x, 10, ctx.w - 10), y: clamp(pt.y, 10, ctx.h - 10) }
@@ -139,7 +139,7 @@ export const waveInterferenceScene: LabScene = {
     })
     ctx.set('probe-l', 'text', {
       x: p.x + 12, y: p.y - 10, 'font-size': 13, 'font-weight': 600,
-      fill: nearInt ? '#10b981' : nearHalf ? C.warn : 'currentColor',
+      fill: nearInt ? C.tension : nearHalf ? C.warn : 'currentColor',
       text: nearInt ? `加强（Δr≈${fmt(kk, 2)}λ）` : nearHalf ? `减弱（Δr≈${fmt(kk, 2)}λ）` : `介于强弱之间（Δr/λ=${fmt(kk, 2)}）`,
     })
     // 探测点到两源的距离虚线
@@ -149,7 +149,7 @@ export const waveInterferenceScene: LabScene = {
     // —— 波源（可拖改间距）——
     for (let s = 0; s < 2; s++) {
       const sx = s === 0 ? st.s1x : st.s2x
-      const el = ctx.set(`s${s}`, 'circle', { cx: sx, cy: S1_BASE.y, r: 10, fill: '#4f46e5', stroke: '#312e81', 'stroke-width': 2 })
+      const el = ctx.set(`s${s}`, 'circle', { cx: sx, cy: S1_BASE.y, r: 10, fill: C.accentDeep, stroke: C.indigoDeep, 'stroke-width': 2 })
       ctx.drag(el, (pt) => {
         const half = Math.abs(pt.x - cxp)
         ctx.setParam('d', clamp(Math.round(half * 2 / 4) * 4, 40, 240))
@@ -158,7 +158,7 @@ export const waveInterferenceScene: LabScene = {
       ctx.set(`s${s}-l`, 'text', { x: sx, y: S1_BASE.y + 26, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: `S${s + 1}` })
     }
 
-    ctx.set('legend', 'text', { x: 40, y: ctx.h - 16, 'font-size': 13, fill: '#10b981', 'fill-opacity': 0.8, text: '● 绿点：加强区（Δr=nλ）　● 红点：减弱区（Δr=(n+½)λ）' })
+    ctx.set('legend', 'text', { x: 40, y: ctx.h - 16, 'font-size': 13, fill: C.tension, 'fill-opacity': 0.8, text: '● 绿点：加强区（Δr=nλ）　● 红点：减弱区（Δr=(n+½)λ）' })
     ctx.set('tip', 'text', { x: 40, y: 26, 'font-size': 13, fill: C.warn, text: '拖白边探测点判断加强/减弱；拖波源改间距 d' })
 
     data['源间距 d'] = `${fmt(params.d, 0)} px`

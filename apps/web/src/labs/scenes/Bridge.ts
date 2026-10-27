@@ -115,9 +115,9 @@ export const bridgeScene: LabScene = {
       pts.push(`${X.toFixed(1)},${Y.toFixed(1)}`)
     }
     if (convex) {
-      ctx.set('arc', 'path', { d: `M${pts.join(' L')}`, fill: 'none', stroke: '#64748b', 'stroke-width': 6 })
-      ctx.set('ground-l', 'rect', { x: 20, y: CENTER.y + R_PX * Math.sin(A0) - 4, width: CENTER.x + R_PX * Math.cos(A0) - 14, height: 8, fill: '#94a3b8' })
-      ctx.set('ground-r', 'rect', { x: CENTER.x + R_PX * Math.cos(A1) + 6, y: CENTER.y + R_PX * Math.sin(A1) - 4, width: 620 - (CENTER.x + R_PX * Math.cos(A1)), height: 8, fill: '#94a3b8' })
+      ctx.set('arc', 'path', { d: `M${pts.join(' L')}`, fill: 'none', stroke: C.muted, 'stroke-width': 6 })
+      ctx.set('ground-l', 'rect', { x: 20, y: CENTER.y + R_PX * Math.sin(A0) - 4, width: CENTER.x + R_PX * Math.cos(A0) - 14, height: 8, fill: C.faint })
+      ctx.set('ground-r', 'rect', { x: CENTER.x + R_PX * Math.cos(A1) + 6, y: CENTER.y + R_PX * Math.sin(A1) - 4, width: 620 - (CENTER.x + R_PX * Math.cos(A1)), height: 8, fill: C.faint })
     } else {
       // 凹桥：画一段下凹弧（圆心在上方屏幕外，用倒置弧近似）
       const pts2: string[] = []
@@ -127,9 +127,9 @@ export const bridgeScene: LabScene = {
         const Y = 250 + 90 * Math.sin(Math.PI * t) // 下凹：中间低
         pts2.push(`${X.toFixed(1)},${Y.toFixed(1)}`)
       }
-      ctx.set('arc', 'path', { d: `M${pts2.join(' L')}`, fill: 'none', stroke: '#64748b', 'stroke-width': 6 })
-      ctx.set('ground-l', 'rect', { x: 20, y: 246, width: 66, height: 8, fill: '#94a3b8' })
-      ctx.set('ground-r', 'rect', { x: 554, y: 246, width: 66, height: 8, fill: '#94a3b8' })
+      ctx.set('arc', 'path', { d: `M${pts2.join(' L')}`, fill: 'none', stroke: C.muted, 'stroke-width': 6 })
+      ctx.set('ground-l', 'rect', { x: 20, y: 246, width: 66, height: 8, fill: C.faint })
+      ctx.set('ground-r', 'rect', { x: 554, y: 246, width: 66, height: 8, fill: C.faint })
     }
 
     // 车位置：桥上用弧坐标，飞车后用抛体坐标
@@ -168,10 +168,10 @@ export const bridgeScene: LabScene = {
       ang = (Math.atan2(tang.y, tang.x) * 180) / Math.PI
     }
     const tf = `translate(${carP.x},${carP.y - 10}) rotate(${carAir ? ang : convex ? ang : ang * 0.4})`
-    const carBody = ctx.set('car-body', 'rect', { x: -24, y: -16, width: 48, height: 18, rx: 5, fill: '#4f46e5', stroke: '#312e81', 'stroke-width': 2, transform: tf })
-    ctx.set('car-top', 'rect', { x: -14, y: -26, width: 26, height: 12, rx: 4, fill: '#818cf8', stroke: '#312e81', 'stroke-width': 1.5, transform: tf })
-    ctx.set('car-w1', 'circle', { cx: -13, cy: 4, r: 5, fill: '#1e293b', transform: tf })
-    ctx.set('car-w2', 'circle', { cx: 13, cy: 4, r: 5, fill: '#1e293b', transform: tf })
+    const carBody = ctx.set('car-body', 'rect', { x: -24, y: -16, width: 48, height: 18, rx: 5, fill: C.accentDeep, stroke: C.indigoDeep, 'stroke-width': 2, transform: tf })
+    ctx.set('car-top', 'rect', { x: -14, y: -26, width: 26, height: 12, rx: 4, fill: C.indigoLight, stroke: C.indigoDeep, 'stroke-width': 1.5, transform: tf })
+    ctx.set('car-w1', 'circle', { cx: -13, cy: 4, r: 5, fill: C.navy, transform: tf })
+    ctx.set('car-w2', 'circle', { cx: 13, cy: 4, r: 5, fill: C.navy, transform: tf })
     ctx.remove('car')
     // 车可拖（拖车身沿弧摆放；飞行中拖拽恢复到桥面）
     ctx.drag(carBody, (p) => {

@@ -173,6 +173,7 @@ export const FIGURE_TEMPLATES = [
   'bridge', // 拱桥/凹桥上的车
   'field_region', // 匀强场区（点电荷/粒子入射）
   'bowl', // 半球形碗 + 绳系碗沿 + 球在碗内壁
+  'bowl2balls', // 半球形碗内两等大球（球心连线水平、相互接触）
   'incline_baffle', // 斜面 + 竖直挡板 + 小球
   'ring_ball', // 光滑圆环 + 天花板 O 点绳吊小球
   'three_ropes', // 三绳结点 O（水平/斜右上/竖直挂重物）
@@ -269,7 +270,7 @@ export const VARIANT_SYSTEM_PROMPT = `你是一名高中物理命题专家。针
 
 输出 JSON 结构：
 [{"stem": "题干", "answer": "答案", "solution": "解析", "pitfall": "易错点提示", "knowledge_points": ["知识点"], "difficulty": 3, "qtype": "计算", "figure_spec": {"template": "模板名", "params": {}}}]
-其中 qtype 从：选择、填空、实验、计算 中选；figure_spec 可省略；template 可选：incline（斜面滑块）、flatblock（水平地面滑块）、pulley（定滑轮连接体）、hang（悬挂小球）、circuit（简单电路）、projectile（平抛）、container2balls（圆柱容器两球）、spring（弹簧连接）、bridge（拱桥/凹桥）、field_region（匀强场区/点电荷）、bowl（半球碗+绳系碗沿）、incline_baffle（斜面+竖直挡板）、ring_ball（圆环+绳吊小球）、three_ropes（三绳结点）、rod_hinge（直杆+铰链+水平绳）。`
+其中 qtype 从：选择、填空、实验、计算 中选；figure_spec 可省略；template 可选：incline（斜面滑块）、flatblock（水平地面滑块）、pulley（定滑轮连接体）、hang（悬挂小球）、circuit（简单电路）、projectile（平抛）、container2balls（圆柱容器两球）、spring（弹簧连接）、bridge（拱桥/凹桥）、field_region（匀强场区/点电荷）、bowl（半球碗+绳系碗沿）、bowl2balls（半球碗内两等大球）、incline_baffle（斜面+竖直挡板）、ring_ball（圆环+绳吊小球）、three_ropes（三绳结点）、rod_hinge（直杆+铰链+水平绳）。`
 
 // ---------- P1：AI 出题器 / 分层练习 / 家长阶段报告 ----------
 
@@ -309,6 +310,7 @@ template 可选模板及 params 说明：
 - bridge：桥上的车（kind 填 convex（拱桥）或 concave（凹桥）、R 半径（m）、label）
 - field_region：匀强场区/点电荷（kind 填 uniform 或 point、charge 可选 +q/-q、label）
 - bowl：光滑半球形碗（angle 球与碗心连线偏离竖直方向角（度）、R 半径（m）、label）
+- bowl2balls：光滑半球形碗内两等大球并排相互接触（球心连线水平）（angle 球与碗心连线偏离竖直方向角（度）、R 碗半径（m）、r 球半径（m）、label1、label2）
 - incline_baffle：斜面+竖直挡板+小球（angle 斜面倾角（度）、label）
 - ring_ball：光滑圆环+天花板 O 点绳吊小球在环上（angle 小球相对环最高点方位角（度）、R 半径（m）、d 为 O 到环心距文字标注）
 - three_ropes：三绳结点 O（OA 水平向左、OB 斜右上与竖直夹角 angle（度）、OC 竖直向下挂重物 G）
@@ -337,7 +339,7 @@ export const TIERED_SYSTEM_PROMPT = `你是一名高中物理命题专家。针�
 输出 JSON 结构：
 {"基础": [同变式题结构], "巩固": [同上], "拔尖": [同上]}
 每题结构：{"stem": "题干", "answer": "答案", "solution": "解析", "pitfall": "易错点", "knowledge_points": ["知识点"], "difficulty": 2, "qtype": "计算", "figure_spec": {"template": "模板名", "params": {}}}
-figure_spec 的 template 可选：incline、flatblock、pulley、hang、circuit、projectile、container2balls、spring、bridge、field_region、bowl、incline_baffle、ring_ball、three_ropes、rod_hinge；params 数值一律国际单位制（角度用度）。`
+figure_spec 的 template 可选：incline、flatblock、pulley、hang、circuit、projectile、container2balls、spring、bridge、field_region、bowl、bowl2balls、incline_baffle、ring_ball、three_ropes、rod_hinge；params 数值一律国际单位制（角度用度）。`
 
 export type TieredResult = { '基础': QuizDraft[]; '巩固': QuizDraft[]; '拔尖': QuizDraft[] }
 

@@ -124,7 +124,7 @@ export const brownianScene: LabScene = {
     }
 
     // 花粉颗粒（大颗粒，可拖动摆放）
-    const pl = ctx.set('pollen', 'circle', { cx: st.pollen.x, cy: st.pollen.y, r: 15, fill: '#f59e0b', stroke: '#b45309', 'stroke-width': 2 })
+    const pl = ctx.set('pollen', 'circle', { cx: st.pollen.x, cy: st.pollen.y, r: 15, fill: C.amber, stroke: C.amberDeep, 'stroke-width': 2 })
     ctx.drag(pl, (p) => {
       st.pollen.x = clamp(p.x, BOX.x + 18, BOX.x + BOX.w - 18)
       st.pollen.y = clamp(p.y, BOX.y + 18, BOX.y + BOX.h - 18)

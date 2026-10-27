@@ -111,9 +111,9 @@ export const dopplerScene: LabScene = {
     ctx.set('obs-l', 'text', { x: OBS.x, y: TRACK_Y + 34, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: '观察者' })
 
     // 波源（小车）
-    ctx.set('src', 'rect', { x: st.sx - 16, y: TRACK_Y - 12, width: 32, height: 18, rx: 4, fill: '#4f46e5' })
-    ctx.set('src-w1', 'circle', { cx: st.sx - 9, cy: TRACK_Y + 7, r: 4, fill: '#334155' })
-    ctx.set('src-w2', 'circle', { cx: st.sx + 9, cy: TRACK_Y + 7, r: 4, fill: '#334155' })
+    ctx.set('src', 'rect', { x: st.sx - 16, y: TRACK_Y - 12, width: 32, height: 18, rx: 4, fill: C.accentDeep })
+    ctx.set('src-w1', 'circle', { cx: st.sx - 9, cy: TRACK_Y + 7, r: 4, fill: C.ink })
+    ctx.set('src-w2', 'circle', { cx: st.sx + 9, cy: TRACK_Y + 7, r: 4, fill: C.ink })
     ctx.set('src-l', 'text', { x: st.sx, y: TRACK_Y - 22, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: `vs=${fmt(params.vs, 0)}` })
 
     // 轨道

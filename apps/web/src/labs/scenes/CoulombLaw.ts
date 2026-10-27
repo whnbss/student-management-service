@@ -78,11 +78,11 @@ export const coulombScene: LabScene = {
     // 两个点电荷（q2 可水平拖动改 r）
     const sign1 = params.q1 >= 0
     const sign2 = params.q2 >= 0
-    const c1 = ctx.set('q1', 'circle', { cx: X1, cy: AXIS_Y, r: 22, fill: sign1 ? '#ef4444' : '#3b82f6', stroke: sign1 ? '#b91c1c' : '#1d4ed8', 'stroke-width': 2 })
-    ctx.set('q1-t', 'text', { x: X1, y: AXIS_Y + 5, 'font-size': 15, 'text-anchor': 'middle', fill: '#fff', text: sign1 ? '+' : '−' })
+    const c1 = ctx.set('q1', 'circle', { cx: X1, cy: AXIS_Y, r: 22, fill: sign1 ? C.gravity : C.normal, stroke: sign1 ? C.redDeep : C.blueDeep, 'stroke-width': 2 })
+    ctx.set('q1-t', 'text', { x: X1, y: AXIS_Y + 5, 'font-size': 15, 'text-anchor': 'middle', fill: C.dash, text: sign1 ? '+' : '−' })
     ctx.set('q1-l', 'text', { x: X1, y: AXIS_Y - 34, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', text: `q₁=${fmt(params.q1, 1)}μC` })
-    const c2 = ctx.set('q2', 'circle', { cx: X2, cy: AXIS_Y, r: 22, fill: sign2 ? '#ef4444' : '#3b82f6', stroke: sign2 ? '#b91c1c' : '#1d4ed8', 'stroke-width': 2 })
-    ctx.set('q2-t', 'text', { x: X2, y: AXIS_Y + 5, 'font-size': 15, 'text-anchor': 'middle', fill: '#fff', text: sign2 ? '+' : '−' })
+    const c2 = ctx.set('q2', 'circle', { cx: X2, cy: AXIS_Y, r: 22, fill: sign2 ? C.gravity : C.normal, stroke: sign2 ? C.redDeep : C.blueDeep, 'stroke-width': 2 })
+    ctx.set('q2-t', 'text', { x: X2, y: AXIS_Y + 5, 'font-size': 15, 'text-anchor': 'middle', fill: C.dash, text: sign2 ? '+' : '−' })
     ctx.set('q2-l', 'text', { x: X2, y: AXIS_Y - 34, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', text: `q₂=${fmt(params.q2, 1)}μC` })
     ctx.drag(c2, (p) => {
       const cm = clamp((p.x - X1) / PX_PER_CM, 4, 34)
@@ -101,8 +101,8 @@ export const coulombScene: LabScene = {
       const p2 = v(X2, AXIS_Y)
       drawArrow(ctx, 'f2', p2, add(p2, v(-dir * F * k, 0)), { color: C.field, label: `F'=${fmt(F, 2)}N` })
       if (opts.showPoints) {
-        ctx.set('dot1', 'circle', { cx: X1, cy: AXIS_Y, r: 3, fill: '#111827' })
-        ctx.set('dot2', 'circle', { cx: X2, cy: AXIS_Y, r: 3, fill: '#111827' })
+        ctx.set('dot1', 'circle', { cx: X1, cy: AXIS_Y, r: 3, fill: C.inkStrong })
+        ctx.set('dot2', 'circle', { cx: X2, cy: AXIS_Y, r: 3, fill: C.inkStrong })
       } else ctx.remove('dot1', 'dot2')
     } else {
       ctx.remove('f1', 'f1-head', 'f1-label', 'f2', 'f2-head', 'f2-label', 'dot1', 'dot2')

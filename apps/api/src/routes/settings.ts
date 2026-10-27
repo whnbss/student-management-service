@@ -2,6 +2,7 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import { db, getSetting, setSetting, UPLOADS_DIR, DB_PATH } from '../db'
 
 export default async function settingsRoutes(app: FastifyInstance) {
@@ -12,10 +13,19 @@ export default async function settingsRoutes(app: FastifyInstance) {
       const pkg = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '../../package.json'), 'utf8'))
       version = String(pkg.version || '')
     } catch { /* 版本读取失败不阻塞 */ }
+    // 局域网 IPv4（给「分享链接」拼接手机可打开的地址用）
+    let lan = '127.0.0.1'
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const it of list || []) {
+        if (it.family === 'IPv4' && !it.internal) { lan = it.address; break }
+      }
+      if (lan !== '127.0.0.1') break
+    }
     return {
       version,
       node: process.version,
       port: Number(getSetting('port')) || 3210,
+      lan,
       data_dir: path.dirname(DB_PATH),
       uploads_dir: UPLOADS_DIR,
       platform: `${process.platform} ${process.arch}`,

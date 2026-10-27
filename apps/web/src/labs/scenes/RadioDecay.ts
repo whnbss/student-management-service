@@ -77,7 +77,7 @@ export const radioDecayScene: LabScene = {
       const x = ORIGIN_X + (i % GRID_COLS) * CELL
       const y = ORIGIN_Y + Math.floor(i / GRID_COLS) * CELL
       if (st.alive[i]) {
-        ctx.set(`n${i}`, 'circle', { cx: x, cy: y, r: 5.5, fill: '#4f46e5' })
+        ctx.set(`n${i}`, 'circle', { cx: x, cy: y, r: 5.5, fill: C.accentDeep })
         ctx.remove(`nd${i}`, `nf${i}`)
       } else {
         ctx.set(`nd${i}`, 'circle', { cx: x, cy: y, r: 5.5, fill: 'none', stroke: 'currentColor', 'stroke-opacity': 0.25, 'stroke-width': 1.2 })

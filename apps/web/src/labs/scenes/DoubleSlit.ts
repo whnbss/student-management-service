@@ -71,7 +71,7 @@ export const doubleSlitScene: LabScene = {
     const rgbStr = `rgb(${r},${g},${b})`
 
     // —— 激光器 + 到双缝的平行光 ——
-    ctx.set('laser', 'rect', { x: 40, y: SLIT_Y - 40, width: 60, height: 80, rx: 6, fill: '#334155' })
+    ctx.set('laser', 'rect', { x: 40, y: SLIT_Y - 40, width: 60, height: 80, rx: 6, fill: C.ink })
     ctx.set('laser-t', 'text', { x: 70, y: SLIT_Y + 60, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: '激光' })
     for (let i = 0; i < 5; i++) {
       const y = SLIT_Y - 24 + i * 12
@@ -100,7 +100,7 @@ export const doubleSlitScene: LabScene = {
     }
 
     // —— 屏与条纹（参数变化时重算，平时只贴缓存）——
-    ctx.set('screen', 'rect', { x: SCREEN_X, y: 60, width: 10, height: 340, fill: '#1e293b', rx: 2 })
+    ctx.set('screen', 'rect', { x: SCREEN_X, y: 60, width: 10, height: 340, fill: C.lead2, rx: 2 })
     const key = `${params.lam}|${params.d}|${params.L}`
     const stripH = 300
     if (key !== st.cacheKey) {

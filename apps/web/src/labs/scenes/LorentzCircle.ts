@@ -133,8 +133,8 @@ export const lorentzScene: LabScene = {
 
     // 粒子（拖拽改半径 → 反推 B / v，保持物理自洽）
     const isNeg = q < 0
-    const particle = ctx.set('p', 'circle', { cx: px2, cy: py2, r: 9, fill: isNeg ? '#0ea5e9' : '#f59e0b', stroke: isNeg ? '#0284c7' : '#b45309', 'stroke-width': 2 })
-    ctx.set('p-t', 'text', { x: px2, y: py2 + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: isNeg ? '−' : '+' })
+    const particle = ctx.set('p', 'circle', { cx: px2, cy: py2, r: 9, fill: isNeg ? C.sky : C.amber, stroke: isNeg ? C.skyDeep : C.amberDeep, 'stroke-width': 2 })
+    ctx.set('p-t', 'text', { x: px2, y: py2 + 4, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: isNeg ? '−' : '+' })
     ctx.drag(particle, (p2) => {
       const d = Math.hypot(p2.x - CENTER.x, p2.y - CENTER.y)
       const rNew = clamp(d / PX_PER_M, 0.01, 5)
@@ -161,7 +161,7 @@ export const lorentzScene: LabScene = {
       drawArrow(ctx, 'fv', pC, { x: pC.x + tang.x * 40, y: pC.y + tang.y * 40 }, { color: C.tension, label: `v=${fmt(params.v, 1)}×10⁶` })
       const toC = { x: (CENTER.x - px2) / (Rpx || 1), y: (CENTER.y - py2) / (Rpx || 1) }
       drawArrow(ctx, 'fF', pC, { x: pC.x + toC.x * F * kF * 0.5, y: pC.y + toC.y * F * kF * 0.5 }, { color: C.field, label: 'F=qvB' })
-      if (opts.showPoints) ctx.set('dot-p', 'circle', { cx: px2, cy: py2, r: 2.5, fill: '#111827' })
+      if (opts.showPoints) ctx.set('dot-p', 'circle', { cx: px2, cy: py2, r: 2.5, fill: C.inkStrong })
       else ctx.remove('dot-p')
     } else {
       ctx.remove('fv', 'fv-head', 'fv-label', 'fF', 'fF-head', 'fF-label', 'dot-p')

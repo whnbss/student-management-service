@@ -95,11 +95,11 @@ export const lenzScene: LabScene = {
 
     // 导线：线圈 → 灵敏电流计
     const gY = 360
-    ctx.set('wire1', 'path', { d: `M${COIL_X - 26},240 C${COIL_X - 40},320 360,${gY} 330,${gY}`, fill: 'none', stroke: '#334155', 'stroke-width': 2 })
-    ctx.set('wire2', 'path', { d: `M${COIL_X + 26},240 C${COIL_X + 40},320 470,${gY} 440,${gY}`, fill: 'none', stroke: '#334155', 'stroke-width': 2 })
+    ctx.set('wire1', 'path', { d: `M${COIL_X - 26},240 C${COIL_X - 40},320 360,${gY} 330,${gY}`, fill: 'none', stroke: C.ink, 'stroke-width': 2 })
+    ctx.set('wire2', 'path', { d: `M${COIL_X + 26},240 C${COIL_X + 40},320 470,${gY} 440,${gY}`, fill: 'none', stroke: C.ink, 'stroke-width': 2 })
 
     // 灵敏电流计
-    ctx.set('meter', 'rect', { x: 300, y: gY - 34, width: 170, height: 52, rx: 10, fill: '#f8fafc', stroke: '#64748b', 'stroke-width': 2 })
+    ctx.set('meter', 'rect', { x: 300, y: gY - 34, width: 170, height: 52, rx: 10, fill: C.paper, stroke: C.muted, 'stroke-width': 2 })
     ctx.set('meter-l', 'text', { x: 385, y: gY - 20, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: '灵敏电流计（G）' })
     // 表盘刻度
     ctx.set('meter-axis', 'line', { x1: 330, y1: gY, x2: 440, y2: gY, stroke: 'currentColor', 'stroke-opacity': 0.3 })
@@ -108,13 +108,13 @@ export const lenzScene: LabScene = {
     }
     // 指针（围绕枢轴 385,gY 摆动）
     const ang = (st.needle * Math.PI) / 180
-    ctx.set('needle', 'line', { x1: 385, y1: gY, x2: 385 + Math.sin(ang) * 26, y2: gY - Math.cos(ang) * 26, stroke: '#dc2626', 'stroke-width': 2.5, 'stroke-linecap': 'round' })
+    ctx.set('needle', 'line', { x1: 385, y1: gY, x2: 385 + Math.sin(ang) * 26, y2: gY - Math.cos(ang) * 26, stroke: C.warn, 'stroke-width': 2.5, 'stroke-linecap': 'round' })
 
     // 线圈（多匝椭圆，右侧竖直）
     for (let i = 0; i < 4; i++) {
-      ctx.set(`coil${i}`, 'ellipse', { cx: COIL_X, cy: 210, rx: 26 + i * 2, ry: 92 - i * 3, fill: 'none', stroke: '#b45309', 'stroke-width': 2.2, 'stroke-opacity': 0.85 })
+      ctx.set(`coil${i}`, 'ellipse', { cx: COIL_X, cy: 210, rx: 26 + i * 2, ry: 92 - i * 3, fill: 'none', stroke: C.amberDeep, 'stroke-width': 2.2, 'stroke-opacity': 0.85 })
     }
-    ctx.set('coil-l', 'text', { x: COIL_X, y: 320, 'font-size': 13, 'text-anchor': 'middle', fill: '#b45309', text: `N=${params.N} 匝` })
+    ctx.set('coil-l', 'text', { x: COIL_X, y: 320, 'font-size': 13, 'text-anchor': 'middle', fill: C.amberDeep, text: `N=${params.N} 匝` })
 
     // 线圈上的感应电流方向箭头（顺/逆时针：屏幕上取上缘箭头方向表示）
     if (st.currDir !== 0) {
@@ -122,12 +122,12 @@ export const lenzScene: LabScene = {
       const dirRight = st.currDir > 0 // 顺时针：上缘向右
       const x1 = COIL_X - 20
       const x2 = COIL_X + 20
-      ctx.set('curr-arrow', 'line', { x1, y1: topY, x2: x2, y2: topY, stroke: '#059669', 'stroke-width': 3 })
+      ctx.set('curr-arrow', 'line', { x1, y1: topY, x2: x2, y2: topY, stroke: C.greenDeep, 'stroke-width': 3 })
       ctx.set('curr-head', 'polygon', {
         points: dirRight ? `${x2 + 8},${topY} ${x2 - 8},${topY - 5} ${x2 - 8},${topY + 5}` : `${x1 - 8},${topY} ${x1 + 8},${topY - 5} ${x1 + 8},${topY + 5}`,
-        fill: '#059669',
+        fill: C.greenDeep,
       })
-      ctx.set('curr-l', 'text', { x: COIL_X, y: topY - 10, 'font-size': 13, 'text-anchor': 'middle', fill: '#059669', text: st.currDir > 0 ? '感应电流（顺时针）' : '感应电流（逆时针）' })
+      ctx.set('curr-l', 'text', { x: COIL_X, y: topY - 10, 'font-size': 13, 'text-anchor': 'middle', fill: C.greenDeep, text: st.currDir > 0 ? '感应电流（顺时针）' : '感应电流（逆时针）' })
     } else {
       ctx.remove('curr-arrow', 'curr-head', 'curr-l')
     }
@@ -135,10 +135,10 @@ export const lenzScene: LabScene = {
     // 条形磁铁（N 红右端 / S 蓝左端，可拖）
     const mw = 130
     const mx = st.magX
-    ctx.set('mag-n', 'rect', { x: mx - mw / 2 + mw / 2, y: MAG_Y - 16, width: mw / 2, height: 32, fill: '#ef4444', rx: 4 })
-    ctx.set('mag-s', 'rect', { x: mx - mw / 2, y: MAG_Y - 16, width: mw / 2, height: 32, fill: '#3b82f6', rx: 4 })
-    ctx.set('mag-n-t', 'text', { x: mx + mw / 4, y: MAG_Y + 5, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: 'N' })
-    ctx.set('mag-s-t', 'text', { x: mx - mw / 4, y: MAG_Y + 5, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: 'S' })
+    ctx.set('mag-n', 'rect', { x: mx - mw / 2 + mw / 2, y: MAG_Y - 16, width: mw / 2, height: 32, fill: C.gravity, rx: 4 })
+    ctx.set('mag-s', 'rect', { x: mx - mw / 2, y: MAG_Y - 16, width: mw / 2, height: 32, fill: C.normal, rx: 4 })
+    ctx.set('mag-n-t', 'text', { x: mx + mw / 4, y: MAG_Y + 5, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: 'N' })
+    ctx.set('mag-s-t', 'text', { x: mx - mw / 4, y: MAG_Y + 5, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: 'S' })
     const magHit = ctx.set('mag-hit', 'rect', { x: mx - mw / 2, y: MAG_Y - 30, width: mw, height: 60, fill: 'transparent' })
     ctx.drag(magHit, (p) => {
       st.auto = false

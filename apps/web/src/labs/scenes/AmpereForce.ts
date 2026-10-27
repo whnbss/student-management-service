@@ -110,14 +110,14 @@ export const ampereScene: LabScene = {
     ctx.set('b-label', 'text', { x: 90, y: 122, 'font-size': 13, fill: C.field, text: `B=${fmt(params.B, 2)}T ${params.bDir === 0 ? '⊗（向里）' : '⊙（向外）'}` })
 
     // 导轨
-    ctx.set('rail-t', 'line', { x1: 100, y1: RAIL_Y - 26, x2: 560, y2: RAIL_Y - 26, stroke: '#94a3b8', 'stroke-width': 5 })
-    ctx.set('rail-b', 'line', { x1: 100, y1: RAIL_Y + 26, x2: 560, y2: RAIL_Y + 26, stroke: '#94a3b8', 'stroke-width': 5 })
+    ctx.set('rail-t', 'line', { x1: 100, y1: RAIL_Y - 26, x2: 560, y2: RAIL_Y - 26, stroke: C.faint, 'stroke-width': 5 })
+    ctx.set('rail-b', 'line', { x1: 100, y1: RAIL_Y + 26, x2: 560, y2: RAIL_Y + 26, stroke: C.faint, 'stroke-width': 5 })
     ctx.set('rail-l', 'text', { x: 100, y: RAIL_Y + 46, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.5, text: '导轨（间距 0.4m）' })
 
     // 导线（随运动平移，红色竖杆）
     const wx = (WIRE_X0 + WIRE_X1) / 2 + st.x * PX_PER_M
-    const wire = ctx.set('wire', 'line', { x1: wx, y1: RAIL_Y - 26, x2: wx, y2: RAIL_Y + 26, stroke: '#dc2626', 'stroke-width': 6, 'stroke-linecap': 'round' })
-    ctx.set('wire-l', 'text', { x: wx, y: RAIL_Y - 36, 'font-size': 13, 'text-anchor': 'middle', fill: '#dc2626', text: params.iDir === 0 ? 'I→' : '←I' })
+    const wire = ctx.set('wire', 'line', { x1: wx, y1: RAIL_Y - 26, x2: wx, y2: RAIL_Y + 26, stroke: C.warn, 'stroke-width': 6, 'stroke-linecap': 'round' })
+    ctx.set('wire-l', 'text', { x: wx, y: RAIL_Y - 36, 'font-size': 13, 'text-anchor': 'middle', fill: C.warn, text: params.iDir === 0 ? 'I→' : '←I' })
     ctx.drag(wire, () => {
       // 拖导线 = 归零位置（演示准备）
       st.x = 0
@@ -132,7 +132,7 @@ export const ampereScene: LabScene = {
       const k = 90 / Math.max(F, 1e-6)
       const p = { x: wx, y: RAIL_Y }
       drawArrow(ctx, 'fF', p, { x: p.x, y: p.y + dirY * F * k }, { color: C.field, label: `F=BIL=${fmt(F, 2)}N` })
-      if (opts.showPoints) ctx.set('dot-w', 'circle', { cx: wx, cy: RAIL_Y, r: 3, fill: '#111827' })
+      if (opts.showPoints) ctx.set('dot-w', 'circle', { cx: wx, cy: RAIL_Y, r: 3, fill: C.inkStrong })
       else ctx.remove('dot-w')
     } else {
       ctx.remove('fF', 'fF-head', 'fF-label', 'dot-w')

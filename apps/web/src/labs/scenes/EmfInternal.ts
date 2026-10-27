@@ -58,7 +58,7 @@ export const emfScene: LabScene = {
     const eta = R / (R + r)
 
     // —— 电路图 ——
-    const wire = '#334155'
+    const wire = C.ink
     const bx = 110
     const by = 300
     ctx.set('w-left', 'line', { x1: bx, y1: by, x2: 80, y2: by, stroke: wire, 'stroke-width': 2 })
@@ -70,7 +70,7 @@ export const emfScene: LabScene = {
     ctx.set('bat', 'line', { x1: bx, y1: by - 18, x2: bx, y2: by + 18, stroke: wire, 'stroke-width': 3 })
     ctx.set('bat2', 'line', { x1: bx + 12, y1: by - 9, x2: bx + 12, y2: by + 9, stroke: wire, 'stroke-width': 7 })
     ctx.set('bat-l', 'text', { x: bx + 26, y: by + 4, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.7, text: `E=${EMF}V` })
-    ctx.set('rint', 'rect', { x: bx - 18, y: by + 40, width: 36, height: 14, fill: '#e2e8f0', stroke: '#64748b' })
+    ctx.set('rint', 'rect', { x: bx - 18, y: by + 40, width: 36, height: 14, fill: C.line2, stroke: C.muted })
     ctx.set('rint-l', 'text', { x: bx + 26, y: by + 52, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.55, text: `r=${fmt(r, 1)}Ω` })
     ctx.set('rint-w1', 'line', { x1: bx, y1: by, x2: bx, y2: by + 40, stroke: wire, 'stroke-width': 2 })
     ctx.set('rint-w2', 'line', { x1: bx, y1: by + 54, x2: bx, y2: by + 70, stroke: wire, 'stroke-width': 2 })
@@ -81,8 +81,8 @@ export const emfScene: LabScene = {
     const rx = 520
     const rh = clamp(30 + (R / 20) * 110, 30, 150)
     const ry = 210 - rh / 2
-    const rBody = ctx.set('r-body', 'rect', { x: rx - 12, y: ry, width: 24, height: rh, fill: '#fbbf24', stroke: '#b45309', rx: 4, 'fill-opacity': 0.9 })
-    ctx.set('r-l', 'text', { x: rx + 24, y: 208, 'font-size': 13, fill: '#b45309', text: `R=${fmt(R, 1)}Ω` })
+    const rBody = ctx.set('r-body', 'rect', { x: rx - 12, y: ry, width: 24, height: rh, fill: C.amberLight, stroke: C.amberDeep, rx: 4, 'fill-opacity': 0.9 })
+    ctx.set('r-l', 'text', { x: rx + 24, y: 208, 'font-size': 13, fill: C.amberDeep, text: `R=${fmt(R, 1)}Ω` })
     ctx.drag(rBody, (p) => {
       // 纵向拖动改 R（越往上越大）
       const ratio = clamp(1 - (p.y - 120) / 180, 0, 1)
@@ -90,13 +90,13 @@ export const emfScene: LabScene = {
       ctx.requestRender()
     })
     // 电压表（并联在 R 两端，读数 = U）
-    ctx.set('volt', 'circle', { cx: 570, cy: 210, r: 22, fill: '#fff', stroke: '#64748b', 'stroke-width': 2 })
-    ctx.set('volt-t', 'text', { x: 570, y: 214, 'font-size': 13, 'text-anchor': 'middle', fill: '#0f172a', text: `${fmt(U, 2)}V` })
+    ctx.set('volt', 'circle', { cx: 570, cy: 210, r: 22, fill: C.surface, stroke: C.muted, 'stroke-width': 2 })
+    ctx.set('volt-t', 'text', { x: 570, y: 214, 'font-size': 13, 'text-anchor': 'middle', fill: C.net, text: `${fmt(U, 2)}V` })
     ctx.set('volt-w1', 'line', { x1: rx + 12, y1: 150, x2: 570, y2: 192, stroke: wire, 'stroke-width': 1.2 })
     ctx.set('volt-w2', 'line', { x1: rx + 12, y1: 270, x2: 570, y2: 228, stroke: wire, 'stroke-width': 1.2 })
     // 电流表（串联，读数 = I）
-    ctx.set('amp', 'circle', { cx: 300, cy: 110, r: 18, fill: '#fff', stroke: '#64748b', 'stroke-width': 2 })
-    ctx.set('amp-t', 'text', { x: 300, y: 114, 'font-size': 13, 'text-anchor': 'middle', fill: '#0f172a', text: `${fmt(I, 2)}A` })
+    ctx.set('amp', 'circle', { cx: 300, cy: 110, r: 18, fill: C.surface, stroke: C.muted, 'stroke-width': 2 })
+    ctx.set('amp-t', 'text', { x: 300, y: 114, 'font-size': 13, 'text-anchor': 'middle', fill: C.net, text: `${fmt(I, 2)}A` })
 
     // 提示（R=r 最大功率标注）
     const atMax = Math.abs(R - r) < 0.06

@@ -100,8 +100,8 @@ export const combinedScene: LabScene = {
     }
 
     // 加速区
-    ctx.set('acc-t', 'rect', { x: ACCEL_X0, y: 110, width: 6, height: 200, fill: '#8b5cf6' })
-    ctx.set('acc-b', 'rect', { x: ACCEL_X1, y: 110, width: 6, height: 200, fill: '#8b5cf6' })
+    ctx.set('acc-t', 'rect', { x: ACCEL_X0, y: 110, width: 6, height: 200, fill: C.field })
+    ctx.set('acc-b', 'rect', { x: ACCEL_X1, y: 110, width: 6, height: 200, fill: C.field })
     ctx.set('acc-l', 'text', { x: (ACCEL_X0 + ACCEL_X1) / 2, y: 100, 'font-size': 13, 'text-anchor': 'middle', fill: C.field, text: `加速 U=${fmt(params.U, 0)}V` })
     ctx.set('acc-l2', 'text', { x: (ACCEL_X0 + ACCEL_X1) / 2, y: 330, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: '＋/−' })
     // 磁场区
@@ -125,7 +125,7 @@ export const combinedScene: LabScene = {
     const idxNow = Math.min(Math.floor(st.s / 4), st.pts.length - 1)
     if (st.pts.length > 2 && idxNow >= 0) {
       const [pX, pY] = st.pts[idxNow]
-      ctx.set('p', 'circle', { cx: pX, cy: pY, r: 6, fill: '#f59e0b', stroke: '#b45309' })
+      ctx.set('p', 'circle', { cx: pX, cy: pY, r: 6, fill: C.amber, stroke: C.amberDeep })
       if (opts.showForces) {
         const pC = { x: pX, y: pY }
         if (pX >= B_X0) {
@@ -143,7 +143,7 @@ export const combinedScene: LabScene = {
 
     // 半圆出射时的回出口标注
     if (halfCircle) {
-      ctx.set('half-l', 'text', { x: B_X0 + 12, y: 380, 'font-size': 13, fill: '#059669', text: 'W ≥ r：粒子转半圆从入射侧下方射回（速度大小不变）' })
+      ctx.set('half-l', 'text', { x: B_X0 + 12, y: 380, 'font-size': 13, fill: C.greenDeep, text: 'W ≥ r：粒子转半圆从入射侧下方射回（速度大小不变）' })
     } else {
       ctx.remove('half-l')
     }

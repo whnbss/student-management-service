@@ -18,24 +18,24 @@ interface Reaction {
 const REACTIONS: Reaction[] = [
   {
     // 氘核 2.0141u + 氚 3.0160u → 氦4 4.0026u + 中子 1.0087u
-    before: [{ label: '²H 氘', r: 24, color: '#3b82f6' }, { label: '³H 氚', r: 28, color: '#8b5cf6' }],
-    after: [{ label: '⁴He', r: 32, color: '#10b981' }, { label: 'n', r: 16, color: '#64748b' }],
+    before: [{ label: '²H 氘', r: 24, color: C.normal }, { label: '³H 氚', r: 28, color: C.field }],
+    after: [{ label: '⁴He', r: 32, color: C.tension }, { label: 'n', r: 16, color: C.muted }],
     dm: 2.0141 + 3.016 - 4.0026 - 1.0087,
     productA: 4,
     note: '太阳与氢弹的能量来源：轻核聚变，单位质量放能最多',
   },
   {
     // U-235 + n → Ba-141 + Kr-92 + 3n（一种典型裂变方式）
-    before: [{ label: '²³⁵U', r: 40, color: '#ef4444' }, { label: 'n', r: 16, color: '#64748b' }],
-    after: [{ label: '¹⁴¹Ba', r: 34, color: '#f59e0b' }, { label: '⁹²Kr', r: 30, color: '#3b82f6' }, { label: '3n', r: 16, color: '#64748b' }],
+    before: [{ label: '²³⁵U', r: 40, color: C.gravity }, { label: 'n', r: 16, color: C.muted }],
+    after: [{ label: '¹⁴¹Ba', r: 34, color: C.amber }, { label: '⁹²Kr', r: 30, color: C.normal }, { label: '3n', r: 16, color: C.muted }],
     dm: 235.0439 + 1.0087 - 140.9144 - 91.9262 - 3 * 1.0087,
     productA: 141,
     note: '核电站链式反应：重核分裂，释放约 200 MeV 量级',
   },
   {
     // Ra-226 → Rn-222 + α（镭的 α 衰变）
-    before: [{ label: '²²⁶Ra', r: 38, color: '#ef4444' }],
-    after: [{ label: '²²²Rn', r: 35, color: '#3b82f6' }, { label: 'α ⁴He', r: 20, color: '#10b981' }],
+    before: [{ label: '²²⁶Ra', r: 38, color: C.gravity }],
+    after: [{ label: '²²²Rn', r: 35, color: C.normal }, { label: 'α ⁴He', r: 20, color: C.tension }],
     dm: 226.0254 - 222.0176 - 4.0026,
     productA: 222,
     note: '天然放射性：α 衰变释放氦核，半衰期 1600 年',
@@ -100,7 +100,7 @@ export const nuclearEnergyScene: LabScene = {
     let x = 60
     r.before.forEach((p, i) => {
       ctx.set(`b${i}`, 'circle', { cx: x + p.r, cy: midY, r: p.r, fill: p.color, 'fill-opacity': 0.85 })
-      ctx.set(`b${i}-l`, 'text', { x: x + p.r, y: midY + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: p.label })
+      ctx.set(`b${i}-l`, 'text', { x: x + p.r, y: midY + 4, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: p.label })
       x += p.r * 2 + 16
     })
     // 反应箭头
@@ -111,7 +111,7 @@ export const nuclearEnergyScene: LabScene = {
     x += 120
     r.after.forEach((p, i) => {
       ctx.set(`a${i}`, 'circle', { cx: x + p.r, cy: midY, r: p.r, fill: p.color, 'fill-opacity': 0.85 })
-      ctx.set(`a${i}-l`, 'text', { x: x + p.r, y: midY + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: p.label })
+      ctx.set(`a${i}-l`, 'text', { x: x + p.r, y: midY + 4, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: p.label })
       x += p.r * 2 + 16
     })
 
@@ -142,8 +142,8 @@ export const nuclearEnergyScene: LabScene = {
       ctx.gset('g-pt', 'circle', { cx: px, cy: py, r: 5, fill: C.warn })
       ctx.gset('g-pt-l', 'text', { x: px + 6, y: py - 6, 'font-size': 13, fill: C.warn, text: `A=${r.productA}` })
       // Fe-56 峰值参考
-      ctx.gset('g-fe', 'circle', { cx: gx(box, 0, 250, 56), cy: gy(box, 0, 10, 8.8), r: 3, fill: '#10b981' })
-      ctx.gset('g-fe-l', 'text', { x: gx(box, 0, 250, 56) + 5, y: gy(box, 0, 10, 8.8) - 8, 'font-size': 13, fill: '#10b981', text: '⁵⁶Fe 最稳定' })
+      ctx.gset('g-fe', 'circle', { cx: gx(box, 0, 250, 56), cy: gy(box, 0, 10, 8.8), r: 3, fill: C.tension })
+      ctx.gset('g-fe-l', 'text', { x: gx(box, 0, 250, 56) + 5, y: gy(box, 0, 10, 8.8) - 8, 'font-size': 13, fill: C.tension, text: '⁵⁶Fe 最稳定' })
     }
 
     data['反应类型'] = ['轻核聚变', '重核裂变', 'α衰变'][params.mode] ?? '—'

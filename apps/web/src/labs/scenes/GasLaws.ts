@@ -128,10 +128,10 @@ export const gasLawsScene: LabScene = {
     ctx.set('cyl-b', 'rect', { x: CYL.x - 6, y: CYL.y + CYL.hMax, width: CYL.w + 12, height: 8, fill: 'currentColor', 'fill-opacity': 0.4 })
 
     // 气体区域淡蓝底
-    ctx.set('gas', 'rect', { x: CYL.x + 1.5, y: pistonY, width: CYL.w - 3, height: CYL.y + CYL.hMax - pistonY, fill: '#38bdf8', 'fill-opacity': 0.12 })
+    ctx.set('gas', 'rect', { x: CYL.x + 1.5, y: pistonY, width: CYL.w - 3, height: CYL.y + CYL.hMax - pistonY, fill: C.skyLight, 'fill-opacity': 0.12 })
 
     // 活塞（等温模式可上下拖动 → 改 V）
-    const piston = ctx.set('piston', 'rect', { x: CYL.x - 4, y: pistonY - 10, width: CYL.w + 8, height: 10, fill: '#94a3b8', rx: 2 })
+    const piston = ctx.set('piston', 'rect', { x: CYL.x - 4, y: pistonY - 10, width: CYL.w + 8, height: 10, fill: C.faint, rx: 2 })
     if (params.mode === 0) {
       ctx.drag(piston, (pt) => {
         const v = clamp(((pt.y - CYL.y) / CYL.hMax) * 2.8, 0.5, 2.8)

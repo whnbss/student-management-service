@@ -133,7 +133,7 @@ export const bohrAtomScene: LabScene = {
     // 电子（当前能级上，可竖直拖到任意能级）
     const ex = LEVEL_X0 + 60
     const ey = LEVEL_Y(st.n)
-    const eEl = ctx.set('electron', 'circle', { cx: ex, cy: ey, r: 9, fill: C.accent, stroke: '#312e81', 'stroke-width': 2 })
+    const eEl = ctx.set('electron', 'circle', { cx: ex, cy: ey, r: 9, fill: C.accent, stroke: C.indigoDeep, 'stroke-width': 2 })
     ctx.drag(eEl, (p) => {
       const nn = clamp(Math.round((p.y - LEVEL_Y(1)) / 62) + 1, 1, N_LEVELS)
       if (nn !== Math.round(st.n)) {
@@ -147,7 +147,7 @@ export const bohrAtomScene: LabScene = {
     // 光子（波浪线飞行）
     const dE = Math.abs(-13.6 / (from * from) - -13.6 / (to * to))
     const lam = dE > 0.01 ? 1240 / dE : Infinity
-    const color = lam >= 380 && lam <= 780 ? visibleRGB(lam) : lam < 380 ? '#7c3aed' : '#94a3b8'
+    const color = lam >= 380 && lam <= 780 ? visibleRGB(lam) : lam < 380 ? C.violetDeep : C.faint
     if (st.phase === 1) {
       const py = (LEVEL_Y(from) + LEVEL_Y(to)) / 2
       const x0 = st.photonX

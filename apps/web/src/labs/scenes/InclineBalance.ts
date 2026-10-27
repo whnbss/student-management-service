@@ -91,7 +91,7 @@ export const inclineScene: LabScene = {
     // 斜面三角形
     ctx.set('tri', 'polygon', {
       points: `${A.x},${A.y} ${B.x},${B.y} ${top.x},${top.y}`,
-      fill: '#c7d2fe', 'fill-opacity': 0.35, stroke: C.accent, 'stroke-width': 2,
+      fill: C.fill, 'fill-opacity': 0.35, stroke: C.accent, 'stroke-width': 2,
     })
     ctx.set('ground', 'line', {
       x1: 30, y1: A.y, x2: 610, y2: A.y, stroke: 'currentColor', 'stroke-opacity': 0.5, 'stroke-width': 1.5,
@@ -104,7 +104,7 @@ export const inclineScene: LabScene = {
 
     // 斜面端点拖拽：改倾角
     const grip = ctx.set('theta-grip', 'circle', {
-      cx: top.x, cy: top.y, r: 10, fill: '#fff', stroke: C.accent, 'stroke-width': 2.5,
+      cx: top.x, cy: top.y, r: 10, fill: C.surface, stroke: C.accent, 'stroke-width': 2.5,
     })
     ctx.set('theta-grip-hint', 'text', { x: top.x + 14, y: top.y - 8, 'font-size': 13, fill: C.accent, text: `拖我调角度 θ=${fmt(theta, 0)}°` })
     ctx.drag(grip, (p) => {
@@ -133,9 +133,9 @@ export const inclineScene: LabScene = {
     ctx.set('block', 'g', {})
     const rect = ctx.set('block-rect', 'rect', {
       x: pos.x - 26, y: pos.y - 24, width: 52, height: 44,
-      fill: '#4f46e5', 'fill-opacity': 0.9, rx: 6,
+      fill: C.accentDeep, 'fill-opacity': 0.9, rx: 6,
       transform: `rotate(${angDeg} ${pos.x} ${pos.y})`,
-      stroke: '#312e81',
+      stroke: C.indigoDeep,
     })
     // 触摸热区放大（透明大圆）
     const hit = ctx.set('block-hit', 'circle', { cx: pos.x, cy: pos.y, r: 34, fill: 'transparent' })
@@ -182,7 +182,7 @@ export const inclineScene: LabScene = {
         ctx.remove('fG1', 'fG1-head', 'fG1-label', 'fG2', 'fG2-head', 'fG2-label', 'comp-label')
       }
       if (opts.showPoints) {
-        ctx.set('dot-center', 'circle', { cx: center.x, cy: center.y, r: 4, fill: '#111827' })
+        ctx.set('dot-center', 'circle', { cx: center.x, cy: center.y, r: 4, fill: C.inkStrong })
       } else {
         ctx.remove('dot-center')
       }
@@ -196,7 +196,7 @@ export const inclineScene: LabScene = {
       : willSlide
         ? `tanθ=${fmt(tanTheta, 2)} > μ=${fmt(params.mu, 2)} → 将滑动（滑动模式 a=${fmt(G * (Math.sin(t) - params.mu * Math.cos(t)), 2)} m/s²）`
         : `tanθ=${fmt(tanTheta, 2)} ≤ μ=${fmt(params.mu, 2)} → 保持静止`
-    ctx.set('hint', 'text', { x: 30, y: 30, 'font-size': 14, fill: willSlide ? C.warn : '#059669', text: hint })
+    ctx.set('hint', 'text', { x: 30, y: 30, 'font-size': 14, fill: willSlide ? C.warn : C.greenDeep, text: hint })
     if (st.slipped) {
       ctx.set('slipped', 'text', { x: 30, y: 52, 'font-size': 13, fill: C.warn, text: '已滑到底，点「重置」重新演示' })
     } else {

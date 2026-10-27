@@ -128,6 +128,17 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   cost REAL NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS shares (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL DEFAULT 'parent_report',
+  student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  title TEXT NOT NULL DEFAULT '',
+  payload TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_shares_token ON shares(token);
 `)
 
 // ---------- settings 读写 ----------

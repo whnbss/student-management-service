@@ -100,9 +100,9 @@ export const photoelectricScene: LabScene = {
     // 光电管（加大）
     ctx.set('tube', 'rect', { x: CATHODE_X - 14, y: TUBE_Y - 90, width: ANODE_X - CATHODE_X + 28, height: 180, rx: 18, fill: 'none', stroke: 'currentColor', 'stroke-opacity': 0.4, 'stroke-width': 2 })
     // 阴极（左板）/阳极（右板）
-    ctx.set('cath', 'rect', { x: CATHODE_X - 10, y: TUBE_Y - 75, width: 8, height: 150, fill: '#64748b' })
+    ctx.set('cath', 'rect', { x: CATHODE_X - 10, y: TUBE_Y - 75, width: 8, height: 150, fill: C.muted })
     ctx.set('cath-l', 'text', { x: CATHODE_X - 6, y: TUBE_Y + 92, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: '阴极' })
-    ctx.set('anode', 'rect', { x: ANODE_X + 2, y: TUBE_Y - 75, width: 8, height: 150, fill: '#64748b' })
+    ctx.set('anode', 'rect', { x: ANODE_X + 2, y: TUBE_Y - 75, width: 8, height: 150, fill: C.muted })
     ctx.set('anode-l', 'text', { x: ANODE_X + 6, y: TUBE_Y + 92, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: '阳极' })
 
     // 光源（左）：波长决定颜色 + 波纹箭头（波纹间距加大，不挤成一团）
@@ -140,7 +140,7 @@ export const photoelectricScene: LabScene = {
 
     // 提示
     ctx.set('tip', 'text', {
-      x: 60, y: 46, 'font-size': 13, fill: emitting ? '#10b981' : C.warn,
+      x: 60, y: 46, 'font-size': 13, fill: emitting ? C.tension : C.warn,
       text: emitting
         ? `✓ 发生光电效应：E光=${fmt(eV, 2)}eV > W₀=${fmt(W0, 1)}eV`
         : `✗ 不能逸出：E光=${fmt(eV, 2)}eV ≤ W₀=${fmt(W0, 1)}eV（加大光强也没用！）`,

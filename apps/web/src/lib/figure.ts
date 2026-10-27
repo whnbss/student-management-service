@@ -347,6 +347,48 @@ function tBowl(p: FigureSpec['params']): string {
   return wrap(inner)
 }
 
+// 半球形碗内两等大球：球心连线水平且相互接触（共点力平衡经典情境）
+// 几何自洽绘制：sinθ = r/(R−r)，θ 为球心与碗心连线偏离竖直方向的角；球绘制半径按比例推导
+function tBowl2balls(p: FigureSpec['params']): string {
+  const angle = Math.min(75, Math.max(5, num(p.angle, 30)))
+  const R = num(p.R, NaN)
+  const r = num(p.r, NaN)
+  const l1 = str(p.label1, 'm')
+  const l2 = str(p.label2, 'm')
+  const cx = 200, cy = 70 // 碗心
+  const Rr = 92 // 碗绘制半径
+  const rad = (angle * Math.PI) / 180
+  // 由 sinθ = br/(Rr−br) 反推球绘制半径，保证球既贴碗壁又相互接触
+  const br = (Rr * Math.sin(rad)) / (1 + Math.sin(rad))
+  const d = Rr - br // 球心到碗心距离
+  const bx1 = cx - d * Math.sin(rad), bx2 = cx + d * Math.sin(rad)
+  const by = cy + d * Math.cos(rad) // 两球心等高（球心连线水平）
+  const inner =
+    // 半球碗（下半圆，碗沿在 cy）
+    `<path d="M ${cx - Rr} ${cy} A ${Rr} ${Rr} 0 0 0 ${cx + Rr} ${cy}" fill="#eef2ff" stroke="${INK}" stroke-width="2.5"/>` +
+    // 地面与斜纹
+    `<line x1="70" y1="${cy + 4}" x2="330" y2="${cy + 4}" stroke="${INK}" stroke-width="2"/>` +
+    [0, 1, 2, 3, 4, 5, 6].map((i) => `<line x1="${82 + i * 36}" y1="${cy + 14}" x2="${92 + i * 36}" y2="${cy + 4}" stroke="#94a3b8" stroke-width="1.5"/>`).join('') +
+    // 两球（球心连线水平、相切于竖直轴）
+    `<circle cx="${bx1}" cy="${by}" r="${br}" fill="#c7d2fe" stroke="${INK}" stroke-width="2"/>` +
+    `<circle cx="${bx2}" cy="${by}" r="${br}" fill="#fde68a" stroke="${INK}" stroke-width="2"/>` +
+    txt(bx1, by + 5, l1, 14) +
+    txt(bx2, by + 5, l2, 14) +
+    // 球心连线（水平虚线）+ 球心标记
+    `<line x1="${bx1}" y1="${by}" x2="${bx2}" y2="${by}" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5 4"/>` +
+    `<circle cx="${bx1}" cy="${by}" r="2" fill="${INK}"/><circle cx="${bx2}" cy="${by}" r="2" fill="${INK}"/>` +
+    `<circle cx="${cx}" cy="${cy}" r="2" fill="${INK}"/>` +
+    txt(cx + 8, cy - 6, 'O', 13, '#64748b', 'start') +
+    // 角度弧（球心-碗心连线与竖直方向）
+    `<path d="M ${cx} ${cy + 44} A 44 44 0 0 1 ${cx + 44 * Math.sin(rad)} ${cy + 44 * Math.cos(rad)}" fill="none" stroke="${RED}" stroke-width="1.5"/>` +
+    txt(cx + 60, cy + 56, angleLabel(p.angle, angle), 13, RED) +
+    // 半径标注（碗心 → 左球心虚线延伸省略，仅标数值）
+    (Number.isFinite(R) && Number.isFinite(r)
+      ? txt(cx, cy + Rr + 34, `R=${R}m（碗）· r=${r}m（球）`, 13, '#64748b')
+      : txt(cx, cy + Rr + 34, '半球形碗（光滑）', 13, '#64748b'))
+  return wrap(inner)
+}
+
 // 斜面 + 竖直挡板 + 小球：angle 斜面倾角（度）、label
 function tInclineBaffle(p: FigureSpec['params']): string {
   const angle = Math.min(70, Math.max(10, num(p.angle, 30)))
@@ -485,6 +527,7 @@ const TEMPLATES: Record<string, (p: FigureSpec['params']) => string> = {
   bridge: tBridge,
   field_region: tFieldRegion,
   bowl: tBowl,
+  bowl2balls: tBowl2balls,
   incline_baffle: tInclineBaffle,
   ring_ball: tRingBall,
   three_ropes: tThreeRopes,

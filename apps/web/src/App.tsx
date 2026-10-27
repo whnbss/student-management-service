@@ -13,6 +13,7 @@ import Labs from '@/pages/Labs'
 import LabDetail from '@/pages/LabDetail'
 import Bank from '@/pages/Bank'
 import Stats from '@/pages/Stats'
+import ShareReport from '@/pages/ShareReport'
 import Placeholder from '@/pages/Placeholder'
 void Placeholder // 暂留：M3 题库/讲义占位时复用
 
@@ -25,6 +26,8 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 // 使用 data router（createBrowserRouter）：Settings 页的 useBlocker 未保存拦截依赖它
 const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
+  // 只读分享页（家长 H5 报告）：凭随机 token 访问，不走登录
+  { path: '/share/:token', element: <ShareReport /> },
   {
     path: '/',
     element: (

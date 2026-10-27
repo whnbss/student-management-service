@@ -117,7 +117,7 @@ export const elevatorScene: LabScene = {
 
     // 轿厢
     const cy = st.y
-    const cab = ctx.set('cab', 'rect', { x: SHAFT_L + 6, y: cy, width: SHAFT_R - SHAFT_L - 12, height: CAB_H, rx: 6, fill: '#c7d2fe', 'fill-opacity': 0.6, stroke: C.accent, 'stroke-width': 2 })
+    const cab = ctx.set('cab', 'rect', { x: SHAFT_L + 6, y: cy, width: SHAFT_R - SHAFT_L - 12, height: CAB_H, rx: 6, fill: C.fill, 'fill-opacity': 0.6, stroke: C.accent, 'stroke-width': 2 })
     ctx.drag(cab, (p) => {
       // 直接拖轿厢上下摆放（暂停时用于摆放位置）
       st.y = clamp(p.y - CAB_H / 2, TOP, FLOOR - CAB_H)
@@ -127,19 +127,19 @@ export const elevatorScene: LabScene = {
       ctx.requestRender()
     })
     // 轿厢顶部的「体重计大屏」（像电梯楼层屏，靠右放，不与 N 箭头标签重叠）
-    ctx.set('scale-screen-bg', 'rect', { x: SHAFT_R - 116, y: cy + 4, width: 110, height: 22, rx: 4, fill: '#0f172a' })
-    ctx.set('scale-screen', 'text', { x: SHAFT_R - 61, y: cy + 20, 'font-size': 16, 'text-anchor': 'middle', fill: '#7dd3fc', text: `${fmt(F, 0)} N` })
+    ctx.set('scale-screen-bg', 'rect', { x: SHAFT_R - 116, y: cy + 4, width: 110, height: 22, rx: 4, fill: C.lead })
+    ctx.set('scale-screen', 'text', { x: SHAFT_R - 61, y: cy + 20, 'font-size': 16, 'text-anchor': 'middle', fill: C.skyLighter, text: `${fmt(F, 0)} N` })
 
     // 体重计（轿厢底部）+ 人站在秤上
-    ctx.set('scale', 'rect', { x: SHAFT_L + 40, y: cy + CAB_H - 14, width: 70, height: 10, rx: 3, fill: '#1e293b' })
+    ctx.set('scale', 'rect', { x: SHAFT_L + 40, y: cy + CAB_H - 14, width: 70, height: 10, rx: 3, fill: C.lead2 })
     const px = SHAFT_L + 75
-    ctx.set('p-head', 'circle', { cx: px, cy: cy + CAB_H - 42, r: 10, fill: '#fbbf24' })
-    ctx.set('p-body', 'line', { x1: px, y1: cy + CAB_H - 32, x2: px, y2: cy + CAB_H - 14, stroke: '#fbbf24', 'stroke-width': 5, 'stroke-linecap': 'round' })
+    ctx.set('p-head', 'circle', { cx: px, cy: cy + CAB_H - 42, r: 10, fill: C.amberLight })
+    ctx.set('p-body', 'line', { x1: px, y1: cy + CAB_H - 32, x2: px, y2: cy + CAB_H - 14, stroke: C.amberLight, 'stroke-width': 5, 'stroke-linecap': 'round' })
 
     // a 控制柄（井道右侧：拖 ↕ 改加速度大小）
     const gripX = SHAFT_R + 60
     const gripY = 230 - params.a * 15
-    const grip = ctx.set('a-grip', 'circle', { cx: gripX, cy: gripY, r: 14, fill: '#fff', stroke: C.field, 'stroke-width': 3 })
+    const grip = ctx.set('a-grip', 'circle', { cx: gripX, cy: gripY, r: 14, fill: C.surface, stroke: C.field, 'stroke-width': 3 })
     ctx.set('a-grip-t', 'text', { x: gripX, y: gripY + 4, 'font-size': 13, 'text-anchor': 'middle', fill: C.field, text: 'a' })
     ctx.set('a-axis', 'line', { x1: gripX, y1: 80, x2: gripX, y2: 380, stroke: 'currentColor', 'stroke-opacity': 0.2, 'stroke-dasharray': '4 4' })
     ctx.set('a-label', 'text', { x: gripX, y: 60, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: `拖我调 a（当前 ${fmt(params.a, 1)} m/s²）` })
@@ -149,7 +149,7 @@ export const elevatorScene: LabScene = {
 
     // 状态徽标（按当前实际加速度）
     let badge = ''
-    let color = '#059669'
+    let color = C.greenDeep
     if (st.phase === 2) {
       badge = st.stoppedBy === 'top' ? '已到顶端（已停止）' : st.stoppedBy === 'bottom' ? '已到底端（已停止）' : '行程结束（已停止）'
     } else if (Math.abs(aEff + G) < 0.3) {
@@ -160,7 +160,7 @@ export const elevatorScene: LabScene = {
       color = C.warn
     } else if (aEff < -0.05) {
       badge = '失重（a < 0，视重 < 实重）'
-      color = '#2563eb'
+      color = C.blue
     } else {
       badge = '平衡（a = 0，视重 = 实重）'
     }
@@ -178,7 +178,7 @@ export const elevatorScene: LabScene = {
       // 加速度方向箭头（紫色，画在轿厢外侧右缘）
       if (Math.abs(aEff) > 0.05) drawArrow(ctx, 'fa', v(SHAFT_R - 10, cy + 45), add(v(SHAFT_R - 10, cy + 45), v(0, -clamp(aEff * 6, -40, 40))), { color: C.field, label: 'a' })
       else ctx.remove('fa', 'fa-head', 'fa-label')
-      if (opts.showPoints) ctx.set('dot', 'circle', { cx: personC.x, cy: personC.y, r: 4, fill: '#111827' })
+      if (opts.showPoints) ctx.set('dot', 'circle', { cx: personC.x, cy: personC.y, r: 4, fill: C.inkStrong })
       else ctx.remove('dot')
     } else {
       ctx.remove('fG', 'fG-head', 'fG-label', 'fN', 'fN-head', 'fN-label', 'fa', 'fa-head', 'fa-label', 'dot')

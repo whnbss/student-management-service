@@ -113,9 +113,9 @@ export const catchUpScene: LabScene = {
     const sx = (worldM: number) => START_X + worldM * PX_PER_M - cam
 
     // 路面（全宽）+ 每 10m 一个标尺刻度（随镜头滚动，学生可读位移）
-    ctx.set('road', 'rect', { x: 40, y: ROAD_Y + 16, width: 560, height: 10, fill: '#94a3b8', rx: 3 })
+    ctx.set('road', 'rect', { x: 40, y: ROAD_Y + 16, width: 560, height: 10, fill: C.faint, rx: 3 })
     for (let i = 0; i < 14; i++) {
-      ctx.set(`dash${i}`, 'line', { x1: 50 + i * 40, y1: ROAD_Y + 21, x2: 66 + i * 40, y2: ROAD_Y + 21, stroke: '#fff', 'stroke-opacity': 0.5, 'stroke-width': 2 })
+      ctx.set(`dash${i}`, 'line', { x1: 50 + i * 40, y1: ROAD_Y + 21, x2: 66 + i * 40, y2: ROAD_Y + 21, stroke: C.dash, 'stroke-opacity': 0.5, 'stroke-width': 2 })
     }
     const firstTick = Math.floor(cam / PX_PER_M / 10) * 10
     for (let m = firstTick; m <= firstTick + 130; m += 10) {
@@ -138,11 +138,11 @@ export const catchUpScene: LabScene = {
     const bx = sx(st.xB)
     const LANE_A = ROAD_Y - 2 // A 车道（下）
     const LANE_B = ROAD_Y - 30 // B 车道（上）
-    ctx.set('lane-dash', 'line', { x1: 40, y1: ROAD_Y - 16, x2: 600, y2: ROAD_Y - 16, stroke: '#fff', 'stroke-opacity': 0.35, 'stroke-width': 1.5, 'stroke-dasharray': '8 8' })
-    ctx.set('carA', 'rect', { x: ax - CAR_W / 2, y: LANE_A, width: CAR_W, height: CAR_H, rx: 4, fill: C.accent, stroke: '#3730a3', 'stroke-width': 1.5 })
-    ctx.set('carA-t', 'text', { x: ax, y: LANE_A + 11.5, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: 'A' })
-    const carB = ctx.set('carB', 'rect', { x: bx - CAR_W / 2, y: LANE_B, width: CAR_W, height: CAR_H, rx: 4, fill: C.normal, stroke: '#1d4ed8', 'stroke-width': 1.5 })
-    ctx.set('carB-t', 'text', { x: bx, y: LANE_B + 11.5, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: 'B' })
+    ctx.set('lane-dash', 'line', { x1: 40, y1: ROAD_Y - 16, x2: 600, y2: ROAD_Y - 16, stroke: C.dash, 'stroke-opacity': 0.35, 'stroke-width': 1.5, 'stroke-dasharray': '8 8' })
+    ctx.set('carA', 'rect', { x: ax - CAR_W / 2, y: LANE_A, width: CAR_W, height: CAR_H, rx: 4, fill: C.accent, stroke: C.indigo800, 'stroke-width': 1.5 })
+    ctx.set('carA-t', 'text', { x: ax, y: LANE_A + 11.5, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: 'A' })
+    const carB = ctx.set('carB', 'rect', { x: bx - CAR_W / 2, y: LANE_B, width: CAR_W, height: CAR_H, rx: 4, fill: C.normal, stroke: C.blueDeep, 'stroke-width': 1.5 })
+    ctx.set('carB-t', 'text', { x: bx, y: LANE_B + 11.5, 'font-size': 13, 'text-anchor': 'middle', fill: C.dash, text: 'B' })
     ctx.drag(carB, (p) => {
       if ((st.t ?? 0) > 0) return
       const d = clamp((p.x - START_X + cam) / PX_PER_M, 0, 60)

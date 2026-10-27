@@ -116,10 +116,10 @@ export const powerScene: LabScene = {
 
     if (params.mode === 0) {
       // —— 功的定义：斜向上拉物块 ——
-      ctx.set('ground', 'rect', { x: 40, y: GROUND_Y + 26, width: 560, height: 8, fill: '#94a3b8', rx: 2 })
+      ctx.set('ground', 'rect', { x: 40, y: GROUND_Y + 26, width: 560, height: 8, fill: C.faint, rx: 2 })
       const bx = START_X + st.x * PX_PER_M
       const bw = 64
-      const block = ctx.set('block', 'rect', { x: bx - bw / 2, y: GROUND_Y - 16, width: bw, height: 42, rx: 6, fill: '#4f46e5', stroke: '#312e81', 'stroke-width': 2 })
+      const block = ctx.set('block', 'rect', { x: bx - bw / 2, y: GROUND_Y - 16, width: bw, height: 42, rx: 6, fill: C.accentDeep, stroke: C.indigoDeep, 'stroke-width': 2 })
       ctx.drag(block, (p) => {
         st.x = clamp((p.x - START_X) / PX_PER_M, 0, 24)
         ctx.requestRender()
@@ -129,7 +129,7 @@ export const powerScene: LabScene = {
       const rad = (params.alpha * Math.PI) / 180
       const tip = add(c, { x: params.F * 1.6 * Math.cos(rad), y: -params.F * 1.6 * Math.sin(rad) })
       drawArrow(ctx, 'fPull', c, tip, { color: C.tension, label: `F=${fmt(params.F, 0)}N ∠${params.alpha}°` })
-      const tipEl = ctx.set('ftip', 'circle', { cx: tip.x, cy: tip.y, r: 10, fill: '#fff', 'fill-opacity': 0.95, stroke: C.tension, 'stroke-width': 2 })
+      const tipEl = ctx.set('ftip', 'circle', { cx: tip.x, cy: tip.y, r: 10, fill: C.surface, 'fill-opacity': 0.95, stroke: C.tension, 'stroke-width': 2 })
       ctx.drag(tipEl, (p) => {
         const dx = clamp(p.x - c.x, 8, 320)
         const dy = c.y - p.y
@@ -155,12 +155,12 @@ export const powerScene: LabScene = {
     }
 
     // —— 机车启动 ——
-    ctx.set('road', 'rect', { x: 40, y: GROUND_Y + 16, width: 560, height: 10, fill: '#94a3b8', rx: 3 })
+    ctx.set('road', 'rect', { x: 40, y: GROUND_Y + 16, width: 560, height: 10, fill: C.faint, rx: 3 })
     const bx = START_X + st.x * PX_PER_M
-    ctx.set('car-body', 'rect', { x: bx - 30, y: GROUND_Y - 20, width: 60, height: 20, rx: 5, fill: '#4f46e5', stroke: '#312e81', 'stroke-width': 2 })
-    ctx.set('car-chim', 'rect', { x: bx + 12, y: GROUND_Y - 32, width: 8, height: 14, fill: '#312e81' })
-    ctx.set('car-w1', 'circle', { cx: bx - 16, cy: GROUND_Y + 2, r: 7, fill: '#1e293b' })
-    ctx.set('car-w2', 'circle', { cx: bx + 16, cy: GROUND_Y + 2, r: 7, fill: '#1e293b' })
+    ctx.set('car-body', 'rect', { x: bx - 30, y: GROUND_Y - 20, width: 60, height: 20, rx: 5, fill: C.accentDeep, stroke: C.indigoDeep, 'stroke-width': 2 })
+    ctx.set('car-chim', 'rect', { x: bx + 12, y: GROUND_Y - 32, width: 8, height: 14, fill: C.indigoDeep })
+    ctx.set('car-w1', 'circle', { cx: bx - 16, cy: GROUND_Y + 2, r: 7, fill: C.navy })
+    ctx.set('car-w2', 'circle', { cx: bx + 16, cy: GROUND_Y + 2, r: 7, fill: C.navy })
 
     const vMax = P / params.f
     const vSwitch = P / params.F0
