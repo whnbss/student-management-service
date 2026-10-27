@@ -63,7 +63,7 @@ export const potentialScene: LabScene = {
       const R = phiToR(PHI_LEVELS[i])
       ctx.set(`eq${i}`, 'circle', { cx: CENTER.x, cy: CENTER.y, r: R, fill: 'none', stroke: C.accent, 'stroke-opacity': 0.55, 'stroke-dasharray': '6 5', 'stroke-width': 1.5 })
       ctx.set(`eq${i}-l`, 'text', {
-        x: CENTER.x + R * 0.7071 + 4, y: CENTER.y - R * 0.7071 - 4, 'font-size': 11, fill: C.accent, 'fill-opacity': 0.8,
+        x: CENTER.x + R * 0.7071 + 4, y: CENTER.y - R * 0.7071 - 4, 'font-size': 13, fill: C.accent, 'fill-opacity': 0.8,
         text: `Φ=${PHI_LEVELS[i]}kV`,
       })
     }
@@ -80,11 +80,11 @@ export const potentialScene: LabScene = {
     // 源电荷
     ctx.set('src', 'circle', { cx: CENTER.x, cy: CENTER.y, r: 16, fill: '#ef4444', stroke: '#b91c1c', 'stroke-width': 2 })
     ctx.set('src-t', 'text', { x: CENTER.x, y: CENTER.y + 5, 'font-size': 14, 'text-anchor': 'middle', fill: '#fff', text: '+' })
-    ctx.set('src-l', 'text', { x: CENTER.x, y: CENTER.y + 32, 'font-size': 12, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: 'Q=4μC' })
+    ctx.set('src-l', 'text', { x: CENTER.x, y: CENTER.y + 32, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: 'Q=4μC' })
 
     // 试探电荷（拖动：guide=1 时锁定到最近的等势面）
     const tc = ctx.set('tc', 'circle', { cx: st.pos.x, cy: st.pos.y, r: 12, fill: params.qt >= 0 ? '#f59e0b' : '#0ea5e9', stroke: params.qt >= 0 ? '#b45309' : '#0284c7', 'stroke-width': 2 })
-    ctx.set('tc-t', 'text', { x: st.pos.x, y: st.pos.y + 4, 'font-size': 11, 'text-anchor': 'middle', fill: '#fff', text: params.qt >= 0 ? '+' : '−' })
+    ctx.set('tc-t', 'text', { x: st.pos.x, y: st.pos.y + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: params.qt >= 0 ? '+' : '−' })
     ctx.drag(
       tc,
       (p) => {
@@ -128,7 +128,7 @@ export const potentialScene: LabScene = {
     st.rPrev = rpx
     const nearEquip = PHI_LEVELS.some((p) => Math.abs(phi / 1000 - p) < 1.5)
     ctx.set('tip', 'text', {
-      x: 44, y: 32, 'font-size': 12, fill: nearEquip ? C.accent : 'currentColor', 'fill-opacity': nearEquip ? 1 : 0.55,
+      x: 44, y: 32, 'font-size': 13, fill: nearEquip ? C.accent : 'currentColor', 'fill-opacity': nearEquip ? 1 : 0.55,
       text: nearEquip ? '✓ 正在等势面上移动：W=0（电势能不变）' : params.guide === 1 ? '已锁定等势面：无论怎么拖 W=0' : '跨越等势面移动时：W = q(Φ₁−Φ₂) ≠ 0',
     })
 

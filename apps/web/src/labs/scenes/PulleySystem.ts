@@ -107,9 +107,9 @@ export const pulleyScene: LabScene = {
     // m1 滑块（拖动本体 = 摆放位移，拖内部手柄 = 改质量）
     const bw = 56 + params.m1 * 18
     const m1el = ctx.set('m1', 'rect', { x: x1 - bw / 2, y: y1 - 22, width: bw, height: 44, rx: 6, fill: '#4f46e5', stroke: '#312e81', 'stroke-width': 2 })
-    ctx.set('m1-t', 'text', { x: x1, y: y1 + 4, 'font-size': 12, 'text-anchor': 'middle', fill: '#fff', text: `m1=${fmt(params.m1, 1)}` })
+    ctx.set('m1-t', 'text', { x: x1, y: y1 + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: `m1=${fmt(params.m1, 1)}` })
     const m1h = ctx.set('m1-handle', 'circle', { cx: x1 - bw / 4, cy: y1, r: 11, fill: '#fff', 'fill-opacity': 0.9, stroke: '#312e81', 'stroke-width': 2 })
-    ctx.set('m1h-t', 'text', { x: x1 - bw / 4, y: y1 + 3, 'font-size': 9, 'text-anchor': 'middle', fill: '#312e81', text: '↕' })
+    ctx.set('m1h-t', 'text', { x: x1 - bw / 4, y: y1 + 3, 'font-size': 13, 'text-anchor': 'middle', fill: '#312e81', text: '↕' })
     ctx.drag(m1el, (p) => {
       st.x = clamp((p.x - M1_START) / PX_PER_M, 0, 4)
       ctx.requestRender()
@@ -119,7 +119,7 @@ export const pulleyScene: LabScene = {
     })
     // m2 悬挂物（拖动改质量）
     const m2el = ctx.set('m2', 'rect', { x: PULLEY.x - 16, y: hangerY, width: 32, height: 30 + params.m2 * 12, rx: 4, fill: '#f59e0b', stroke: '#b45309', 'stroke-width': 2 })
-    ctx.set('m2-t', 'text', { x: PULLEY.x, y: hangerY + 22 + params.m2 * 6, 'font-size': 11, 'text-anchor': 'middle', fill: '#fff', text: `m2=${fmt(params.m2, 2)}` })
+    ctx.set('m2-t', 'text', { x: PULLEY.x, y: hangerY + 22 + params.m2 * 6, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: `m2=${fmt(params.m2, 2)}` })
     ctx.drag(m2el, (p) => {
       ctx.setParam('m2', clamp(Math.round((params.m2 - (p.y - hangerY) * 0.008) * 100) / 100, 0.05, 1.5))
     })
@@ -132,7 +132,7 @@ export const pulleyScene: LabScene = {
         const sysC = v(x1 + 10, y1 + 60)
         const boxH = Math.min(hangerY - y1 + 66, 415 - (y1 - 30))
         ctx.set('sys-box', 'rect', { x: x1 - bw / 2 - 8, y: y1 - 30, width: PULLEY.x - x1 + bw / 2 + 30, height: boxH, fill: 'none', stroke: C.net, 'stroke-dasharray': '6 5', 'stroke-opacity': 0.6, rx: 8 })
-        ctx.set('sys-label', 'text', { x: x1 + 10, y: y1 - 36, 'font-size': 11, fill: C.net, 'fill-opacity': 0.7, text: '整体 (m1+m2)' })
+        ctx.set('sys-label', 'text', { x: x1 + 10, y: y1 - 36, 'font-size': 13, fill: C.net, 'fill-opacity': 0.7, text: '整体 (m1+m2)' })
         drawArrow(ctx, 'wDrive', sysC, add(sysC, v(0, params.m2 * G * 0.8)), { color: C.gravity, label: `m2g=${fmt(params.m2 * G, 2)}N（动力）` })
         drawArrow(ctx, 'wRes2', sysC, add(sysC, v(-(params.m2 * G - f) * 0.8, 0)), { color: C.friction, label: `μm1g=${fmt(f, 2)}N（阻力）` })
         ctx.remove('isoT1', 'isoT1-head', 'isoT1-label', 'isoT2', 'isoT2-head', 'isoT2-label', 'isoF1', 'isoF1-head', 'isoF1-label', 'isoF2', 'isoF2-head', 'isoF2-label')
@@ -160,7 +160,7 @@ export const pulleyScene: LabScene = {
     const tips: string[] = []
     if (st.stuck) tips.push('拉不动：m2g ≤ μm1g，静摩擦与绳张力平衡')
     if (st.finished) tips.push('m1 已到滑轮处，点「重置」再来')
-    ctx.set('tip', 'text', { x: 70, y: 46, 'font-size': 12, fill: C.warn, text: tips.join('；') })
+    ctx.set('tip', 'text', { x: 70, y: 46, 'font-size': 13, fill: C.warn, text: tips.join('；') })
 
     // v-t 图像：量程按当前参数的理论终点自适应（位移 4m 内的末速/时长，避免曲线被裁平）
     const vEnd = Math.sqrt(2 * a * 4)

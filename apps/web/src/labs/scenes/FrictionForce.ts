@@ -51,6 +51,13 @@ export const frictionScene: LabScene = {
     '滑动瞬间摩擦力从 μs·mg 突降为 μk·mg（μk < μs），物体会突然加速',
     'f-F 图像：斜率 1 的直线 → 突跳 → 水平线；这是判断临界点的标准图像',
   ],
+  challenge: {
+    question: 'm = 2 kg、μs = 0.5、μk = 0.3（g = 10），水平拉力 F 从 0 缓慢加到 12 N。摩擦力怎么变？',
+    options: ['始终等于 F，最大 12 N', '先随 F 增到 10 N，突降为 6 N 后保持不变', '恒为 6 N', '恒为 10 N'],
+    answer: 1,
+    explanation: '静摩擦阶段 f = F 跟随外力，最大到 μs·mg = 10 N；一旦滑动，摩擦突降为滑动摩擦 μk·mg = 6 N 不再随 F 变化。「突变」是本模型的考点。',
+    reveal_preset: '滑动中',
+  },
   init(params: SceneParams): S {
     const fs = Math.min(params.F, params.mus * params.m * G)
     return {
@@ -111,10 +118,10 @@ export const frictionScene: LabScene = {
     const bx = START_X + st.x * PX_PER_M
     const bw = 50 + params.m * 4
     const block = ctx.set('block', 'rect', { x: bx - bw / 2, y: GROUND_Y - 18, width: bw, height: 44, rx: 6, fill: st.moving ? C.friction : '#4f46e5', stroke: st.moving ? '#b45309' : '#312e81', 'stroke-width': 2 })
-    ctx.set('block-t', 'text', { x: bx, y: GROUND_Y + 8, 'font-size': 12, 'text-anchor': 'middle', fill: '#fff', text: `${fmt(params.m, 1)}kg` })
+    ctx.set('block-t', 'text', { x: bx, y: GROUND_Y + 8, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: `${fmt(params.m, 1)}kg` })
     // 推力手柄：拖动改 F（↔）
     const handle = ctx.set('handle', 'circle', { cx: bx + 40, cy: GROUND_Y + 4, r: 13, fill: '#fff', 'fill-opacity': 0.95, stroke: C.tension, 'stroke-width': 2 })
-    ctx.set('handle-t', 'text', { x: bx + 40, y: GROUND_Y + 8, 'font-size': 10, 'text-anchor': 'middle', fill: '#065f46', text: 'F↔' })
+    ctx.set('handle-t', 'text', { x: bx + 40, y: GROUND_Y + 8, 'font-size': 13, 'text-anchor': 'middle', fill: '#065f46', text: 'F↔' })
     ctx.drag(handle, (p) => {
       ctx.setParam('F', clamp(Math.round((p.x - START_X) * 0.08 * 5) / 5, 0, 30))
     })
@@ -144,7 +151,7 @@ export const frictionScene: LabScene = {
     if (st.moving) tips.push('滑动中：f = μk·mg 不再随 F 增大')
     else if (params.F <= fsMax) tips.push(`静止：静摩擦 f=F=${fmt(params.F, 1)}N 跟踪外力`)
     if (st.x >= 20) tips.push('已到最右端，点「重置」再来')
-    ctx.set('tip', 'text', { x: 70, y: 44, 'font-size': 12, fill: C.warn, text: tips.join('；') })
+    ctx.set('tip', 'text', { x: 70, y: 44, 'font-size': 13, fill: C.warn, text: tips.join('；') })
 
     // f-F 图像
     if (ctx.gw) {
@@ -153,13 +160,13 @@ export const frictionScene: LabScene = {
       axes(ctx, box, { xLabel: '推力 F/N', yLabel: '摩擦力 f/N', xMax: fMax, yMax: fMax })
       // f=F 参考对角线
       ctx.gset('g-diag', 'line', { x1: gx(box, 0, fMax, 0), y1: gy(box, 0, fMax, 0), x2: gx(box, 0, fMax, fMax), y2: gy(box, 0, fMax, fMax), stroke: 'currentColor', 'stroke-opacity': 0.25, 'stroke-dasharray': '5 5' })
-      ctx.gset('g-diagl', 'text', { x: gx(box, 0, fMax, fMax) - 6, y: gy(box, 0, fMax, fMax) + 14, 'font-size': 10, 'text-anchor': 'end', fill: 'currentColor', 'fill-opacity': 0.5, text: 'f=F' })
+      ctx.gset('g-diagl', 'text', { x: gx(box, 0, fMax, fMax) - 6, y: gy(box, 0, fMax, fMax) + 14, 'font-size': 13, 'text-anchor': 'end', fill: 'currentColor', 'fill-opacity': 0.5, text: 'f=F' })
       // μs·mg 临界线（红虚线）
       ctx.gset('g-fs', 'line', { x1: box.x, y1: gy(box, 0, fMax, fsMax), x2: box.x + box.w, y2: gy(box, 0, fMax, fsMax), stroke: C.gravity, 'stroke-dasharray': '6 4', 'stroke-opacity': 0.8 })
-      ctx.gset('g-fsl', 'text', { x: box.x + 6, y: gy(box, 0, fMax, fsMax) - 5, 'font-size': 10, fill: C.gravity, text: `μs·mg=${fmt(fsMax, 1)}` })
+      ctx.gset('g-fsl', 'text', { x: box.x + 6, y: gy(box, 0, fMax, fsMax) - 5, 'font-size': 13, fill: C.gravity, text: `μs·mg=${fmt(fsMax, 1)}` })
       // μk·mg 滑动摩擦线（橙实线）
       ctx.gset('g-fk', 'line', { x1: box.x, y1: gy(box, 0, fMax, fk), x2: box.x + box.w, y2: gy(box, 0, fMax, fk), stroke: C.friction, 'stroke-opacity': 0.8 })
-      ctx.gset('g-fkl', 'text', { x: box.x + 6, y: gy(box, 0, fMax, fk) - 5, 'font-size': 10, fill: C.friction, text: `μk·mg=${fmt(fk, 1)}` })
+      ctx.gset('g-fkl', 'text', { x: box.x + 6, y: gy(box, 0, fMax, fk) - 5, 'font-size': 13, fill: C.friction, text: `μk·mg=${fmt(fk, 1)}` })
       // 实测轨迹
       polyline(ctx, 'g-trace', st.trace, box, 0, fMax, 0, fMax, C.net)
     }

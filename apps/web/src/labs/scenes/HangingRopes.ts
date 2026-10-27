@@ -63,6 +63,13 @@ export const hangingScene: LabScene = {
     '绳越接近水平张力越大：T = mg/(2sinα)，α→0 时 T→∞（「绳快断了」的根源）',
     '绳只能拉不能推：某绳张力算出负值说明它已松弛，该绳退出受力',
   ],
+  challenge: {
+    question: '小球被两根绳悬挂，把右绳逐渐拉到接近水平，右绳的张力会怎么变？',
+    options: ['逐渐变小', '几乎不变', '急剧增大，绳越平张力越大', '先减小后增大'],
+    answer: 2,
+    explanation: '绳越接近水平，张力在竖直方向的分量越小；要维持 mg，张力本身必须急剧增大（T 含 1/sinθ 因子）。接近水平时张力可达重力的许多倍——这就是「晾衣绳」张力爆炸效应。',
+    reveal_preset: '接近水平（张力爆炸）',
+  },
   init(): S {
     return { t: 0, p: v(510, 250), sag: 90 }
   },
@@ -151,7 +158,7 @@ export const hangingScene: LabScene = {
       tri = tri.map((p) => add(p, v(dx, dy)))
       const [triO, gEnd, t1End] = tri
       const t2End = triO // 闭合回起点
-      ctx.set('tri-title', 'text', { x: 40, y: 244, 'font-size': 11, fill: 'currentColor', 'fill-opacity': 0.55, text: '力的三角形（自动闭合）' })
+      ctx.set('tri-title', 'text', { x: 40, y: 244, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.55, text: '力的三角形（自动闭合）' })
       ctx.set('tri1', 'line', { x1: triO.x, y1: triO.y, x2: gEnd.x, y2: gEnd.y, stroke: C.gravity, 'stroke-width': 2.5 })
       ctx.set('tri2', 'line', { x1: gEnd.x, y1: gEnd.y, x2: t1End.x, y2: t1End.y, stroke: C.tension, 'stroke-width': 2.5 })
       ctx.set('tri3', 'line', { x1: t1End.x, y1: t1End.y, x2: t2End.x, y2: t2End.y, stroke: C.net, 'stroke-width': 2, 'stroke-dasharray': '5 4' })

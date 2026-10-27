@@ -1,6 +1,7 @@
 // 我的：外观（深色模式）、修改密码、AI 供应商配置（多供应商/多 Key/连通性测试/费用估算/用量统计）、关于、备份占位（M4）
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useBlocker } from 'react-router-dom'
+import {ChartLine, TriangleAlert} from 'lucide-react'
+import { useBlocker, useNavigate } from 'react-router-dom'
 import { get, put, post } from '@/lib/api'
 import { useToastStore, useAuthStore } from '@/stores/auth'
 import type { AiProvider } from '@workbench/shared'
@@ -24,7 +25,7 @@ const shiftMonth = (m: string, delta: number) => {
   const d = new Date(y, mo - 1 + delta, 1)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
-const KIND_LABEL: Record<string, string> = { analyze: '拍照分析', variants: '举一反三', test: '连通测试' }
+const KIND_LABEL: Record<string, string> = { analyze: "拍照分析", variants: "举一反三", quiz: "AI 出题", tiered: "分层练习", report: "家长报告", test: "连通测试" }
 
 // 单价输入：内部用字符串草稿，避免受控 Number 丢小数点（输入 "2.5" 中途变 "2." 的问题）
 function PriceInput({ value, onCommit, placeholder }: { value: number; onCommit: (n: number) => void; placeholder: string }) {
@@ -43,6 +44,7 @@ function PriceInput({ value, onCommit, placeholder }: { value: number; onCommit:
 }
 
 export default function Settings() {
+  const navigate = useNavigate()
   const [oldPassword, setOld] = useState('')
   const [newPassword, setNew] = useState('')
   const [confirmPassword, setConfirm] = useState('')
@@ -310,7 +312,7 @@ export default function Settings() {
         {/* 隐私提示：以后端返回为唯一数据源 */}
         {privacyNotice && (
           <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3">
-            ⚠️ {privacyNotice}
+            <TriangleAlert className="w-4 h-4 inline-block align-[-2px]" /> {privacyNotice}
           </p>
         )}
 
@@ -483,6 +485,15 @@ export default function Settings() {
         <h2 className="font-semibold text-sm">数据备份与恢复</h2>
         <p className="text-xs text-slate-500">M4 里程碑交付：一键导出 zip（SQLite + uploads）与恢复。</p>
       </div>
+
+      {/* 统计入口（移动端 5 Tab 已满，从「我的」页进入） */}
+      <button className="card p-5 w-full text-left flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => navigate('/stats')}>
+        <ChartLine className="w-5 h-5 text-primary-500" />
+        <span>
+          <span className="block text-sm font-semibold">统计</span>
+          <span className="block text-xs text-slate-500">每周/每月课时与收入曲线、学生留存与续费率</span>
+        </span>
+      </button>
 
       <div className="card p-5 space-y-1">
         <h2 className="font-semibold text-sm mb-1">关于</h2>

@@ -1,13 +1,21 @@
 // 课件 28：洛伦兹力与粒子圆周运动（必修三 · 磁场）
-// 拖 v、B、q、m，r=mv/(qB)、T=2πm/(qB) 实时；正负电荷偏转方向切换；质谱仪预设
+// 粒子预设（电子/质子/α 粒子）自动带出真实 q、m（比荷只读）；拖 v、B，r=mv/(qB)、T=2πm/(qB)、F=qvB 全部自洽；
+// 正负电荷（电子为负）偏转方向切换；质谱仪预设
 import type { LabScene, LabState, LabData, SceneParams } from '../engine/types'
 import { C, clamp, fmt } from '../engine/vec'
 import { drawArrow } from '../engine/Arrow'
 
 const CENTER: { x: number; y: number } = { x: 320, y: 220 }
-// 像素↔实际：1px = 1cm
+// 像素↔实际：1px = 1cm（半径超出可见范围时按限幅绘制并在数据面板标注）
 const PX_PER_M = 100
-const Q_E = 1.6e-19
+const E_CHARGE = 1.6e-19
+
+/** 粒子预设：q（C，带符号）、m（kg）为真实物理量 */
+const PARTICLES = [
+  { label: '电子 e⁻（负电荷）', q: -E_CHARGE, m: 9.11e-31 },
+  { label: '质子 p（正电荷）', q: E_CHARGE, m: 1.67e-27 },
+  { label: 'α 粒子（正电荷）', q: 2 * E_CHARGE, m: 6.64e-27 },
+]
 
 interface S extends LabState {
   theta: number // 圆周相位
@@ -19,32 +27,47 @@ function rToPx(rM: number): number {
   return clamp(rM * PX_PER_M, 18, 170)
 }
 
+/** 半径的显示单位自适应：m / cm / mm */
+function fmtLength(m: number): string {
+  if (m >= 1) return `${fmt(m, 2)} m`
+  if (m >= 0.01) return `${fmt(m * 100, 1)} cm`
+  return `${fmt(m * 1000, 2)} mm`
+}
+
+/** 科学计数法：×10^-7 的 ^ 写成 Unicode 上标（×10⁻⁷） */
+function sci(n: number): string {
+  if (n === 0) return '0'
+  const exp = Math.floor(Math.log10(Math.abs(n)))
+  if (exp >= -2 && exp <= 3) return fmt(n, 3)
+  const SUP: Record<string, string> = { '-': '⁻', '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' }
+  return `${fmt(n / 10 ** exp, 2)}×10${String(exp).split('').map((c) => SUP[c] ?? c).join('')}`
+}
+
 export const lorentzScene: LabScene = {
   id: 'lorentz-circle',
   title: '洛伦兹力与粒子圆周运动',
   grade: '高二',
   chapter: '必修三 · 磁场',
-  desc: '拖 v/B/q/m：r=mv/(qB)、T=2πm/(qB) 实时；正负电荷偏转方向相反；质谱仪预设',
+  desc: '选粒子（电子/质子/α）：q、m 自动带出，r=mv/(qB)、T=2πm/(qB)、F=qvB 实时自洽',
   tags: ['洛伦兹力', '圆周运动', '质谱仪', '磁场', '带电粒子'],
   view: { w: 640, h: 420 },
   params: [
-    { key: 'v', label: '速率 v', min: 1, max: 8, step: 0.1, unit: '×10⁶m/s', default: 4, reset: false },
-    { key: 'B', label: '磁感应强度 B', min: 0.1, max: 2, step: 0.05, unit: 'T', default: 0.5, reset: false },
-    { key: 'qm', label: '比荷 q/m', min: 1, max: 10, step: 0.5, unit: '×10⁷C/kg', default: 4, reset: false },
     {
-      key: 'qSign', label: '电荷符号', min: 0, max: 1, step: 1, unit: '', default: 0,
-      options: [{ value: 0, label: '正电荷（+）' }, { value: 1, label: '负电荷（−）' }],
+      key: 'particle', label: '粒子（q、m 自动带出）', min: 0, max: 2, step: 1, unit: '', default: 1,
+      options: PARTICLES.map((p, i) => ({ value: i, label: p.label })),
     },
+    { key: 'v', label: '速率 v', min: 0.5, max: 20, step: 0.5, unit: '×10⁶m/s', default: 15, reset: false },
+    { key: 'B', label: '磁感应强度 B', min: 0.1, max: 2, step: 0.05, unit: 'T', default: 0.3, reset: false },
     {
       key: 'bDir', label: 'B 方向', min: 0, max: 1, step: 1, unit: '', default: 0,
       options: [{ value: 0, label: '垂直纸面向里 ⊗' }, { value: 1, label: '垂直纸面向外 ⊙' }],
     },
   ],
   presets: [
-    { name: '标准演示', params: { v: 4, B: 0.5, qm: 4, qSign: 0, bDir: 0 } },
-    { name: '负电荷（反转）', params: { v: 4, B: 0.5, qm: 4, qSign: 1, bDir: 0 } },
-    { name: '质谱仪（同速不同荷）', params: { v: 4, B: 0.5, qm: 8, qSign: 0, bDir: 0 } },
-    { name: '强磁场（半径小）', params: { v: 2, B: 2, qm: 4, qSign: 0, bDir: 0 } },
+    { name: '质子 · 标准演示', params: { particle: 1, v: 15, B: 0.3, bDir: 0 } },
+    { name: '电子 · 反向偏转', params: { particle: 0, v: 10, B: 0.1, bDir: 0 } },
+    { name: 'α 粒子 · 大圆（质谱仪）', params: { particle: 2, v: 10, B: 0.2, bDir: 0 } },
+    { name: '强磁场（半径小）', params: { particle: 1, v: 5, B: 2, bDir: 0 } },
   ],
   formulas: [
     'F = qvB',
@@ -56,13 +79,21 @@ export const lorentzScene: LabScene = {
     '半径 r=mv/(qB)：v 越大 r 越大，B 越强 r 越小（质谱仪分离原理）',
     '周期 T=2πm/(qB) 与速率无关——回旋加速器的核心',
   ],
+  challenge: {
+    question: '电子与质子以相同速度垂直射入同一匀强磁场，谁的轨道半径更小？',
+    options: ['电子（质量小）', '质子（质量大）', '两者相同', '取决于电荷量以外的因素'],
+    answer: 0,
+    explanation: 'r = mv/(qB)：速度与磁场相同、电荷量大小同为一个 e，质量小的电子轨道半径小得多（约 1/1836）。质谱仪正是利用这一点区分同位素。',
+    reveal_preset: '电子 · 反向偏转',
+  },
   init(): S {
     return { theta: -Math.PI / 2, turn: 0 }
   },
   step(dt, params, state) {
     const st = state as S
-    // 演示用固定可视角速度（真实周期 10⁻⁷s 量级太快），旋转方向由电荷符号与 B 方向定
-    const spin = (params.qSign === 0 ? 1 : -1) * (params.bDir === 0 ? -1 : 1)
+    // 演示用固定可视角速度（真实周期 10⁻⁷s 量级太快）；旋转方向由电荷符号与 B 方向定
+    const qSign = (PARTICLES[params.particle] ?? PARTICLES[1]).q > 0 ? 1 : -1
+    const spin = qSign * (params.bDir === 0 ? -1 : 1)
     const w = 2.2 // rad/s
     st.theta += spin * w * dt
     st.turn += (w * dt) / (2 * Math.PI)
@@ -70,12 +101,15 @@ export const lorentzScene: LabScene = {
   render(ctx, params, state, opts): LabData {
     const st = state as S
     const data: LabData = {}
-    const q = params.qm * 1e7 * Q_E // C（量级演示）
+    const pt = PARTICLES[params.particle] ?? PARTICLES[1]
+    const q = pt.q
+    const m = pt.m
     const v = params.v * 1e6
-    const rM = v / (params.qm * 1e7 * params.B)
-    const T = (2 * Math.PI) / (params.qm * 1e7 * params.B)
-    const F = (params.qm * 1e7 * Q_E) * v * params.B
+    const rM = (m * v) / (Math.abs(q) * params.B) // 真实半径 m
+    const T = (2 * Math.PI * m) / (Math.abs(q) * params.B)
+    const F = Math.abs(q) * v * params.B
     const Rpx = rToPx(rM)
+    const rClamped = Math.abs(Rpx - rM * PX_PER_M) > 0.5
 
     // 磁场符号阵列
     if (params.B > 0.001) {
@@ -97,15 +131,21 @@ export const lorentzScene: LabScene = {
     const py2 = CENTER.y + Rpx * Math.sin(st.theta)
     ctx.set('rad', 'line', { x1: CENTER.x, y1: CENTER.y, x2: px2, y2: py2, stroke: 'currentColor', 'stroke-opacity': 0.25, 'stroke-dasharray': '3 3' })
 
-    // 粒子（拖拽改半径 → 改比荷 qm）
-    const particle = ctx.set('p', 'circle', { cx: px2, cy: py2, r: 9, fill: params.qSign === 0 ? '#f59e0b' : '#0ea5e9', stroke: params.qSign === 0 ? '#b45309' : '#0284c7', 'stroke-width': 2 })
-    ctx.set('p-t', 'text', { x: px2, y: py2 + 4, 'font-size': 10, 'text-anchor': 'middle', fill: '#fff', text: params.qSign === 0 ? '+' : '−' })
+    // 粒子（拖拽改半径 → 反推 B / v，保持物理自洽）
+    const isNeg = q < 0
+    const particle = ctx.set('p', 'circle', { cx: px2, cy: py2, r: 9, fill: isNeg ? '#0ea5e9' : '#f59e0b', stroke: isNeg ? '#0284c7' : '#b45309', 'stroke-width': 2 })
+    ctx.set('p-t', 'text', { x: px2, y: py2 + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: isNeg ? '−' : '+' })
     ctx.drag(particle, (p2) => {
       const d = Math.hypot(p2.x - CENTER.x, p2.y - CENTER.y)
-      const rNew = clamp(d / PX_PER_M, 0.2, 1.7)
-      // r = mv/(qB) → qm = v/(rB)
-      const qmNew = clamp(params.v * 1e6 / (rNew * params.B) / 1e7, 1, 10)
-      ctx.setParam('qm', Math.round(qmNew * 2) / 2)
+      const rNew = clamp(d / PX_PER_M, 0.01, 5)
+      // r = mv/(qB) → 优先反推 B；B 超量程时反推 v
+      const bNew = (m * v) / (Math.abs(q) * rNew)
+      if (bNew >= 0.1 && bNew <= 2) {
+        ctx.setParam('B', Math.round(bNew * 20) / 20)
+      } else {
+        const vNew = clamp((Math.abs(q) * params.B * rNew) / m / 1e6, 0.5, 20)
+        ctx.setParam('v', Math.round(vNew * 2) / 2)
+      }
       // 保持相位连续
       st.theta = Math.atan2(p2.y - CENTER.y, p2.x - CENTER.x)
       ctx.requestRender()
@@ -115,8 +155,8 @@ export const lorentzScene: LabScene = {
     if (opts.showForces) {
       const kF = 90 / Math.max(F, 1e-18)
       const pC = { x: px2, y: py2 }
-      // v 切向：顺/逆时针由 spin 决定
-      const spin = (params.qSign === 0 ? 1 : -1) * (params.bDir === 0 ? -1 : 1)
+      // v 切向：顺/逆时针由电荷符号与 B 方向决定
+      const spin = (isNeg ? -1 : 1) * (params.bDir === 0 ? -1 : 1)
       const tang = { x: -Math.sin(st.theta) * spin, y: Math.cos(st.theta) * spin }
       drawArrow(ctx, 'fv', pC, { x: pC.x + tang.x * 40, y: pC.y + tang.y * 40 }, { color: C.tension, label: `v=${fmt(params.v, 1)}×10⁶` })
       const toC = { x: (CENTER.x - px2) / (Rpx || 1), y: (CENTER.y - py2) / (Rpx || 1) }
@@ -129,23 +169,21 @@ export const lorentzScene: LabScene = {
 
     // 提示
     ctx.set('tip', 'text', {
-      x: 44, y: 40, 'font-size': 12, fill: 'currentColor', 'fill-opacity': 0.55,
-      text: `B⊗ 时正电荷逆时针、负电荷顺时针（洛伦兹力指向圆心）；拖粒子改半径`,
+      x: 44, y: 40, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.55,
+      text: rClamped
+        ? `真实半径 ${fmtLength(rM)} 超出画面比例（1px=1cm），图中按限幅半径示意；数据面板为真实值`
+        : `B⊗ 时正电荷逆时针、负电荷顺时针（洛伦兹力指向圆心）；拖粒子改半径`,
     })
 
+    data['粒子'] = pt.label.split('（')[0]
+    data['电荷 q'] = `${sci(Math.abs(q))} C（${isNeg ? '负' : '正'}）`
+    data['质量 m'] = `${sci(m)} kg`
+    data['比荷 q/m（只读）'] = `${sci(Math.abs(q) / m)} C/kg`
     data['速率 v'] = `${fmt(params.v, 1)}×10⁶ m/s`
-    data['半径 r=mv/(qB)'] = `${fmt(rM * 100, 1)} cm`
+    data['半径 r=mv/(qB)'] = fmtLength(rM)
     data['周期 T=2πm/(qB)'] = `${sci(T)} s`
     data['洛伦兹力 F=qvB'] = `${sci(F)} N`
     data['已转圈数'] = fmt(st.turn, 2)
-    data['偏转方向'] = params.qSign === 0 ? '正电荷' : '负电荷'
     return data
   },
-}
-
-function sci(n: number): string {
-  if (n === 0) return '0'
-  const exp = Math.floor(Math.log10(Math.abs(n)))
-  if (exp >= -2 && exp <= 3) return fmt(n, 3)
-  return `${fmt(n / 10 ** exp, 2)}×10^${exp}`
 }

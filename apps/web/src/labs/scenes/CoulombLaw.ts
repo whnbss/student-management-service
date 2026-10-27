@@ -66,9 +66,9 @@ export const coulombScene: LabScene = {
       if (X > ctx.w - 20) break
       const major = cm % 10 === 0
       ctx.set(`tick${cm}`, 'line', { x1: X, y1: 330, x2: X, y2: major ? 342 : 337, stroke: 'currentColor', 'stroke-opacity': major ? 0.5 : 0.25 })
-      if (major) ctx.set(`tickl${cm}`, 'text', { x: X, y: 356, 'font-size': 10, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: String(cm) })
+      if (major) ctx.set(`tickl${cm}`, 'text', { x: X, y: 356, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: String(cm) })
     }
-    ctx.set('ruler-label', 'text', { x: 40, y: 356, 'font-size': 10, fill: 'currentColor', 'fill-opacity': 0.5, text: 'cm' })
+    ctx.set('ruler-label', 'text', { x: 40, y: 356, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.5, text: 'cm' })
 
     // 间距标注双箭头
     const X2 = st.x2
@@ -114,7 +114,7 @@ export const coulombScene: LabScene = {
       text: attract ? '异号电荷：相互吸引' : '同号电荷：相互排斥',
     })
     ctx.set('tip2', 'text', {
-      x: 50, y: 70, 'font-size': 12, fill: 'currentColor', 'fill-opacity': 0.5,
+      x: 50, y: 70, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.5,
       text: '拖动右侧电荷改间距 r；箭头长度按当前最大力归一（90px 基准）',
     })
 

@@ -102,19 +102,19 @@ export const combinedScene: LabScene = {
     // 加速区
     ctx.set('acc-t', 'rect', { x: ACCEL_X0, y: 110, width: 6, height: 200, fill: '#8b5cf6' })
     ctx.set('acc-b', 'rect', { x: ACCEL_X1, y: 110, width: 6, height: 200, fill: '#8b5cf6' })
-    ctx.set('acc-l', 'text', { x: (ACCEL_X0 + ACCEL_X1) / 2, y: 100, 'font-size': 11, 'text-anchor': 'middle', fill: C.field, text: `加速 U=${fmt(params.U, 0)}V` })
-    ctx.set('acc-l2', 'text', { x: (ACCEL_X0 + ACCEL_X1) / 2, y: 330, 'font-size': 10, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: '＋/−' })
+    ctx.set('acc-l', 'text', { x: (ACCEL_X0 + ACCEL_X1) / 2, y: 100, 'font-size': 13, 'text-anchor': 'middle', fill: C.field, text: `加速 U=${fmt(params.U, 0)}V` })
+    ctx.set('acc-l2', 'text', { x: (ACCEL_X0 + ACCEL_X1) / 2, y: 330, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: '＋/−' })
     // 磁场区
     ctx.set('b-zone', 'rect', { x: B_X0, y: 40, width: Wpx, height: 340, fill: C.field, 'fill-opacity': 0.05, stroke: C.field, 'stroke-opacity': 0.3, 'stroke-dasharray': '5 4' })
     let idx = 0
     for (let gy2 = 70; gy2 <= 360; gy2 += 42) {
       for (let gx2 = B_X0 + 20; gx2 <= B_X0 + Wpx - 12; gx2 += 44) {
-        ctx.set(`b${idx}`, 'text', { x: gx2, y: gy2, 'font-size': 12, 'text-anchor': 'middle', fill: C.field, 'fill-opacity': clamp(params.B * 1.1, 0.15, 0.7), text: '×' })
+        ctx.set(`b${idx}`, 'text', { x: gx2, y: gy2, 'font-size': 13, 'text-anchor': 'middle', fill: C.field, 'fill-opacity': clamp(params.B * 1.1, 0.15, 0.7), text: '×' })
         idx++
       }
     }
     for (let i = idx; i < 60; i++) ctx.remove(`b${i}`)
-    ctx.set('b-l', 'text', { x: B_X0 + 8, y: 34, 'font-size': 11, fill: C.field, text: `B=${fmt(params.B, 2)}T ⊗ W=${fmt(params.W, 2)}m` })
+    ctx.set('b-l', 'text', { x: B_X0 + 8, y: 34, 'font-size': 13, fill: C.field, text: `B=${fmt(params.B, 2)}T ⊗ W=${fmt(params.W, 2)}m` })
 
     // 轨迹
     if (st.pts.length > 2) {
@@ -143,7 +143,7 @@ export const combinedScene: LabScene = {
 
     // 半圆出射时的回出口标注
     if (halfCircle) {
-      ctx.set('half-l', 'text', { x: B_X0 + 12, y: 380, 'font-size': 12, fill: '#059669', text: 'W ≥ r：粒子转半圆从入射侧下方射回（速度大小不变）' })
+      ctx.set('half-l', 'text', { x: B_X0 + 12, y: 380, 'font-size': 13, fill: '#059669', text: 'W ≥ r：粒子转半圆从入射侧下方射回（速度大小不变）' })
     } else {
       ctx.remove('half-l')
     }

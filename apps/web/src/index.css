@@ -40,3 +40,45 @@ body {
   filter: brightness(1.12) drop-shadow(0 0 5px rgba(99, 102, 241, 0.9));
   cursor: move;
 }
+
+/* —— 课件详情页布局（直接写 CSS，不依赖 Tailwind 任意值类，避免 JIT 生成失败导致布局塌陷）—— */
+/* 无图课件：单列 → md 两栏 [1fr_320px]，舞台 ≥780px（640 viewBox 按 ~1.2 倍放大） */
+/* 有图课件：md 两栏（图像面板在舞台下方）→ xl 三栏 [1.5fr_1fr_300px]（舞台 | 图像 | 参数） */
+.lab-grid {
+  display: grid;
+  gap: 1rem;
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 768px) {
+  .lab-grid {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+}
+@media (min-width: 1280px) {
+  .lab-grid.uses-graph {
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 300px;
+  }
+}
+/* md~xl 之间：图像面板放舞台下方（第 1 列第 2 行），参数面板在右侧第 2 列 */
+@media (min-width: 768px) and (max-width: 1279px) {
+  .lab-grid.uses-graph .lab-cell-graph {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .lab-grid .lab-cell-side {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+/* xl 三栏：舞台 | 图像 | 参数，靠显式落位保证不被挤到隐式列 */
+@media (min-width: 1280px) {
+  .lab-grid.uses-graph .lab-cell-graph {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .lab-grid.uses-graph .lab-cell-side {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}

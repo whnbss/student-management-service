@@ -9,13 +9,14 @@ function addDays(date: string, days: number): string {
 }
 
 export default async function mistakeRoutes(app: FastifyInstance) {
-  // 列表：按学生/状态/知识点筛选；到期重做在前端置顶
+  // 列表：按学生/状态/知识点/关键词筛选；到期重做在前端置顶
   app.get('/api/mistakes', async (req) => {
-    const q = req.query as { student_id?: string; status?: string; knowledge_point?: string }
+    const q = req.query as { student_id?: string; status?: string; knowledge_point?: string; q?: string }
     let sql = `SELECT m.*, st.name AS student_name FROM mistakes m JOIN students st ON st.id = m.student_id WHERE 1=1`
     const args: any[] = []
     if (q.student_id) { sql += ' AND m.student_id = ?'; args.push(q.student_id) }
     if (q.status) { sql += ' AND m.mastery_status = ?'; args.push(q.status) }
+    if (q.q) { sql += ' AND (m.stem LIKE ? OR m.wrong_solution LIKE ? OR m.knowledge_points LIKE ?)'; const like = `%${q.q}%`; args.push(like, like, like) }
     sql += ' ORDER BY m.created_at DESC'
     const rows = db.prepare(sql).all(...args) as any[]
     // 知识点过滤（JSON 数组 LIKE 兜底）

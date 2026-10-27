@@ -53,6 +53,13 @@ export const turntableScene: LabScene = {
     '临界角速度与质量无关（mω²r 与 μmg 同含 m）',
     '圆锥摆：T = mg/cosθ，θ 越大张力越大；ω=√(g/(Lcosθ)) 随 θ 增大',
   ],
+  challenge: {
+    question: '转盘上的物体随盘匀速转动，转速 ω 增大到超过临界值 √(μg/r) 时，物体会怎样？',
+    options: ['继续做圆周运动', '逐渐沿半径向外滑动直至离盘', '立即沿切线飞出盘外', '向圆心滑动'],
+    answer: 1,
+    explanation: '需要的向心力 mω²r 超过最大静摩擦 μmg 后，静摩擦「供不上」，物体沿半径向外滑（实际轨迹是缓慢外旋的螺线，不是立即沿切线飞出）。',
+    reveal_preset: '转盘·超临界外滑',
+  },
   init(): S {
     return { phi: 0, rr: 0, vr: 0, sliding: false }
   },
@@ -100,7 +107,7 @@ export const turntableScene: LabScene = {
       for (let m = 0.5; m <= 1.3; m += 0.4) {
         const rp = m * 130
         ctx.set(`rt${m}`, 'circle', { cx: CX, cy: CY, r: rp, fill: 'none', stroke: 'currentColor', 'stroke-opacity': 0.15, 'stroke-dasharray': '3 5' })
-        ctx.set(`rtl${m}`, 'text', { x: CX + rp * 0.7071 + 4, y: CY - rp * 0.7071 - 4, 'font-size': 9, fill: 'currentColor', 'fill-opacity': 0.45, text: `${fmt(m, 1)}m` })
+        ctx.set(`rtl${m}`, 'text', { x: CX + rp * 0.7071 + 4, y: CY - rp * 0.7071 - 4, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.45, text: `${fmt(m, 1)}m` })
       }
       // 物体（沿半径可拖改 r）
       const pr = st.rr * 130
@@ -132,7 +139,7 @@ export const turntableScene: LabScene = {
       if (st.sliding) tips.push(`已外滑：ω²r > μg（需 ${fmt(need, 2)}N > 最大静摩擦 ${fmt(fmax, 2)}N）`)
       else if (params.omega > wc * 0.9) tips.push(`接近临界：ωc=√(μg/r)=${fmt(wc, 2)} rad/s`)
       if (st.rr >= 1.35) tips.push('已滑出盘缘！')
-      ctx.set('tip', 'text', { x: 60, y: 40, 'font-size': 12, fill: C.warn, text: tips.join('；') })
+      ctx.set('tip', 'text', { x: 60, y: 40, 'font-size': 13, fill: C.warn, text: tips.join('；') })
       data['模式'] = '水平转盘'
       data['需要的向心力 mω²r'] = `${fmt(need, 3)} N`
       data['最大静摩擦 μmg'] = `${fmt(fmax, 3)} N`
@@ -177,7 +184,7 @@ export const turntableScene: LabScene = {
       }
       const w = Math.sqrt(G / (params.L * Math.cos(rad)))
       const Tp = (2 * Math.PI) / w
-      ctx.set('tip', 'text', { x: 60, y: 40, 'font-size': 12, fill: C.warn, text: `θ 越大 → cosθ 越小 → 张力与角速度越大（T=mg/cosθ）` })
+      ctx.set('tip', 'text', { x: 60, y: 40, 'font-size': 13, fill: C.warn, text: `θ 越大 → cosθ 越小 → 张力与角速度越大（T=mg/cosθ）` })
       data['模式'] = '圆锥摆'
       data['角速度 ω'] = `${fmt(w, 3)} rad/s`
       data['周期 2π√(Lcosθ/g)'] = `${fmt(Tp, 3)} s`

@@ -15,8 +15,15 @@ interface CustomPreset {
   state?: Record<string, unknown>
 }
 
-// 舞台网格（浅色，随深色模式）
-function drawGrid(ctx: SvgCtx) {
+// 舞台网格（浅色，随深色模式）；默认关闭（PhET 原则：降低装饰对认知负荷的干扰），工具条可开
+function drawGrid(ctx: SvgCtx, show: boolean) {
+  if (!show) {
+    const ids: string[] = []
+    for (let x = 40; x < ctx.w; x += 40) ids.push(`_gx${x}`)
+    for (let y = 40; y < ctx.h; y += 40) ids.push(`_gy${y}`)
+    ctx.remove(...ids)
+    return
+  }
   for (let x = 40; x < ctx.w; x += 40) {
     ctx.set(`_gx${x}`, 'line', { x1: x, y1: 0, x2: x, y2: ctx.h, stroke: 'currentColor', 'stroke-opacity': 0.05 })
   }
@@ -46,6 +53,11 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [data, setData] = useState<LabData>({})
   const [opts, setOpts] = useState<RenderOpts>({ showForces: true, showComponents: false, showPoints: true })
+  const [showGrid, setShowGrid] = useState(false)
+  // 挑战模式（先预测后揭示）：null=未作答；number=已选选项索引
+  const [challengeOpen, setChallengeOpen] = useState(false)
+  const [challengePick, setChallengePick] = useState<number | null>(null)
+  const [challengeRevealed, setChallengeRevealed] = useState(false)
   const [customPresets, setCustomPresets] = useState<CustomPreset[]>(() => {
     try {
       return JSON.parse(localStorage.getItem(PRESET_KEY(scene.id)) || '[]')
@@ -70,7 +82,7 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
     (forceData = false) => {
       const ctx = ctxRef.current
       if (!ctx) return
-      drawGrid(ctx)
+      drawGrid(ctx, gridRef.current)
       const d = scene.render(ctx, paramsRef.current, stateRef.current, optsRef.current)
       const now = performance.now()
       if (forceData || now - lastDataTs.current > 100) {
@@ -84,6 +96,15 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
   const optsRef = useRef(opts)
   optsRef.current = opts
   doRenderRef.current = doRender
+
+  // 网格开关切换时重绘（走 ref 避免闭包过期）
+  const gridRef = useRef(showGrid)
+  gridRef.current = showGrid
+  useEffect(() => {
+    if (playingRef.current) return
+    cancelAnimationFrame(onceRaf.current)
+    onceRaf.current = requestAnimationFrame(() => doRenderRef.current())
+  }, [showGrid])
 
   // 暂停状态下请求重绘一帧
   const requestRender = useCallback(() => {
@@ -177,6 +198,28 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
     doRender(true)
   }
 
+  // —— 挑战模式（先预测后揭示）——
+  const openChallenge = () => {
+    setChallengePick(null)
+    setChallengeRevealed(false)
+    setChallengeOpen(true)
+  }
+  // 揭示：应用预设/参数（动态课件自动播放，演示正确答案）
+  const revealChallenge = () => {
+    const ch = scene.challenge
+    if (!ch) return
+    if (ch.reveal_preset) {
+      const hit = [...scene.presets, ...customPresets].find((p) => p.name === ch.reveal_preset)
+      if (hit) applyPreset(hit.params, hit.state)
+    } else if (ch.reveal_params) {
+      const merged = { ...initialParams(scene), ...ch.reveal_params }
+      applyPreset(merged)
+    }
+    setChallengeRevealed(true)
+    // 动态课件：揭示后自动播放，让「正确答案」动起来（PhET：predict → reveal）
+    if (scene.step) setTimeout(() => setPlaying(true), 600)
+  }
+
   // 自定义预设（localStorage 按课件 id 存储）
   const savePreset = () => {
     const name = window.prompt('给这组参数起个名字（如：临界角演示）')
@@ -242,6 +285,8 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
       <button className={`btn-outline !px-3 !py-1.5 text-xs ${opts.showForces ? '!border-primary-400 !text-primary-600' : ''}`} onClick={() => setOpts({ ...opts, showForces: !opts.showForces })}>力箭头</button>
       <button className={`btn-outline !px-3 !py-1.5 text-xs ${opts.showComponents ? '!border-primary-400 !text-primary-600' : ''}`} onClick={() => setOpts({ ...opts, showComponents: !opts.showComponents })}>分量</button>
       <button className={`btn-outline !px-3 !py-1.5 text-xs ${opts.showPoints ? '!border-primary-400 !text-primary-600' : ''}`} onClick={() => setOpts({ ...opts, showPoints: !opts.showPoints })}>受力点</button>
+      <button className={`btn-outline !px-3 !py-1.5 text-xs ${showGrid ? '!border-primary-400 !text-primary-600' : ''}`} onClick={() => setShowGrid(!showGrid)}>网格</button>
+      {scene.challenge && <button className="btn-outline !px-3 !py-1.5 text-xs !border-amber-400 !text-amber-600" onClick={openChallenge}>🎯 挑战</button>}
       {!fullscreen && <button className="btn-outline !px-3 !py-1.5 text-xs ml-auto" onClick={() => setFullscreen(true)}>⛶ 全屏课件</button>}
       {fullscreen && <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setFullscreen(false)}>✕ 退出全屏（Esc）</button>}
     </div>
@@ -314,6 +359,58 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
     </div>
   )
 
+  // —— 挑战面板（先预测后揭示）：遮罩弹层，先作答再揭示并自动演示 ——
+  const ch = scene.challenge
+  const challengePanel = ch && challengeOpen ? (
+    <div className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4" onMouseDown={() => setChallengeOpen(false)}>
+      <div className="w-full max-w-md card !bg-white dark:!bg-slate-900 p-5 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-base font-bold">🎯 挑战：先预测再看结果</span>
+          <button className="ml-auto text-slate-400 hover:text-slate-600 text-lg leading-none" onClick={() => setChallengeOpen(false)} aria-label="关闭">×</button>
+        </div>
+        <p className="text-sm mb-4 leading-relaxed">{ch.question}</p>
+        <div className="space-y-2">
+          {ch.options.map((o, i) => {
+            const picked = challengePick === i
+            const isRight = ch.answer === i
+            let cls = 'btn-outline w-full !justify-start text-left text-sm'
+            if (challengePick !== null || challengeRevealed) {
+              if (isRight) cls += ' !border-green-500 !bg-green-50 !text-green-700 dark:!bg-green-900/30 dark:!text-green-300'
+              else if (picked) cls += ' !border-red-400 !bg-red-50 !text-red-600 dark:!bg-red-900/30'
+            }
+            return (
+              <button key={i} className={cls} disabled={challengeRevealed} onClick={() => setChallengePick(i)}>
+                <span className="num mr-2 opacity-60">{'ABCD'[i]}.</span>{o}
+                {challengePick !== null && isRight && <span className="ml-auto">✓</span>}
+                {picked && !isRight && <span className="ml-auto">✗</span>}
+              </button>
+            )
+          })}
+        </div>
+        {challengePick !== null && !challengeRevealed && (
+          <div className={`mt-3 text-sm font-medium ${challengePick === ch.answer ? 'text-green-600' : 'text-red-500'}`}>
+            {challengePick === ch.answer ? '✓ 答对了！' : '✗ 再想想，也可以直接揭示答案看演示'}
+          </div>
+        )}
+        {challengeRevealed && (
+          <div className="mt-3 text-sm text-slate-600 dark:text-slate-300 bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3 leading-relaxed">
+            <span className="font-semibold">解答：</span>{ch.explanation}
+          </div>
+        )}
+        <div className="mt-4 flex gap-2 justify-end">
+          {!challengeRevealed && (
+            <button className="btn-primary !px-4 !py-1.5 text-xs" disabled={challengePick === null} onClick={revealChallenge}>
+              揭示答案（自动演示）
+            </button>
+          )}
+          {challengeRevealed && (
+            <button className="btn-outline !px-4 !py-1.5 text-xs" onClick={() => setChallengeOpen(false)}>关闭挑战</button>
+          )}
+        </div>
+      </div>
+    </div>
+  ) : null
+
   // —— 全屏课件模式：舞台与图像面板同屏并排、字号放大、参数面板收进抽屉 ——
   if (fullscreen) {
     return (
@@ -340,30 +437,30 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
             {paramPanel}
           </div>
         )}
+        {challengePanel}
       </div>
     )
   }
 
   // —— 普通模式：usesGraph 课件宽屏三栏（舞台 | 图像面板 | 参数+数据），投屏教学可同屏对比 ——
-  const gridCls = scene.usesGraph
-    ? 'grid gap-4 items-start md:grid-cols-[minmax(0,1fr)_290px] xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_290px]'
-    : 'grid gap-4 items-start md:grid-cols-[minmax(0,1fr)_290px]'
+  // 布局规则写在 index.css 的 .lab-grid 组件类里（不依赖 Tailwind 任意值，避免 JIT 生成失败导致布局塌陷）
   return (
     <div className="space-y-4">
       {toolbar}
       {presetChips}
-      <div className={gridCls}>
-        <div className="space-y-4 min-w-0">
+      <div className={`lab-grid ${scene.usesGraph ? 'uses-graph' : ''}`}>
+        <div className="lab-cell-stage space-y-4 min-w-0">
           {stage}
           {/* 无图像面板的课件也要挂载 graph SVG（引擎依赖），仅隐藏 */}
           {!scene.usesGraph && graphPanel}
         </div>
-        {scene.usesGraph && <div className="min-w-0 md:col-start-1 md:row-start-2 xl:col-start-2 xl:row-start-1">{graphPanel}</div>}
-        <div className="space-y-4 md:col-start-2 md:row-start-1 xl:col-start-3">
+        {scene.usesGraph && <div className="lab-cell-graph min-w-0">{graphPanel}</div>}
+        <div className="lab-cell-side space-y-4">
           <div className="card p-4">{paramPanel}</div>
           {dataPanel}
         </div>
       </div>
+      {challengePanel}
     </div>
   )
 }

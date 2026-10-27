@@ -96,7 +96,7 @@ export const efieldScene: LabScene = {
     const qt = params.qt * 1e-9
     const posQ = params.qt >= 0
     const tc = ctx.set('tc', 'circle', { cx: st.pos.x, cy: st.pos.y, r: 11, fill: posQ ? '#f59e0b' : '#0ea5e9', stroke: posQ ? '#b45309' : '#0284c7', 'stroke-width': 2, 'fill-opacity': 0.95 })
-    ctx.set('tc-t', 'text', { x: st.pos.x, y: st.pos.y + 4, 'font-size': 11, 'text-anchor': 'middle', fill: '#fff', text: posQ ? '+' : '−' })
+    ctx.set('tc-t', 'text', { x: st.pos.x, y: st.pos.y + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: posQ ? '+' : '−' })
     ctx.drag(tc, (p) => {
       st.pos = v(clamp(p.x, 14, ctx.w - 14), clamp(p.y, 14, ctx.h - 14))
       ctx.requestRender()
@@ -129,8 +129,8 @@ export const efieldScene: LabScene = {
     }
 
     // 提示
-    ctx.set('tip', 'text', { x: 44, y: 32, 'font-size': 12, fill: 'currentColor', 'fill-opacity': 0.55, text: '紫线=电场线（疏→密 场强增大）；橙色=试探电荷（可拖）' })
-    if (Math.abs(qt) < 0.01) ctx.set('tip2', 'text', { x: 44, y: 50, 'font-size': 12, fill: C.warn, text: 'q=0：不受力，但该点场强 E 依然存在' })
+    ctx.set('tip', 'text', { x: 44, y: 32, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.55, text: '紫线=电场线（疏→密 场强增大）；橙色=试探电荷（可拖）' })
+    if (Math.abs(qt) < 0.01) ctx.set('tip2', 'text', { x: 44, y: 50, 'font-size': 13, fill: C.warn, text: 'q=0：不受力，但该点场强 E 依然存在' })
     else ctx.remove('tip2')
 
     data['电荷组合'] = mode === 0 ? '单个正点电荷' : mode === 1 ? '等量同号' : '等量异号'

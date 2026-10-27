@@ -26,7 +26,7 @@ export function axes(
     const tx = x + (w * i) / 4
     ctx.gset(`g-xt${i}`, 'line', { x1: tx, y1: y + h, x2: tx, y2: y + h + 4, stroke: 'currentColor', 'stroke-opacity': 0.5 })
     ctx.gset(`g-xlt${i}`, 'text', {
-      x: tx, y: y + h + 14, 'font-size': 9, 'text-anchor': 'middle', fill: 'currentColor',
+      x: tx, y: y + h + 14, 'font-size': 11, 'text-anchor': 'middle', fill: 'currentColor',
       'fill-opacity': 0.6,
       text: ((xMin + ((opts.xMax - xMin) * i) / 4)).toFixed(1).replace(/\.0$/, ''),
     })
@@ -36,14 +36,14 @@ export function axes(
     const ty = y + h - (h * i) / 3
     ctx.gset(`g-yt${i}`, 'line', { x1: x - 4, y1: ty, x2: x, y2: ty, stroke: 'currentColor', 'stroke-opacity': 0.5 })
     ctx.gset(`g-ylt${i}`, 'text', {
-      x: x - 6, y: ty + 3, 'font-size': 9, 'text-anchor': 'end', fill: 'currentColor',
+      x: x - 6, y: ty + 3, 'font-size': 11, 'text-anchor': 'end', fill: 'currentColor',
       'fill-opacity': 0.6,
       text: ((yMin + ((opts.yMax - yMin) * i) / 3)).toFixed(1).replace(/\.0$/, ''),
     })
   }
   // 轴标签
-  ctx.gset('g-xlabel', 'text', { x: x + w, y: y + h + 24, 'font-size': 10, 'text-anchor': 'end', fill: 'currentColor', 'fill-opacity': 0.7, text: opts.xLabel })
-  ctx.gset('g-ylabel', 'text', { x: x + 2, y: y - 4, 'font-size': 10, fill: 'currentColor', 'fill-opacity': 0.7, text: opts.yLabel })
+  ctx.gset('g-xlabel', 'text', { x: x + w, y: y + h + 24, 'font-size': 12, 'text-anchor': 'end', fill: 'currentColor', 'fill-opacity': 0.7, text: opts.xLabel })
+  ctx.gset('g-ylabel', 'text', { x: x + 2, y: y - 4, 'font-size': 12, fill: 'currentColor', 'fill-opacity': 0.7, text: opts.yLabel })
   return box
 }
 

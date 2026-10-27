@@ -100,8 +100,8 @@ export const selectorScene: LabScene = {
       const cy = 210
       ctx.set('plate-t', 'rect', { x: px0, y: cy - 62, width: px1 - px0, height: 8, fill: '#8b5cf6' })
       ctx.set('plate-b', 'rect', { x: px0, y: cy + 54, width: px1 - px0, height: 8, fill: '#8b5cf6' })
-      ctx.set('plate-t-l', 'text', { x: px0 - 6, y: cy - 50, 'font-size': 11, 'text-anchor': 'end', fill: C.field, text: '+' })
-      ctx.set('plate-b-l', 'text', { x: px0 - 6, y: cy + 62, 'font-size': 11, 'text-anchor': 'end', fill: C.field, text: '−' })
+      ctx.set('plate-t-l', 'text', { x: px0 - 6, y: cy - 50, 'font-size': 13, 'text-anchor': 'end', fill: C.field, text: '+' })
+      ctx.set('plate-b-l', 'text', { x: px0 - 6, y: cy + 62, 'font-size': 13, 'text-anchor': 'end', fill: C.field, text: '−' })
       for (let i = 0; i < 4; i++) {
         const X = px0 + 40 + i * 90
         ctx.set(`e${i}`, 'line', { x1: X, y1: cy - 50, x2: X, y2: cy + 50, stroke: C.field, 'stroke-opacity': 0.3, 'stroke-width': 1.4 })
@@ -109,14 +109,14 @@ export const selectorScene: LabScene = {
       let idx = 0
       for (let gy2 = cy - 42; gy2 <= cy + 42; gy2 += 28) {
         for (let gx2 = px0 + 20; gx2 <= px1 - 20; gx2 += 52) {
-          ctx.set(`b${idx}`, 'text', { x: gx2, y: gy2, 'font-size': 12, 'text-anchor': 'middle', fill: C.field, 'fill-opacity': 0.28, text: '×' })
+          ctx.set(`b${idx}`, 'text', { x: gx2, y: gy2, 'font-size': 13, 'text-anchor': 'middle', fill: C.field, 'fill-opacity': 0.28, text: '×' })
           idx++
         }
       }
       for (let i = idx; i < 20; i++) ctx.remove(`b${i}`)
 
       ctx.set('slit', 'line', { x1: px0 - 26, y1: cy - 14, x2: px0 - 26, y2: cy + 14, stroke: '#94a3b8', 'stroke-width': 5 })
-      ctx.set('slit-l', 'text', { x: px0 - 30, y: cy + 32, 'font-size': 10, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: '入口' })
+      ctx.set('slit-l', 'text', { x: px0 - 30, y: cy + 32, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: '入口' })
       const pX = px0 - 20 + Math.min(st.selX + 20, 360)
       const pY = cy + clamp(st.selY, -60, 60)
       ctx.set('p', 'circle', { cx: pX, cy: pY, r: 7, fill: '#f59e0b', stroke: '#b45309' })
@@ -137,7 +137,7 @@ export const selectorScene: LabScene = {
             : tooFast ? '✗ v 太快：qvB > qE，偏向上板被吸收' : '✗ v 太慢：qvB < qE，偏向下板被吸收'
           : '飞行中……注意观察是否偏转',
       })
-      ctx.set('tip2', 'text', { x: 44, y: 64, 'font-size': 12, fill: 'currentColor', 'fill-opacity': 0.55, text: `v₀=E/B=${fmt(v0 / 1e5, 2)}×10⁵m/s（当前 v=${fmt(params.v, 1)}×10⁵）` })
+      ctx.set('tip2', 'text', { x: 44, y: 64, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.55, text: `v₀=E/B=${fmt(v0 / 1e5, 2)}×10⁵m/s（当前 v=${fmt(params.v, 1)}×10⁵）` })
 
       data['模式'] = '速度选择器'
       data['直线通过条件 v₀=E/B'] = `${fmt(v0 / 1e5, 2)}×10⁵ m/s`
@@ -157,9 +157,9 @@ export const selectorScene: LabScene = {
       // 两个 D 形盒（左上 / 右下，竖直缝隙）
       ctx.set('d1', 'path', { d: 'M320,210 L320,80 A130,130 0 0,0 190,210 Z', fill: '#e2e8f0', 'fill-opacity': 0.4, stroke: '#64748b', 'stroke-width': 2 })
       ctx.set('d2', 'path', { d: 'M320,210 L320,340 A130,130 0 0,1 450,210 Z', fill: '#cbd5e1', 'fill-opacity': 0.4, stroke: '#64748b', 'stroke-width': 2 })
-      ctx.set('d-l', 'text', { x: 245, y: 145, 'font-size': 12, fill: '#475569', text: 'D₁' })
-      ctx.set('d-l2', 'text', { x: 398, y: 285, 'font-size': 12, fill: '#475569', text: 'D₂' })
-      ctx.set('gap-l', 'text', { x: 312, y: 210, 'font-size': 9, 'text-anchor': 'end', fill: C.warn, text: '缝隙' })
+      ctx.set('d-l', 'text', { x: 245, y: 145, 'font-size': 13, fill: '#475569', text: 'D₁' })
+      ctx.set('d-l2', 'text', { x: 398, y: 285, 'font-size': 13, fill: '#475569', text: 'D₂' })
+      ctx.set('gap-l', 'text', { x: 312, y: 210, 'font-size': 13, 'text-anchor': 'end', fill: C.warn, text: '缝隙' })
 
       // 螺旋轨迹：每半圈半径按 r_n 增长
       const pts: string[] = []
@@ -182,13 +182,13 @@ export const selectorScene: LabScene = {
 
       if (reachedMax || st.done) {
         ctx.set('exit', 'rect', { x: 442, y: 200, width: 34, height: 18, fill: '#059669', rx: 3 })
-        ctx.set('exit-l', 'text', { x: 459, y: 194, 'font-size': 10, 'text-anchor': 'middle', fill: '#059669', text: '引出口' })
+        ctx.set('exit-l', 'text', { x: 459, y: 194, 'font-size': 13, 'text-anchor': 'middle', fill: '#059669', text: '引出口' })
         ctx.set('tip', 'text', { x: 44, y: 44, 'font-size': 13, fill: '#059669', text: `★ 达到最大半径 R=${fmt(Rmax, 2)}m，引出射出！共加速 ${n} 次` })
       } else {
         ctx.remove('exit', 'exit-l')
         ctx.set('tip', 'text', { x: 44, y: 44, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.6, text: '螺旋半径渐增：每经过缝隙加速一次，r=mv/(qB) 随之变大' })
       }
-      ctx.set('tip2', 'text', { x: 44, y: 64, 'font-size': 11, fill: 'currentColor', 'fill-opacity': 0.45, text: '点「播放」观看螺旋加速动画；最大动能只由 R 与 B 决定（与 U 无关）' })
+      ctx.set('tip2', 'text', { x: 44, y: 64, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.45, text: '点「播放」观看螺旋加速动画；最大动能只由 R 与 B 决定（与 U 无关）' })
 
       data['模式'] = '回旋加速器'
       data['已加速次数 n'] = String(n)

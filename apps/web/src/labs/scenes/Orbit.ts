@@ -92,7 +92,7 @@ export const orbitScene: LabScene = {
 
     // 地球
     ctx.set('earth', 'circle', { cx: CENTER.x, cy: CENTER.y, r: EARTH_R, fill: '#3b82f6', stroke: '#1d4ed8', 'stroke-width': 2 })
-    ctx.set('earth-l', 'text', { x: CENTER.x, y: CENTER.y + 4, 'font-size': 10, 'text-anchor': 'middle', fill: '#fff', text: '地球' })
+    ctx.set('earth-l', 'text', { x: CENTER.x, y: CENTER.y + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: '地球' })
 
     // 圆轨道参考圈（圆轨道模式）
     if (circular) {
@@ -156,7 +156,7 @@ export const orbitScene: LabScene = {
     }
     tips.push('⚠ 半径刻度为对数压缩，非等比')
     tips.forEach((tp, i) => {
-      ctx.set(`tip${i}`, 'text', { x: 50, y: 34 + i * 17, 'font-size': 12, fill: i === tips.length - 1 ? 'currentColor' : C.warn, 'fill-opacity': i === tips.length - 1 ? 0.5 : 1, text: tp })
+      ctx.set(`tip${i}`, 'text', { x: 50, y: 34 + i * 17, 'font-size': 13, fill: i === tips.length - 1 ? 'currentColor' : C.warn, 'fill-opacity': i === tips.length - 1 ? 0.5 : 1, text: tp })
     })
     for (let i = tips.length; i < 5; i++) ctx.remove(`tip${i}`)
 

@@ -1,7 +1,8 @@
 // 拍批流程（产品灵魂）：拍照/相册 → 压缩上传 → AI 分析（骨架屏+进度文案）→ 结果编辑逐项确认 → 保存入库
 // 流程状态存于全局 store（stores/analyze.ts）：切到其它页面再回来仍停留在上次的分析界面，不丢结果
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import {Camera, Image} from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { get } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
 import { useAnalyzeStore } from '@/stores/analyze'
@@ -21,6 +22,8 @@ const VERDICT_COLOR: Record<string, string> = {
 export default function Analyze() {
   const navigate = useNavigate()
   const show = useToastStore((s) => s.show)
+  // 支持从其它页面带 ?student=<id> 进入（如学生详情「拍作业分析」入口），自动选中该学生
+  const presetStudent = new URLSearchParams(useLocation().search).get('student')
 
   // 流程状态全部来自全局 store，页面只是视图
   const step = useAnalyzeStore((s) => s.step)
@@ -55,6 +58,12 @@ export default function Analyze() {
     get<Student[]>('/api/students').then(setStudents).catch((e) => show(e.message || '加载失败'))
   }, [show])
 
+  // 预选学生（学生详情快捷入口带入）
+  useEffect(() => {
+    const n = Number(presetStudent)
+    if (Number.isFinite(n) && n > 0) setStudentId(n)
+  }, [presetStudent, setStudentId])
+
   const pick = (fl: FileList | null) => {
     if (!fl?.length) return
     addFiles(Array.from(fl).filter((f) => f.type.startsWith('image/')))
@@ -82,8 +91,8 @@ export default function Analyze() {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <button className="btn-primary !py-6 text-base" onClick={() => cameraRef.current?.click()}>📷 拍照</button>
-          <button className="btn-outline !py-6 text-base" onClick={() => albumRef.current?.click()}>🖼️ 相册多选</button>
+          <button className="btn-primary !py-6 text-base" onClick={() => cameraRef.current?.click()}><Camera className="w-4 h-4 inline-block align-[-2px]" /> 拍照</button>
+          <button className="btn-outline !py-6 text-base" onClick={() => albumRef.current?.click()}><Image className="w-4 h-4 inline-block align-[-2px]" /> 相册多选</button>
         </div>
         {/* HTTP 局域网下不能依赖 getUserMedia，用系统相机 input capture */}
         <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { pick(e.target.files); e.target.value = '' }} />

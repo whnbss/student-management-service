@@ -60,6 +60,13 @@ export const catchUpScene: LabScene = {
     '匀减速追匀速：vA 减到 vB 之前没追上，之后就再也追不上了',
     '相对运动观点：以 B 为参考系，A 以 vA−vB、aA−aB 做匀变速',
   ],
+  challenge: {
+    question: 'A 车以 20 m/s 匀减速（a = −2 m/s²）追前方 20 m 处以 10 m/s 匀速行驶的 B 车，能追上吗？',
+    options: ['能追上', '追不上（距离先减后增）', '恰好追不上', '无法判断'],
+    answer: 0,
+    explanation: '以 B 为参考系：相对初速 10 m/s、相对加速度 −2 m/s²。追上条件 10t − t² = 20 有解（t ≈ 2.8 s），A 能追上；若把 d0 加大到超过 25 m 就追不上了——试拖 d0 看看临界。',
+    reveal_preset: '能追上（匀减速追匀速）',
+  },
   init(params: SceneParams): S {
     return {
       t: 0,
@@ -116,22 +123,26 @@ export const catchUpScene: LabScene = {
       const X = sx(m)
       if (X < 40 || X > 604) continue
       ctx.set(`mk${m}`, 'line', { x1: X, y1: ROAD_Y + 26, x2: X, y2: ROAD_Y + 34, stroke: 'currentColor', 'stroke-opacity': 0.45 })
-      ctx.set(`mkl${m}`, 'text', { x: X, y: ROAD_Y + 46, 'font-size': 9, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: `${m}m` })
+      ctx.set(`mkl${m}`, 'text', { x: X, y: ROAD_Y + 46, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: `${m}m` })
     }
     // 起点线（随镜头移动）
     const startSX = sx(0)
     if (startSX > 40 && startSX < 604) {
       ctx.set('startline', 'line', { x1: startSX, y1: ROAD_Y - 40, x2: startSX, y2: ROAD_Y + 16, stroke: 'currentColor', 'stroke-opacity': 0.3, 'stroke-dasharray': '4 4' })
-      ctx.set('startl', 'text', { x: startSX, y: ROAD_Y - 46, 'font-size': 10, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.4, text: '起点' })
+      ctx.set('startl', 'text', { x: startSX, y: ROAD_Y - 46, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.4, text: '起点' })
     } else ctx.remove('startline', 'startl')
 
-    // 两车位置（A 车不再可拖：初始间距只通过 B 车拖拽或 d0 滑块设置）
+    // 两车分车道绘制（A 下车道 / B 上车道）：任意时刻两车都不重叠遮挡，间距用标尺读数
+    // A 车不再可拖：初始间距只通过 B 车拖拽或 d0 滑块设置
     const ax = sx(st.xA)
     const bx = sx(st.xB)
-    ctx.set('carA', 'rect', { x: ax - CAR_W / 2, y: ROAD_Y - 8, width: CAR_W, height: CAR_H, rx: 4, fill: C.accent, stroke: '#3730a3', 'stroke-width': 1.5 })
-    ctx.set('carA-t', 'text', { x: ax, y: ROAD_Y + 3, 'font-size': 9, 'text-anchor': 'middle', fill: '#fff', text: 'A' })
-    const carB = ctx.set('carB', 'rect', { x: bx - CAR_W / 2, y: ROAD_Y - 8, width: CAR_W, height: CAR_H, rx: 4, fill: C.normal, stroke: '#1d4ed8', 'stroke-width': 1.5 })
-    ctx.set('carB-t', 'text', { x: bx, y: ROAD_Y + 3, 'font-size': 9, 'text-anchor': 'middle', fill: '#fff', text: 'B' })
+    const LANE_A = ROAD_Y - 2 // A 车道（下）
+    const LANE_B = ROAD_Y - 30 // B 车道（上）
+    ctx.set('lane-dash', 'line', { x1: 40, y1: ROAD_Y - 16, x2: 600, y2: ROAD_Y - 16, stroke: '#fff', 'stroke-opacity': 0.35, 'stroke-width': 1.5, 'stroke-dasharray': '8 8' })
+    ctx.set('carA', 'rect', { x: ax - CAR_W / 2, y: LANE_A, width: CAR_W, height: CAR_H, rx: 4, fill: C.accent, stroke: '#3730a3', 'stroke-width': 1.5 })
+    ctx.set('carA-t', 'text', { x: ax, y: LANE_A + 11.5, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: 'A' })
+    const carB = ctx.set('carB', 'rect', { x: bx - CAR_W / 2, y: LANE_B, width: CAR_W, height: CAR_H, rx: 4, fill: C.normal, stroke: '#1d4ed8', 'stroke-width': 1.5 })
+    ctx.set('carB-t', 'text', { x: bx, y: LANE_B + 11.5, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: 'B' })
     ctx.drag(carB, (p) => {
       if ((st.t ?? 0) > 0) return
       const d = clamp((p.x - START_X + cam) / PX_PER_M, 0, 60)
@@ -141,19 +152,19 @@ export const catchUpScene: LabScene = {
     // 间距标注（车 A 前沿 → 车 B 前沿）
     const gap = st.xB - st.xA
     if (gap > 0 && bx - ax > 10) {
-      const y0 = ROAD_Y - 30
+      const y0 = ROAD_Y - 44
       ctx.set('gapline', 'line', { x1: ax, y1: y0, x2: bx, y2: y0, stroke: C.net, 'stroke-width': 1.5 })
       ctx.set('gapt1', 'line', { x1: ax, y1: y0 - 5, x2: ax, y2: y0 + 5, stroke: C.net, 'stroke-width': 1.5 })
       ctx.set('gapt2', 'line', { x1: bx, y1: y0 - 5, x2: bx, y2: y0 + 5, stroke: C.net, 'stroke-width': 1.5 })
-      ctx.set('gaplabel', 'text', { x: (ax + bx) / 2, y: y0 - 8, 'font-size': 12, 'text-anchor': 'middle', fill: C.net, text: `${fmt(gap, 1)} m` })
+      ctx.set('gaplabel', 'text', { x: (ax + bx) / 2, y: y0 - 8, 'font-size': 13, 'text-anchor': 'middle', fill: C.net, text: `${fmt(gap, 1)} m` })
     } else {
       ctx.remove('gapline', 'gapt1', 'gapt2', 'gaplabel')
     }
 
     // 速度箭头
     if (opts.showForces) {
-      drawArrow(ctx, 'va', v(ax, ROAD_Y - 46), add(v(ax, ROAD_Y - 46), v(st.vA * 4, 0)), { color: C.accent, label: `vA=${fmt(st.vA, 1)}` })
-      drawArrow(ctx, 'vb', v(bx, ROAD_Y - 62), add(v(bx, ROAD_Y - 62), v(st.vB * 4, 0)), { color: C.normal, label: `vB=${fmt(st.vB, 1)}` })
+      drawArrow(ctx, 'va', v(ax, LANE_A + 7), add(v(ax, LANE_A + 7), v(st.vA * 4, 0)), { color: C.accent, label: `vA=${fmt(st.vA, 1)}` })
+      drawArrow(ctx, 'vb', v(bx, LANE_B - 10), add(v(bx, LANE_B - 10), v(st.vB * 4, 0)), { color: C.normal, label: `vB=${fmt(st.vB, 1)}` })
     } else {
       ctx.remove('va', 'va-head', 'va-label', 'vb', 'vb-head', 'vb-label')
     }
@@ -163,22 +174,28 @@ export const catchUpScene: LabScene = {
     if (st.passed) tips.push('A 已追上/超过 B')
     else if ((st.t ?? 0) >= T_MAX) tips.push('时间到仍未追上')
     if (st.minGap < params.d0 && !st.passed) tips.push(`最小间距 ${fmt(st.minGap, 1)} m（t=${fmt(st.minGapT, 1)}s 时速度相等处最近）`)
-    ctx.set('tip', 'text', { x: 70, y: 40, 'font-size': 12, fill: C.warn, text: tips.join('；') })
+    ctx.set('tip', 'text', { x: 70, y: 40, 'font-size': 13, fill: C.warn, text: tips.join('；') })
 
     // v-t 双曲线
     if (ctx.gw) {
       const box = { x: 44, y: 24, w: ctx.gw - 70, h: ctx.gh - 66 }
-      const vMax = 30
+      // 量程按当前参数的理论峰值自适应（匀加速到 T_MAX 的最大速度），避免半板空白或曲线被裁
+      const vPeak = Math.max(
+        params.vA + (params.aA > 0 ? params.aA * T_MAX : 0),
+        params.vB + (params.aB > 0 ? params.aB * T_MAX : 0),
+        1
+      )
+      const vMax = Math.ceil(vPeak * 1.15)
       axes(ctx, box, { xLabel: 't/s', yLabel: 'v/(m/s)', xMax: T_MAX, yMax: vMax })
       polyline(ctx, 'g-va', st.ptsA, box, 0, T_MAX, 0, vMax, C.accent)
       polyline(ctx, 'g-vb', st.ptsB, box, 0, T_MAX, 0, vMax, C.normal)
-      ctx.gset('g-legend', 'text', { x: box.x + 8, y: box.y + 14, 'font-size': 11, fill: C.accent, text: '— A 车' })
-      ctx.gset('g-legend2', 'text', { x: box.x + 60, y: box.y + 14, 'font-size': 11, fill: C.normal, text: '— B 车' })
+      ctx.gset('g-legend', 'text', { x: box.x + 8, y: box.y + 14, 'font-size': 13, fill: C.accent, text: '— A 车' })
+      ctx.gset('g-legend2', 'text', { x: box.x + 60, y: box.y + 14, 'font-size': 13, fill: C.normal, text: '— B 车' })
       // 速度相等时刻（间距极值点）：两线交点竖直虚线
       if (!st.passed && st.minGapT > 0 && st.minGapT < T_MAX) {
         const X = gx(box, 0, T_MAX, st.minGapT)
         ctx.gset('g-min', 'line', { x1: X, y1: box.y, x2: X, y2: box.y + box.h, stroke: C.warn, 'stroke-dasharray': '4 4', 'stroke-opacity': 0.7 })
-        ctx.gset('g-minlabel', 'text', { x: X + 4, y: box.y + 26, 'font-size': 10, fill: C.warn, text: '速度相等' })
+        ctx.gset('g-minlabel', 'text', { x: X + 4, y: box.y + 26, 'font-size': 13, fill: C.warn, text: '速度相等' })
       }
     }
     data['时间 t'] = `${fmt(st.t, 2)} s`

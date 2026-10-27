@@ -3,6 +3,7 @@ import Database from 'better-sqlite3'
 import path from 'node:path'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
+import { sanitizeAiText } from '@workbench/shared'
 
 // data 目录固定在项目根（apps/api 向上两级）
 const DATA_DIR = path.resolve(import.meta.dirname, '../../..', 'data')
@@ -139,6 +140,37 @@ export function getSetting(key: string): string | null {
 export function setSetting(key: string, value: string) {
   db.prepare('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value)
 }
+
+// ---------- 轻量迁移：老库升级 + 存量数据一次性清洗 ----------
+
+// 清洗文本里字面残留的 \n / \\（AI JSON 双重转义遗留，见 sanitizeAiText）
+function sanitizeStoredText(s: string): string {
+  if (!s.includes('\\')) return s
+  return sanitizeAiText(s)
+}
+
+function migrateSchema() {
+  // questions 表补 figure 列（题目配图：SVG 模板渲染结果或上传图片路径）
+  const cols = db.prepare('PRAGMA table_info(questions)').all() as Array<{ name: string }>
+  if (!cols.some((c) => c.name === 'figure')) {
+    db.exec("ALTER TABLE questions ADD COLUMN figure TEXT NOT NULL DEFAULT ''")
+  }
+  // 存量题目一次性清洗：字面 \n → 真实换行、字面 \\ → \（只跑一次，标记在 settings）
+  if (!getSetting('question_text_sanitized_v1')) {
+    const rows = db.prepare('SELECT id, stem, answer, solution, pitfall FROM questions').all() as Array<{
+      id: number; stem: string; answer: string; solution: string; pitfall: string
+    }>
+    const upd = db.prepare('UPDATE questions SET stem=?, answer=?, solution=?, pitfall=? WHERE id=?')
+    for (const r of rows) {
+      const [stem, answer, solution, pitfall] = [r.stem, r.answer, r.solution, r.pitfall].map(sanitizeStoredText)
+      if (stem !== r.stem || answer !== r.answer || solution !== r.solution || pitfall !== r.pitfall) {
+        upd.run(stem, answer, solution, pitfall, r.id)
+      }
+    }
+    setSetting('question_text_sanitized_v1', '1')
+  }
+}
+migrateSchema()
 
 export function nowISO() {
   return new Date().toISOString()

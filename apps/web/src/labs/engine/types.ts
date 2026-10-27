@@ -28,6 +28,20 @@ export interface Preset {
   state?: Record<string, unknown>
 }
 
+/** 先预测后揭示（PhET 教学法）：挑战题面 + 选项 + 判定 + 揭示解释 */
+export interface LabChallenge {
+  question: string
+  options: string[]
+  /** 正确选项索引（从 0 开始） */
+  answer: number
+  /** 揭示时展示的讲解 */
+  explanation: string
+  /** 揭示时自动应用的预设名（演示正确答案的情景，须与 presets 中的 name 一致） */
+  reveal_preset?: string
+  /** 揭示时直接应用的参数（与 reveal_preset 二选一，优先用预设） */
+  reveal_params?: Record<string, number>
+}
+
 /** 实时数据面板：label → 显示文本 */
 export type LabData = Record<string, string>
 
@@ -94,6 +108,8 @@ export interface LabScene {
   formulas?: string[]
   /** 教学要点（2~3 条易错点，详情页折叠卡，投影时可直接念） */
   keyPoints?: string[]
+  /** 挑战模式（先预测后揭示），配置了才显示「挑战」按钮 */
+  challenge?: LabChallenge
   /** 初始化/重置场景状态 */
   init(params: SceneParams): LabState
   /** 推进物理过程（固定时间步长，可选；静态场景无此方法） */

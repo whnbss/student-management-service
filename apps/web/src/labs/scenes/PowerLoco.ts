@@ -143,8 +143,8 @@ export const powerScene: LabScene = {
       } else ctx.remove('fx', 'fx-head', 'fx-label')
       // 位移标注
       ctx.set('distline', 'line', { x1: START_X, y1: GROUND_Y + 44, x2: bx, y2: GROUND_Y + 44, stroke: C.accent, 'stroke-width': 2 })
-      ctx.set('distlabel', 'text', { x: (START_X + bx) / 2, y: GROUND_Y + 58, 'font-size': 12, 'text-anchor': 'middle', fill: C.accent, text: `l=${fmt(st.x, 2)} m` })
-      ctx.set('tip', 'text', { x: 70, y: 44, 'font-size': 12, fill: C.warn, text: '拖箭头端点改 F 与 α；α=90° 时力不做功（W=0）' })
+      ctx.set('distlabel', 'text', { x: (START_X + bx) / 2, y: GROUND_Y + 58, 'font-size': 13, 'text-anchor': 'middle', fill: C.accent, text: `l=${fmt(st.x, 2)} m` })
+      ctx.set('tip', 'text', { x: 70, y: 44, 'font-size': 13, fill: C.warn, text: '拖箭头端点改 F 与 α；α=90° 时力不做功（W=0）' })
       if (ctx.gw) ctx.gclear()
       const W = params.F * st.x * Math.cos(rad)
       data['功 W=Flcosα'] = `${fmt(W, 1)} J`
@@ -177,7 +177,7 @@ export const powerScene: LabScene = {
       else tips.push(`已转恒功率段：F=P/v 减小，v→vmax=${fmt(vMax, 1)} m/s`)
     }
     if (st.x >= 40) tips.push('已到最右端，点「重置」再来')
-    ctx.set('tip', 'text', { x: 70, y: 44, 'font-size': 12, fill: C.warn, text: tips.join('；') })
+    ctx.set('tip', 'text', { x: 70, y: 44, 'font-size': 13, fill: C.warn, text: tips.join('；') })
 
     // v-t 图像
     if (ctx.gw) {
@@ -187,13 +187,13 @@ export const powerScene: LabScene = {
       polyline(ctx, 'g-vt', st.pts, box, 0, 60, 0, yMax, C.accent)
       // vmax 参考线
       ctx.gset('g-vmax', 'line', { x1: box.x, y1: gy(box, 0, yMax, vMax), x2: box.x + box.w, y2: gy(box, 0, yMax, vMax), stroke: C.friction, 'stroke-dasharray': '6 4', 'stroke-opacity': 0.8 })
-      ctx.gset('g-vmaxl', 'text', { x: box.x + 6, y: gy(box, 0, yMax, vMax) - 5, 'font-size': 10, fill: C.friction, text: `vmax=P/f=${fmt(vMax, 1)}` })
+      ctx.gset('g-vmaxl', 'text', { x: box.x + 6, y: gy(box, 0, yMax, vMax) - 5, 'font-size': 13, fill: C.friction, text: `vmax=P/f=${fmt(vMax, 1)}` })
       // 恒加速→恒功率切换点
       if (params.mode === 2 && vSwitch < vMax) {
         const tSwitch = vSwitch / ((params.F0 - params.f) / params.m)
         const X = gx(box, 0, 60, tSwitch)
         ctx.gset('g-sw', 'line', { x1: X, y1: box.y, x2: X, y2: box.y + box.h, stroke: C.warn, 'stroke-dasharray': '4 4', 'stroke-opacity': 0.7 })
-        ctx.gset('g-swl', 'text', { x: X + 4, y: box.y + 12, 'font-size': 10, fill: C.warn, text: `达额定功率 t=${fmt(tSwitch, 1)}s` })
+        ctx.gset('g-swl', 'text', { x: X + 4, y: box.y + 12, 'font-size': 13, fill: C.warn, text: `达额定功率 t=${fmt(tSwitch, 1)}s` })
       } else ctx.remove('g-sw', 'g-swl')
     }
     data['模式'] = params.mode === 1 ? '恒功率启动' : '恒加速启动'

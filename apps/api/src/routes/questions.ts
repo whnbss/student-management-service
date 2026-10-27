@@ -1,0 +1,267 @@
+// 题库与组卷（P1）：题目 CRUD / 筛选 / AI 出题器（含自动二审）/ 分层练习 / 家长阶段报告
+// AI 生成结果一律先返回草稿，教师在前端逐题编辑确认后才通过 bulk 入库（ai_generated 标记）
+import type { FastifyInstance } from 'fastify'
+import { db, nowISO, remainingHours } from '../db'
+import { pickProvider, generateQuiz, generateTiered, generateParentReport, validateQuizDrafts, reviewQuizDrafts } from '../ai'
+import { sanitizeAiText } from '@workbench/shared'
+import type { QuizLevel } from '@workbench/shared'
+
+function kpOf(raw: string): string[] {
+  try { return JSON.parse(raw || '[]') as string[] } catch { return [] }
+}
+
+// figure 列校验：必须是 {"kind":"svg"|"img","data":"..."} 形态的 JSON（svg 内联、img 为 uploads 相对路径），非法返回空串
+function sanitizeFigureJson(raw: unknown): string {
+  if (!raw) return ''
+  if (typeof raw !== 'string') return ''
+  let f: any
+  try { f = JSON.parse(raw) } catch { return '' }
+  if (!f || typeof f !== 'object') return ''
+  if (f.kind === 'svg' && typeof f.data === 'string' && f.data.startsWith('<svg') && f.data.length < 100_000) {
+    return JSON.stringify({ kind: 'svg', data: f.data })
+  }
+  if (f.kind === 'img' && typeof f.data === 'string' && f.data.startsWith('/uploads/') && f.data.length < 300) {
+    return JSON.stringify({ kind: 'img', data: f.data })
+  }
+  return ''
+}
+
+// 查重：同知识点 + 题干前 40 字（去空白）相同 → 视为疑似重复
+function normStem(s: string): string {
+  return s.replace(/\s+/g, '').slice(0, 40)
+}
+function findDuplicates(drafts: Array<{ stem: string; knowledge_points: string[] }>): Array<{ index: number; id: number; stem: string }> {
+  const existing = db.prepare('SELECT id, stem, knowledge_points FROM questions').all() as any[]
+  const out: Array<{ index: number; id: number; stem: string }> = []
+  for (let i = 0; i < drafts.length; i++) {
+    const kps = new Set(drafts[i].knowledge_points)
+    const prefix = normStem(drafts[i].stem)
+    if (!prefix) continue
+    const hit = existing.find((e) => {
+      if (!e.stem || normStem(e.stem) !== prefix) return false
+      const ek = kpOf(e.knowledge_points)
+      return ek.some((k) => kps.has(k))
+    })
+    if (hit) out.push({ index: i, id: hit.id, stem: String(hit.stem).slice(0, 60) })
+  }
+  return out
+}
+
+export default async function questionRoutes(app: FastifyInstance) {
+  // ---------- 题目列表：多条件筛选（搜索覆盖 题干/答案/解析/知识点） ----------
+  app.get('/api/questions', async (req) => {
+    const q = req.query as {
+      q?: string; grade?: string; qtype?: string; kp?: string
+      min_diff?: string; max_diff?: string; favorite?: string
+    }
+    let sql = 'SELECT * FROM questions WHERE 1=1'
+    const args: any[] = []
+    if (q.q) {
+      sql += ' AND (stem LIKE ? OR answer LIKE ? OR solution LIKE ? OR knowledge_points LIKE ?)'
+      const like = `%${q.q}%`
+      args.push(like, like, like, like)
+    }
+    if (q.grade) { sql += ' AND grade = ?'; args.push(q.grade) }
+    if (q.qtype) { sql += ' AND qtype = ?'; args.push(q.qtype) }
+    if (q.min_diff) { sql += ' AND difficulty >= ?'; args.push(Number(q.min_diff)) }
+    if (q.max_diff) { sql += ' AND difficulty <= ?'; args.push(Number(q.max_diff)) }
+    if (q.favorite === '1') { sql += ' AND favorite = 1' }
+    sql += ' ORDER BY id DESC'
+    const rows = db.prepare(sql).all(...args) as any[]
+    // 知识点过滤在客户端语义化处理（JSON 数组 LIKE 兜底也可，这里统一内存过滤更准）
+    return q.kp ? rows.filter((r) => kpOf(r.knowledge_points).includes(q.kp!)) : rows
+  })
+
+  // ---------- 知识点全库去重列表（筛选器选项来自全库，不随当前过滤缩小） ----------
+  app.get('/api/questions/kps', async () => {
+    const rows = db.prepare('SELECT knowledge_points FROM questions').all() as any[]
+    const s = new Set<string>()
+    for (const r of rows) for (const k of kpOf(r.knowledge_points)) s.add(k)
+    return { ok: true, kps: [...s].sort((a, b) => a.localeCompare(b, 'zh')) }
+  })
+
+  // ---------- 手动添加单题 ----------
+  app.post('/api/questions', async (req, reply) => {
+    const b = (req.body || {}) as any
+    if (!b.stem || !String(b.stem).trim()) { reply.code(400).send({ error: '题干必填' }); return }
+    const r = db.prepare(`INSERT INTO questions(
+      stem, answer, solution, pitfall, knowledge_points, difficulty, qtype, source, mistake_id, grade, figure, created_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      sanitizeAiText(b.stem).trim(), sanitizeAiText(b.answer), sanitizeAiText(b.solution), sanitizeAiText(b.pitfall),
+      JSON.stringify(Array.isArray(b.knowledge_points) ? b.knowledge_points : []),
+      Math.min(5, Math.max(1, Number(b.difficulty) || 3)),
+      String(b.qtype || '计算'), String(b.source || 'manual'), b.mistake_id || null, String(b.grade || ''),
+      sanitizeFigureJson(b.figure), nowISO()
+    )
+    return { ok: true, id: r.lastInsertRowid }
+  })
+
+  // ---------- 批量入库：AI 出题 / 分层练习确认后的题目（打 ai_generated 标记） ----------
+  // 查重：同知识点 + 题干前 40 字相同 → 未带 force 时返回疑似重复列表，前端确认后带 force 重新提交
+  app.post('/api/questions/bulk', async (req, reply) => {
+    const b = (req.body || {}) as { questions?: unknown; source?: string; force?: boolean }
+    if (!Array.isArray(b.questions) || b.questions.length === 0) { reply.code(400).send({ error: 'questions 必须是非空数组' }); return }
+    let drafts
+    try {
+      drafts = validateQuizDrafts(b.questions, 30)
+    } catch (e: any) {
+      reply.code(400).send({ error: e.message || '题目数据不合法' }); return
+    }
+    if (!drafts.length) { reply.code(400).send({ error: '没有题干有效的题目' }); return }
+    if (!b.force) {
+      const duplicates = findDuplicates(drafts)
+      if (duplicates.length) { return { ok: false, duplicates } }
+    }
+    const source = 'ai_generated'
+    const ins = db.prepare(`INSERT INTO questions(
+      stem, answer, solution, pitfall, knowledge_points, difficulty, qtype, source, mistake_id, grade, figure, created_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+    const figs = Array.isArray(b.questions) ? (b.questions as any[]) : []
+    const ids: number[] = []
+    for (let i = 0; i < drafts.length; i++) {
+      const fig = sanitizeFigureJson(figs[i]?.figure)
+      const r = ins.run(
+        drafts[i].stem, drafts[i].answer, drafts[i].solution, drafts[i].pitfall, JSON.stringify(drafts[i].knowledge_points),
+        drafts[i].difficulty, drafts[i].qtype, source, figs[i]?.mistake_id ?? null, String(figs[i]?.grade || ''),
+        fig, nowISO()
+      )
+      ids.push(Number(r.lastInsertRowid))
+    }
+    return { ok: true, ids }
+  })
+
+  // ---------- 编辑 / 收藏 ----------
+  app.put('/api/questions/:id', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const cur = db.prepare('SELECT id FROM questions WHERE id = ?').get(id)
+    if (!cur) { reply.code(404).send({ error: '题目不存在' }); return }
+    const b = (req.body || {}) as any
+    const fields = ['stem', 'answer', 'solution', 'pitfall', 'qtype', 'grade'] as const
+    const sets: string[] = []
+    const args: any[] = []
+    for (const f of fields) {
+      if (b[f] !== undefined) { sets.push(`${f} = ?`); args.push(sanitizeAiText(b[f])) }
+    }
+    if (b.knowledge_points !== undefined) {
+      sets.push('knowledge_points = ?')
+      args.push(JSON.stringify(Array.isArray(b.knowledge_points) ? b.knowledge_points : []))
+    }
+    if (b.difficulty !== undefined) { sets.push('difficulty = ?'); args.push(Math.min(5, Math.max(1, Number(b.difficulty) || 3))) }
+    if (b.favorite !== undefined) { sets.push('favorite = ?'); args.push(b.favorite ? 1 : 0) }
+    if (b.figure !== undefined) { sets.push('figure = ?'); args.push(sanitizeFigureJson(b.figure)) }
+    if (!sets.length) { reply.code(400).send({ error: '没有要更新的字段' }); return }
+    args.push(id)
+    db.prepare(`UPDATE questions SET ${sets.join(', ')} WHERE id = ?`).run(...args)
+    return { ok: true }
+  })
+
+  app.delete('/api/questions/:id', async (req) => {
+    const { id } = req.params as { id: string }
+    db.prepare('DELETE FROM questions WHERE id = ?').run(id)
+    return { ok: true }
+  })
+
+  // ---------- AI 出题器：生成草稿 + 自动二审（不入库，前端确认后走 bulk） ----------
+  app.post('/api/quiz/generate', async (req, reply) => {
+    const b = (req.body || {}) as { kps?: unknown; qtypes?: unknown; count?: unknown; level?: unknown; grade?: unknown }
+    const kps = Array.isArray(b.kps) ? b.kps.map(String).map((s) => s.trim()).filter(Boolean) : []
+    if (!kps.length) { reply.code(400).send({ error: '请至少填写一个知识点' }); return }
+    const qtypes = Array.isArray(b.qtypes) && b.qtypes.length ? b.qtypes.map(String) : ['计算']
+    const count = [5, 10, 20].includes(Number(b.count)) ? Number(b.count) : 5
+    const level: QuizLevel = (['基础', '高考', '竞赛'] as const).includes(b.level as any) ? (b.level as QuizLevel) : '高考'
+    const provider = pickProvider('text')
+    if (!provider) { reply.code(400).send({ error: '尚未配置 AI 供应商 API Key，请到「我的 → AI 配置」填写' }); return }
+    try {
+      const { result, usage } = await generateQuiz(provider, { kps, qtypes, count, level, grade: String(b.grade || '') })
+      // 自动二审：逐题挑错（数值自洽/情境几何/超纲/解析含试错/缺图）。二审失败不阻塞出题，降级为无审查结果
+      let review = null
+      let review_usage = null
+      try {
+        const r2 = await reviewQuizDrafts(provider, result)
+        review = r2.result
+        review_usage = r2.usage
+      } catch (e: any) {
+        console.error('[quiz] 二审失败（已降级为不审查）:', e.message)
+      }
+      return { ok: true, questions: result, usage, review, review_usage }
+    } catch (e: any) {
+      reply.code(502).send({ error: e.message || 'AI 出题失败' })
+    }
+  })
+
+  // ---------- 分层练习：按学生薄弱点生成三档练习草稿 ----------
+  app.post('/api/practice/tiered', async (req, reply) => {
+    const b = (req.body || {}) as { student_id?: unknown; kps?: unknown }
+    const sid = Number(b.student_id)
+    if (!sid) { reply.code(400).send({ error: '缺少学生' }); return }
+    const student = db.prepare('SELECT * FROM students WHERE id = ?').get(sid) as any
+    if (!student) { reply.code(404).send({ error: '学生不存在' }); return }
+    const provider = pickProvider('text')
+    if (!provider) { reply.code(400).send({ error: '尚未配置 AI 供应商 API Key，请到「我的 → AI 配置」填写' }); return }
+
+    // 薄弱知识点：未掌握/重做中的错题知识点优先；教师显式传入 kps 时以传入为准
+    let kps = Array.isArray(b.kps) ? b.kps.map(String).filter(Boolean) : []
+    const mistakes = db.prepare('SELECT * FROM mistakes WHERE student_id = ? ORDER BY created_at DESC').all(sid) as any[]
+    if (!kps.length) {
+      const cnt = new Map<string, number>()
+      for (const m of mistakes) {
+        if (m.mastery_status === '已掌握') continue
+        for (const k of kpOf(m.knowledge_points)) cnt.set(k, (cnt.get(k) || 0) + 1)
+      }
+      kps = [...cnt.entries()].sort((a, b2) => b2[1] - a[1]).slice(0, 5).map(([k]) => k)
+    }
+    // 掌握度 → 推荐默认档：未掌握占比高推基础，掌握良好推拔尖
+    const total = mistakes.length
+    const unmastered = mistakes.filter((m) => m.mastery_status === '未掌握').length
+    const mastered = mistakes.filter((m) => m.mastery_status === '已掌握').length
+    const recommended = total === 0 ? '基础' : unmastered / Math.max(total, 1) > 0.4 ? '基础' : mastered / Math.max(total, 1) > 0.6 ? '拔尖' : '巩固'
+    const masteryNote = total
+      ? `共 ${total} 道错题，未掌握 ${unmastered}、重做中 ${total - unmastered - mastered}、已掌握 ${mastered}；高频薄弱点：${[...new Set(mistakes.filter((m) => m.mastery_status !== '已掌握').flatMap((m) => kpOf(m.knowledge_points)))].slice(0, 5).join('、') || '无'}`
+      : '暂无错题记录，按新课进度出题'
+
+    try {
+      const { result, usage } = await generateTiered(provider, { kps, grade: student.grade, mastery_note: masteryNote })
+      return { ok: true, tiers: result, recommended_tier: recommended, kps, usage }
+    } catch (e: any) {
+      reply.code(502).send({ error: e.message || '生成分层练习失败' })
+    }
+  })
+
+  // ---------- 家长阶段报告：基于学情/错题/出勤生成三段式报告草稿 ----------
+  app.post('/api/reports/parent', async (req, reply) => {
+    const b = (req.body || {}) as { student_id?: unknown; from?: unknown; to?: unknown }
+    const sid = Number(b.student_id)
+    if (!sid) { reply.code(400).send({ error: '缺少学生' }); return }
+    const student = db.prepare('SELECT * FROM students WHERE id = ?').get(sid) as any
+    if (!student) { reply.code(404).send({ error: '学生不存在' }); return }
+    const provider = pickProvider('text')
+    if (!provider) { reply.code(400).send({ error: '尚未配置 AI 供应商 API Key，请到「我的 → AI 配置」填写' }); return }
+    // 时段：默认最近一个月
+    const to = String(b.to || nowISO().slice(0, 10))
+    const from = String(b.from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
+    const logs = db
+      .prepare('SELECT date, type, content, next_class_key FROM study_logs WHERE student_id = ? AND date BETWEEN ? AND ? ORDER BY date DESC')
+      .all(sid, from, to) as any[]
+    const mistakes = db
+      .prepare('SELECT knowledge_points, error_type, mastery_status, stem FROM mistakes WHERE student_id = ? AND created_at BETWEEN ? AND ?')
+      .all(sid, `${from}T00:00:00`, `${to}T23:59:59`) as any[]
+    const att = db
+      .prepare("SELECT status, COUNT(*) AS n FROM attendance WHERE student_id = ? AND date BETWEEN ? AND ? GROUP BY status")
+      .all(sid, from, to) as any[]
+    const attendance = { 到课: 0, 请假: 0, 缺勤: 0 } as Record<string, number>
+    for (const a of att) attendance[a.status] = a.n
+    try {
+      const { result, usage } = await generateParentReport(provider, {
+        student: { name: student.name, grade: student.grade, textbook: student.textbook },
+        range: { from, to },
+        logs,
+        mistakes: mistakes.map((m) => ({ knowledge_points: kpOf(m.knowledge_points), error_type: m.error_type, mastery_status: m.mastery_status, stem: m.stem })),
+        attendance: attendance as any,
+        remaining_hours: remainingHours(sid),
+      })
+      return { ok: true, report: result, range: { from, to }, usage }
+    } catch (e: any) {
+      reply.code(502).send({ error: e.message || '生成家长报告失败' })
+    }
+  })
+}

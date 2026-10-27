@@ -100,7 +100,7 @@ export const launchScene: LabScene = {
       const X = sx(m)
       if (X > 620) break
       ctx.set(`gt${m}`, 'line', { x1: X, y1: ORIGIN.y + 12, x2: X, y2: ORIGIN.y + 18, stroke: 'currentColor', 'stroke-opacity': 0.4 })
-      ctx.set(`gtl${m}`, 'text', { x: X, y: ORIGIN.y + 30, 'font-size': 9, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.45, text: `${Math.round(m)}m` })
+      ctx.set(`gtl${m}`, 'text', { x: X, y: ORIGIN.y + 30, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.45, text: `${Math.round(m)}m` })
     }
     // 发射台（小炮台）
     ctx.set('cannon', 'rect', { x: ORIGIN.x - 8, y: ORIGIN.y - 10, width: 16, height: 12, fill: '#475569', rx: 2 })
@@ -121,7 +121,7 @@ export const launchScene: LabScene = {
     ctx.set('ref45', 'path', { d: pathOfScreen(ref45, sx, sy), fill: 'none', stroke: C.net, 'stroke-opacity': 0.25, 'stroke-width': 1.5 })
     const R45 = (params.v0 * params.v0) / G
     if (sx(R45) < 610) {
-      ctx.set('ref45l', 'text', { x: sx(R45 * 0.5), y: sy((params.v0 * params.v0) / (2 * G)) - 10, 'font-size': 10, fill: C.net, 'fill-opacity': 0.45, 'text-anchor': 'middle', text: `45° 时射程最大 R=${fmt(R45, 1)}m` })
+      ctx.set('ref45l', 'text', { x: sx(R45 * 0.5), y: sy((params.v0 * params.v0) / (2 * G)) - 10, 'font-size': 13, fill: C.net, 'fill-opacity': 0.45, 'text-anchor': 'middle', text: `45° 时射程最大 R=${fmt(R45, 1)}m` })
     } else ctx.remove('ref45l')
 
     // 小球（沿轨迹运动，可拖改 v0/θ——拖球=调 θ，配合滑块）
@@ -156,17 +156,17 @@ export const launchScene: LabScene = {
     // 最高点与落点标记
     if (H > 0.5) {
       ctx.set('apex', 'circle', { cx: sx(vx0 * (vy0 / G)), cy: sy(H), r: 3, fill: C.warn })
-      ctx.set('apexl', 'text', { x: sx(vx0 * (vy0 / G)) + 6, y: sy(H) - 4, 'font-size': 10, fill: C.warn, text: `H=${fmt(H, 1)}m` })
+      ctx.set('apexl', 'text', { x: sx(vx0 * (vy0 / G)) + 6, y: sy(H) - 4, 'font-size': 13, fill: C.warn, text: `H=${fmt(H, 1)}m` })
     } else ctx.remove('apex', 'apexl')
     ctx.set('land', 'line', { x1: sx(R), y1: ORIGIN.y, x2: sx(R), y2: ORIGIN.y - 16, stroke: C.accent, 'stroke-width': 2 })
-    ctx.set('landl', 'text', { x: sx(R), y: ORIGIN.y - 20, 'font-size': 10, 'text-anchor': 'middle', fill: C.accent, text: `R=${fmt(R, 1)}m` })
+    ctx.set('landl', 'text', { x: sx(R), y: ORIGIN.y - 20, 'font-size': 13, 'text-anchor': 'middle', fill: C.accent, text: `R=${fmt(R, 1)}m` })
 
     const tips: string[] = []
     if (Math.abs(params.theta - 45) < 1) tips.push('θ=45°：sin2θ=1，射程最大')
     else if (params.theta > 45) tips.push(`θ>45°：射高优先（与 θ=${90 - params.theta}° 等射程）`)
     else tips.push(`θ<45°：与 θ=${90 - params.theta}° 等射程`)
     if (st.ghosts.length) tips.push(`轨迹族 ${st.ghosts.length} 条（改参数即留影）`)
-    ctx.set('tip', 'text', { x: 200, y: 40, 'font-size': 12, fill: C.warn, text: tips.join('；') })
+    ctx.set('tip', 'text', { x: 200, y: 40, 'font-size': 13, fill: C.warn, text: tips.join('；') })
 
     data['射程 R=v0²sin2θ/g'] = `${fmt(R, 2)} m`
     data['射高 H=v0²sin²θ/2g'] = `${fmt(H, 2)} m`

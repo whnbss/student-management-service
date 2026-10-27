@@ -57,6 +57,13 @@ export const inclineScene: LabScene = {
     'tanθ > μ 时静摩擦「顶不住」，物体必滑；tanθ = μ 即恰好滑动的临界角',
     '滑动后摩擦力突降为 μmg（μk < μs），所以物体一旦启动往往突然加速',
   ],
+  challenge: {
+    question: '斜面倾角 37°、μ = 0.4（tan37° ≈ 0.75），滑块会怎样？（先预测再看演示）',
+    options: ['保持静止', '沿斜面匀速下滑', '沿斜面加速下滑', '向上滑动'],
+    answer: 2,
+    explanation: '重力沿斜面分量 mg·sin37° = 0.6mg，最大静摩擦约 μmg·cos37° = 0.32mg。0.6mg > 0.32mg，静摩擦「顶不住」，滑块加速下滑（a = g(sinθ − μcosθ) ≈ 2.8 m/s²）。',
+    reveal_params: { m: 2, mu: 0.4, theta: 37, mode: 1 },
+  },
   init(): S {
     return { t: 0, s: 0.5, vel: 0, slipped: false }
   },
@@ -99,7 +106,7 @@ export const inclineScene: LabScene = {
     const grip = ctx.set('theta-grip', 'circle', {
       cx: top.x, cy: top.y, r: 10, fill: '#fff', stroke: C.accent, 'stroke-width': 2.5,
     })
-    ctx.set('theta-grip-hint', 'text', { x: top.x + 14, y: top.y - 8, 'font-size': 12, fill: C.accent, text: `拖我调角度 θ=${fmt(theta, 0)}°` })
+    ctx.set('theta-grip-hint', 'text', { x: top.x + 14, y: top.y - 8, 'font-size': 13, fill: C.accent, text: `拖我调角度 θ=${fmt(theta, 0)}°` })
     ctx.drag(grip, (p) => {
       // 以顶点 A 为圆心，把指针方向换算成倾角
       const dx = clamp(p.x - A.x, 20, 620)
@@ -169,7 +176,7 @@ export const inclineScene: LabScene = {
         drawArrow(ctx, 'fG2', center, add(center, normalPart), { color: C.gravity, component: true, width: 2 })
         // 分量数值
         ctx.set('comp-label', 'text', {
-          x: center.x + 90, y: center.y + 60, 'font-size': 12, fill: C.gravity, text: `mg·sinθ=${fmt(mg * Math.sin(t), 1)}N  mg·cosθ=${fmt(mg * Math.cos(t), 1)}N`,
+          x: center.x + 90, y: center.y + 60, 'font-size': 13, fill: C.gravity, text: `mg·sinθ=${fmt(mg * Math.sin(t), 1)}N  mg·cosθ=${fmt(mg * Math.cos(t), 1)}N`,
         })
       } else {
         ctx.remove('fG1', 'fG1-head', 'fG1-label', 'fG2', 'fG2-head', 'fG2-label', 'comp-label')

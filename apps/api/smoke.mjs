@@ -240,6 +240,107 @@ log('恢复默认配置', r.status === 200 && r.data?.ok)
 r = await req('GET', '/api/settings/ai')
 log('恢复默认后active已清空', r.data?.active_id === '' || r.data?.active_id === undefined, `active_id=${JSON.stringify(r.data?.active_id)}`)
 
+// ---------- P1：题库 / AI 出题器 / 分层练习 / 家长报告 ----------
+
+// 31a. 题目手动添加
+r = await req('POST', '/api/questions', { stem: '质量 $m=2kg$ 的物体受 $F=4N$ 恒力，求加速度', answer: '$a=2m/s^2$', solution: '由牛顿第二定律 $a=F/m=2$', pitfall: '注意单位', knowledge_points: ['牛顿第二定律'], difficulty: 2, qtype: '计算', grade: '高一' })
+const qid1 = r.data?.id
+log('题目手动添加', r.status === 200 && !!qid1, `id=${qid1}`)
+
+// 31b. 批量入库（模拟 AI 出题确认后）
+r = await req('POST', '/api/questions/bulk', { questions: [
+  { stem: '变式题一', answer: 'A', solution: '略', pitfall: '', knowledge_points: ['牛顿第二定律'], difficulty: 3, qtype: '选择' },
+  { stem: '变式题二', answer: '8m/s', solution: '略', pitfall: '', knowledge_points: ['匀变速直线运动'], difficulty: 4, qtype: '计算' },
+] })
+const bulkIds = r.data?.ids || []
+log('题目批量入库', r.status === 200 && bulkIds.length === 2, `ids=${bulkIds.length}`)
+
+// 31c. 批量入库非法数据拒绝（题干全空）
+r = await req('POST', '/api/questions/bulk', { questions: [{ stem: '', answer: '' }] })
+log('批量入库空题干拒绝', r.status === 400)
+
+// 31d. 题目筛选：关键词 / 题型 / 难度区间 / 知识点
+r = await req('GET', '/api/questions?q=加速度')
+log('题目关键词搜索', r.status === 200 && r.data.some((x) => x.id === qid1), `n=${r.data?.length}`)
+r = await req('GET', '/api/questions?qtype=选择')
+log('题目按题型筛选', r.status === 200 && r.data.every((x) => x.qtype === '选择') && r.data.length >= 1, `n=${r.data?.length}`)
+r = await req('GET', '/api/questions?min_diff=4')
+log('题目按难度下限筛选', r.status === 200 && r.data.every((x) => x.difficulty >= 4), `n=${r.data?.length}`)
+r = await req('GET', `/api/questions?kp=${encodeURIComponent('匀变速直线运动')}`)
+log('题目按知识点筛选', r.status === 200 && r.data.length >= 1 && r.data.every((x) => (x.knowledge_points || '').includes('匀变速直线运动')), `n=${r.data?.length}`)
+
+// 31e. 收藏切换 + 只看收藏
+r = await req('PUT', `/api/questions/${qid1}`, { favorite: true })
+r = await req('GET', '/api/questions?favorite=1')
+log('题目收藏与筛选', r.status === 200 && r.data.some((x) => x.id === qid1), `n=${r.data?.length}`)
+
+// 31f. 编辑题目 + 非法难度收敛
+r = await req('PUT', `/api/questions/${qid1}`, { stem: '质量 $m=2kg$ 的物体受 $F=6N$ 恒力，求加速度', difficulty: 99 })
+r = await req('GET', `/api/questions?q=${encodeURIComponent('恒力')}`)
+log('题目编辑（难度收敛5）', r.status === 200 && r.data[0]?.difficulty === 5 && r.data[0]?.stem.includes('6N'), `diff=${r.data[0]?.difficulty}`)
+
+// 31g. AI 出题器：缺知识点拒绝
+r = await req('POST', '/api/quiz/generate', { kps: [] })
+log('出题缺知识点拒绝', r.status === 400)
+
+// 31g2. 文本清洗：字面 \n 入库时转真实换行；figure 非法 JSON 收敛为空
+r = await req('POST', '/api/questions', { stem: '字面换行测试题', solution: '第一段。\\n第二段。', answer: 'ok', knowledge_points: ['牛顿第二定律'], figure: '{bad json' })
+const qidSan = r.data?.id
+r = await req('GET', `/api/questions?q=${encodeURIComponent('字面换行测试题')}`)
+log('字面\\n入库清洗', r.status === 200 && !r.data[0]?.solution?.includes('\\n') && r.data[0]?.solution?.includes('\n'), JSON.stringify(r.data?.[0]?.solution))
+r = await req('GET', `/api/questions?q=${encodeURIComponent('字面换行测试题')}`)
+log('非法figure收敛为空', r.data?.[0]?.figure === '', `figure=${JSON.stringify(r.data?.[0]?.figure)}`)
+
+// 31g3. figure 合法 svg 保存与回读
+const figSvg = JSON.stringify({ kind: 'svg', data: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 240"></svg>' })
+r = await req('PUT', `/api/questions/${qidSan}`, { figure: figSvg })
+r = await req('GET', `/api/questions?q=${encodeURIComponent('字面换行测试题')}`)
+log('figure svg 保存回读', r.data?.[0]?.figure && JSON.parse(r.data[0].figure).kind === 'svg')
+
+// 31g4. 知识点全库列表接口
+r = await req('GET', '/api/questions/kps')
+log('知识点全库接口', r.status === 200 && Array.isArray(r.data?.kps) && r.data.kps.includes('牛顿第二定律'), `n=${r.data?.kps?.length}`)
+
+// 31g5. 批量入库查重：同知识点+题干前40字相同 → 返回疑似重复；force 后入库
+const dupQ = { stem: '查重测试题干内容保持一致即可触发查重逻辑', answer: '1', solution: '略', knowledge_points: ['牛顿第二定律'], difficulty: 2, qtype: '计算' }
+r = await req('POST', '/api/questions', { ...dupQ }) // 先入库一道原题
+const dupFirst = r.data?.id
+r = await req('POST', '/api/questions/bulk', { questions: [dupQ] })
+log('批量入库查重拦截', r.data?.ok === false && Array.isArray(r.data?.duplicates) && r.data.duplicates.length >= 1, JSON.stringify(r.data?.duplicates?.[0]))
+r = await req('POST', '/api/questions/bulk', { questions: [dupQ], force: true })
+const dupId = r.data?.ids?.[0]
+log('批量入库force入库', r.status === 200 && !!dupId, `id=${dupId}`)
+
+// 31g6. 搜索覆盖解析与知识点
+r = await req('GET', `/api/questions?q=${encodeURIComponent('第二段')}`)
+log('搜索覆盖解析', r.status === 200 && r.data.some((x) => x.id === qidSan))
+
+
+// 31h. AI 出题器：未配 Key / 调用失败错误路径
+r = await req('POST', '/api/quiz/generate', { kps: ['牛顿第二定律'], qtypes: ['计算'], count: 5, level: '基础' })
+log('出题无Key/调用错误路径', r.status === 400 || r.status === 502, `status=${r.status} msg=${String(r.data?.error || '').slice(0, 30)}`)
+
+// 31i. 分层练习：缺学生拒绝 / 学生不存在 404
+r = await req('POST', '/api/practice/tiered', {})
+log('分层练习缺学生拒绝', r.status === 400)
+r = await req('POST', '/api/practice/tiered', { student_id: 99999999 })
+log('分层练习学生不存在', r.status === 404)
+
+// 31j. 家长报告：参数校验 + 错误路径
+r = await req('POST', '/api/reports/parent', {})
+log('报告缺学生拒绝', r.status === 400)
+r = await req('POST', '/api/reports/parent', { student_id: 99999999 })
+log('报告学生不存在', r.status === 404)
+
+// 31k. 删除题目
+r = await req('DELETE', `/api/questions/${qid1}`)
+r = await req('GET', `/api/questions?q=${encodeURIComponent('恒力')}`)
+log('题目删除', r.status === 200 && r.data.length === 0)
+for (const id of bulkIds) await req('DELETE', `/api/questions/${id}`)
+await req('DELETE', `/api/questions/${qidSan}`)
+await req('DELETE', `/api/questions/${dupId}`)
+await req('DELETE', `/api/questions/${dupFirst}`)
+
 // 31. 恢复测试前的 AI 配置 + 清理测试数据（不能 reset 成默认值，会清掉用户真实填写的 Key）
 await req('PUT', '/api/settings/ai', { providers: savedProviders || [], proxy: savedProxy, active_id: savedActiveId })
 r = await req('GET', '/api/settings/ai')

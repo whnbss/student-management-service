@@ -49,6 +49,13 @@ export const cartScene: LabScene = {
     '整体法 a = (mg−μMg)/(M+m)，隔离法对小车 T − μMg = Ma，两法结果一致',
     '实验中「钩码质量 ≪ 小车质量」时才可近似认为 T ≈ mg',
   ],
+  challenge: {
+    question: '小车 M = 0.6 kg，钩码 m = 0.2 kg，轨道无摩擦。释放后小车的加速度是多少？',
+    options: ['约 2.5 m/s²', '约 3.3 m/s²', '约 13.3 m/s²', '无法确定'],
+    answer: 0,
+    explanation: '对整体用牛顿第二定律：a = mg / (M + m) = 0.2×10 / 0.8 = 2.5 m/s²。注意分母是总质量——误用 a = mg/M 会得 3.3 m/s²（错在漏了钩码也在加速）。',
+    reveal_preset: '理想无摩擦',
+  },
   init(): S {
     return { t: 0, x: 0, vel: 0, stuck: false, finished: false, pts: [[0, 0]], nextSample: 0 }
   },
@@ -100,7 +107,7 @@ export const cartScene: LabScene = {
     ctx.set('rope2', 'line', { x1: PULLEY.x, y1: PULLEY.y, x2: PULLEY.x, y2: hangerY, stroke: '#334155', 'stroke-width': 2 })
     // 钩码下方的地面（钩码到 x=2m 时恰好触地 = 行程终点）
     ctx.set('hanger-ground', 'rect', { x: PULLEY.x - 40, y: 380, width: 80, height: 8, fill: '#94a3b8' })
-    ctx.set('hanger-ground-l', 'text', { x: PULLEY.x, y: 376, 'font-size': 10, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.45, text: '地面' })
+    ctx.set('hanger-ground-l', 'text', { x: PULLEY.x, y: 376, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.45, text: '地面' })
     // 小车本体（宽度随质量微变，体现"质量"）
     const bw = 70 + params.M * 20
     const cart = ctx.set('cart', 'rect', { x: cx - bw / 2, y: cy - 24, width: bw, height: 46, rx: 8, fill: '#4f46e5', stroke: '#312e81', 'stroke-width': 2 })
@@ -108,7 +115,7 @@ export const cartScene: LabScene = {
     ctx.set('cart-wheel2', 'circle', { cx: cx + bw / 4, cy: cy + 24, r: 6, fill: '#1e293b' })
     // 质量拖拽手柄（小车内部 ↕）
     const mHandle = ctx.set('m-handle', 'circle', { cx: cx, cy: cy - 2, r: 13, fill: '#fff', 'fill-opacity': 0.9, stroke: '#312e81', 'stroke-width': 2 })
-    ctx.set('m-handle-t', 'text', { x: cx, y: cy + 2, 'font-size': 11, 'text-anchor': 'middle', fill: '#312e81', text: 'M↕' })
+    ctx.set('m-handle-t', 'text', { x: cx, y: cy + 2, 'font-size': 13, 'text-anchor': 'middle', fill: '#312e81', text: 'M↕' })
     ctx.drag(mHandle, (p) => {
       // 竖直拖动调质量
       const dy = p.y - cy

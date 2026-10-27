@@ -3,8 +3,14 @@
 // - 输出严格 JSON 校验，失败自动重试 2 次（共 3 次尝试），绝不入库脏数据
 // - 每次调用记录 token 用量与费用估算（ai_usage 表）
 import { db, getSetting, nowISO } from './db'
-import type { AiProvider, AiAnalysisResult, Grade } from '@workbench/shared'
-import { ANALYZE_SYSTEM_PROMPT, analyzeUserPrompt, VARIANT_SYSTEM_PROMPT } from '@workbench/shared'
+import type { AiProvider, AiAnalysisResult, Grade, QuizDraft, QuizLevel, ParentReport, QuizReview, FigureSpec } from '@workbench/shared'
+import {
+  ANALYZE_SYSTEM_PROMPT, analyzeUserPrompt,
+  VARIANT_SYSTEM_PROMPT, QUIZ_SYSTEM_PROMPT, quizUserPrompt,
+  TIERED_SYSTEM_PROMPT, REPORT_SYSTEM_PROMPT,
+  REVIEW_SYSTEM_PROMPT, reviewUserPrompt,
+  sanitizeAiText, FIGURE_TEMPLATES,
+} from '@workbench/shared'
 import path from 'node:path'
 import fs from 'node:fs'
 import { fetch as undiciFetch, ProxyAgent } from 'undici'
@@ -325,10 +331,10 @@ function validateVariants(obj: any): Array<{ stem: string; answer: string; solut
   const arr = Array.isArray(obj) ? obj : obj?.questions
   if (!Array.isArray(arr) || arr.length === 0) throw new Error('变式题结果不是非空数组')
   return arr.slice(0, 3).map((q: any) => ({
-    stem: String(q?.stem || '').trim(),
-    answer: String(q?.answer || '').trim(),
-    solution: String(q?.solution || '').trim(),
-    pitfall: String(q?.pitfall || '').trim(),
+    stem: sanitizeAiText(q?.stem).trim(),
+    answer: sanitizeAiText(q?.answer).trim(),
+    solution: sanitizeAiText(q?.solution).trim(),
+    pitfall: sanitizeAiText(q?.pitfall).trim(),
     knowledge_points: Array.isArray(q?.knowledge_points) ? q.knowledge_points.map(String) : [],
     difficulty: Math.min(5, Math.max(1, Number(q?.difficulty) || 3)),
     qtype: ['选择', '填空', '实验', '计算'].includes(q?.qtype) ? q.qtype : '计算',
@@ -358,6 +364,153 @@ async function chatJson<T>(provider: AiProvider, opts: ChatOptions, validate: (o
     }
   }
   throw lastErr ? new Error(friendlyAiError(lastErr)) : new Error('AI 调用失败')
+}
+
+// ---------- 业务（P1）：AI 出题器 / 分层练习 / 家长阶段报告 ----------
+
+// figure_spec 校验：模板名必须在白名单内，params 收敛为 number|string
+function sanitizeFigureSpec(raw: any): { template: string; params: Record<string, number | string> } | null {
+  if (!raw || typeof raw !== 'object' || typeof raw.template !== 'string') return null
+  const t = raw.template.trim()
+  if (!(FIGURE_TEMPLATES as readonly string[]).includes(t)) return null
+  const params: Record<string, number | string> = {}
+  const p = raw.params
+  if (p && typeof p === 'object') {
+    for (const [k, v] of Object.entries(p)) {
+      if (typeof v === 'number' && Number.isFinite(v)) params[k] = v
+      else if (typeof v === 'string' && v.trim()) params[k] = v.trim().slice(0, 30)
+    }
+  }
+  return { template: t, params }
+}
+
+// 出题/分层练习共用的题目草稿校验（题干必填，难度收敛 1~5，题型白名单，文本清洗字面 \n，figure_spec 白名单）
+export function validateQuizDrafts(arr: any, max = 30): QuizDraft[] {
+  if (!Array.isArray(arr) || arr.length === 0) throw new Error('出题结果不是非空数组')
+  return arr.slice(0, max).map((q: any) => ({
+    stem: sanitizeAiText(q?.stem).trim(),
+    answer: sanitizeAiText(q?.answer).trim(),
+    solution: sanitizeAiText(q?.solution).trim(),
+    pitfall: sanitizeAiText(q?.pitfall).trim(),
+    knowledge_points: Array.isArray(q?.knowledge_points) ? q.knowledge_points.map((k: any) => String(k)) : [],
+    difficulty: Math.min(5, Math.max(1, Number(q?.difficulty) || 3)),
+    qtype: ['选择', '填空', '实验', '计算'].includes(q?.qtype) ? q.qtype : '计算',
+    figure_spec: sanitizeFigureSpec(q?.figure_spec),
+  })).filter((q) => q.stem)
+}
+
+// AI 出题器：按知识点/题型/数量/难度档命题，返回草稿（教师编辑确认后才入库）
+export async function generateQuiz(
+  provider: AiProvider,
+  p: { kps: string[]; qtypes: string[]; count: number; level: QuizLevel; grade: string }
+): Promise<{ result: QuizDraft[]; usage: ReturnType<typeof recordUsage> }> {
+  return chatJson(
+    provider,
+    { model: provider.text_model || provider.vision_model, system: QUIZ_SYSTEM_PROMPT, user: quizUserPrompt(p), temperature: 0.7 },
+    (o) => validateQuizDrafts(o, p.count + 5),
+    'quiz'
+  )
+}
+
+// 二审质检：对生成的题目草稿做第二次 AI 调用挑错（数值自洽/情境几何/超纲/解析含试错/缺图）
+// 返回与 drafts 一一对应的审查结果；fixed 有值时为修正稿（前端展示 issues 并可采纳 fixed）
+export async function reviewQuizDrafts(
+  provider: AiProvider,
+  drafts: QuizDraft[]
+): Promise<{ result: QuizReview[]; usage: ReturnType<typeof recordUsage> }> {
+  const validate = (obj: any): QuizReview[] => {
+    if (!Array.isArray(obj) || obj.length === 0) throw new Error('二审结果不是非空数组')
+    return obj.slice(0, drafts.length).map((r: any) => {
+      const issues = Array.isArray(r?.issues) ? r.issues.map((s: any) => sanitizeAiText(s)).filter(Boolean) : []
+      let fixed: QuizDraft | null = null
+      const fixedValidated = r?.fixed ? validateQuizDrafts([r.fixed], 1) : []
+      if (fixedValidated[0]) {
+        fixed = { ...fixedValidated[0], figure_spec: sanitizeFigureSpec(r.fixed?.figure_spec) ?? fixedValidated[0].figure_spec ?? null }
+      }
+      return { pass: !!r?.pass || (issues.length === 0 && !fixed), issues, fixed }
+    })
+  }
+  return chatJson(
+    provider,
+    { model: provider.text_model || provider.vision_model, system: REVIEW_SYSTEM_PROMPT, user: reviewUserPrompt(drafts), temperature: 0.1 },
+    validate,
+    'review'
+  )
+}
+
+// 分层练习：三档各 2~3 题
+function validateTiered(obj: any): { '基础': QuizDraft[]; '巩固': QuizDraft[]; '拔尖': QuizDraft[] } {
+  if (!obj || typeof obj !== 'object') throw new Error('分层练习结果不是对象')
+  const tiers = ['基础', '巩固', '拔尖'] as const
+  const out: any = {}
+  for (const t of tiers) {
+    const arr = obj[t] || obj[t === '基础' ? 'basic' : t === '巩固' ? 'consolidate' : 'advanced']
+    out[t] = validateQuizDrafts(arr, 5)
+  }
+  return out
+}
+
+export async function generateTiered(
+  provider: AiProvider,
+  p: { kps: string[]; grade: string; mastery_note: string }
+): Promise<{ result: { '基础': QuizDraft[]; '巩固': QuizDraft[]; '拔尖': QuizDraft[] }; usage: ReturnType<typeof recordUsage> }> {
+  const user = `知识点：${p.kps.join('、') || '（教师未指定，请覆盖该生主要薄弱点）'}
+学生年级：${p.grade || '高一'}
+学生当前掌握情况：${p.mastery_note || '（无记录）'}
+请按约定 JSON 结构输出三档练习。`
+  return chatJson(provider, { model: provider.text_model || provider.vision_model, system: TIERED_SYSTEM_PROMPT, user, temperature: 0.7 }, validateTiered, 'tiered')
+}
+
+// 家长阶段报告：基于学情日志 + 错题 + 出勤数据生成三段式报告草稿
+function validateReport(obj: any): ParentReport {
+  if (!obj || typeof obj !== 'object') throw new Error('报告结果不是对象')
+  const lines = (v: any) => (Array.isArray(v) ? v.map(String).map((s) => s.trim()).filter(Boolean) : [])
+  const r: ParentReport = {
+    summary: String(obj.summary || '').trim(),
+    glow: lines(obj.glow),
+    grow: lines(obj.grow),
+    plan: lines(obj.plan),
+    payment_hint: String(obj.payment_hint || '').trim(),
+  }
+  if (!r.glow.length && !r.grow.length && !r.plan.length) throw new Error('报告三段式内容为空')
+  return r
+}
+
+export async function generateParentReport(
+  provider: AiProvider,
+  data: {
+    student: { name: string; grade: string; textbook: string }
+    range: { from: string; to: string }
+    logs: Array<{ date: string; type: string; content: string; next_class_key: string }>
+    mistakes: Array<{ knowledge_points: string[]; error_type: string; mastery_status: string; stem: string }>
+    attendance: { 到课: number; 请假: number; 缺勤: number }
+    remaining_hours: number
+  }
+): Promise<{ result: ParentReport; usage: ReturnType<typeof recordUsage> }> {
+  // 数据瘦身：日志单条截断、限量，控制 token 成本
+  const logLines = data.logs.slice(0, 40).map((l) => `- ${l.date}[${l.type}] ${l.content.slice(0, 160)}${l.next_class_key ? `（下次课重点：${l.next_class_key.slice(0, 60)}）` : ''}`).join('\n') || '（该时段无学情记录）'
+  const kpCount = new Map<string, number>()
+  for (const m of data.mistakes) for (const k of m.knowledge_points) kpCount.set(k, (kpCount.get(k) || 0) + 1)
+  const kpTop = [...kpCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, n]) => `${k}×${n}`).join('、') || '无'
+  const errCount = new Map<string, number>()
+  for (const m of data.mistakes) if (m.error_type) errCount.set(m.error_type, (errCount.get(m.error_type) || 0) + 1)
+  const errTop = [...errCount.entries()].map(([k, n]) => `${k}×${n}`).join('、') || '无'
+  const mastery = {
+    未掌握: data.mistakes.filter((m) => m.mastery_status === '未掌握').length,
+    已重做一次: data.mistakes.filter((m) => m.mastery_status === '已重做一次').length,
+    已掌握: data.mistakes.filter((m) => m.mastery_status === '已掌握').length,
+  }
+  const user = `学生：${data.student.name}（${data.student.grade}，${data.student.textbook || '人教版'}）
+报告时段：${data.range.from} ~ ${data.range.to}
+出勤：到课 ${data.attendance.到课} 次、请假 ${data.attendance.请假} 次、缺勤 ${data.attendance.缺勤} 次
+错题：共 ${data.mistakes.length} 道（未掌握 ${mastery.未掌握} / 重做中 ${mastery.已重做一次} / 已掌握 ${mastery.已掌握}）
+高频薄弱知识点：${kpTop}
+错因分布：${errTop}
+剩余课时：${data.remaining_hours}${data.remaining_hours <= 3 ? '（偏少，可在 payment_hint 中得体提醒）' : ''}
+学情记录：
+${logLines}
+请按约定 JSON 结构输出家长阶段报告。`
+  return chatJson(provider, { model: provider.text_model || provider.vision_model, system: REPORT_SYSTEM_PROMPT, user, temperature: 0.4 }, validateReport, 'report')
 }
 
 // ---------- 业务：作业图片分析 ----------

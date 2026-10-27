@@ -26,6 +26,17 @@ import { lorentzScene } from './scenes/LorentzCircle'
 import { selectorScene } from './scenes/SelectorCyclotron'
 import { combinedScene } from './scenes/CombinedFields'
 import { lenzScene } from './scenes/LenzLaw'
+import { transverseWaveScene } from './scenes/TransverseWave'
+import { waveInterferenceScene } from './scenes/WaveInterference'
+import { dopplerScene } from './scenes/Doppler'
+import { brownianScene } from './scenes/Brownian'
+import { gasLawsScene } from './scenes/GasLaws'
+import { refractionScene } from './scenes/Refraction'
+import { doubleSlitScene } from './scenes/DoubleSlit'
+import { photoelectricScene } from './scenes/Photoelectric'
+import { bohrAtomScene } from './scenes/BohrAtom'
+import { radioDecayScene } from './scenes/RadioDecay'
+import { nuclearEnergyScene } from './scenes/NuclearEnergy'
 
 export const SCENES: LabScene[] = [
   inclineScene,
@@ -54,6 +65,17 @@ export const SCENES: LabScene[] = [
   selectorScene,
   combinedScene,
   lenzScene,
+  transverseWaveScene,
+  waveInterferenceScene,
+  dopplerScene,
+  brownianScene,
+  gasLawsScene,
+  refractionScene,
+  doubleSlitScene,
+  photoelectricScene,
+  bohrAtomScene,
+  radioDecayScene,
+  nuclearEnergyScene,
 ]
 
 export function findScene(id: string | undefined): LabScene | undefined {

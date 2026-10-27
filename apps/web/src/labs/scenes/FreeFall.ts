@@ -96,13 +96,13 @@ export const freeFallScene: LabScene = {
       const y = GROUND_Y - m * PX_PER_M
       ctx.set(`tick${m}`, 'line', { x1: 96, y1: y, x2: 108, y2: y, stroke: 'currentColor', 'stroke-opacity': 0.4 })
       if (m % 10 === 0) {
-        ctx.set(`tickl${m}`, 'text', { x: 90, y: y + 4, 'font-size': 10, 'text-anchor': 'end', fill: 'currentColor', 'fill-opacity': 0.5, text: `${m}m` })
+        ctx.set(`tickl${m}`, 'text', { x: 90, y: y + 4, 'font-size': 13, 'text-anchor': 'end', fill: 'currentColor', 'fill-opacity': 0.5, text: `${m}m` })
       }
     }
     // 高度指示虚线
     if (st.y > 0.2) {
       ctx.set('hline', 'line', { x1: BALL_X, y1: GROUND_Y, x2: BALL_X, y2: ballY(st.y), stroke: C.accent, 'stroke-dasharray': '4 4', 'stroke-opacity': 0.6 })
-      ctx.set('hlabel', 'text', { x: BALL_X + 6, y: (GROUND_Y + ballY(st.y)) / 2, 'font-size': 11, fill: C.accent, text: `h=${fmt(st.y, 1)}m` })
+      ctx.set('hlabel', 'text', { x: BALL_X + 6, y: (GROUND_Y + ballY(st.y)) / 2, 'font-size': 13, fill: C.accent, text: `h=${fmt(st.y, 1)}m` })
     } else {
       ctx.remove('hline', 'hlabel')
     }
@@ -118,7 +118,7 @@ export const freeFallScene: LabScene = {
     })
     // 「拖我」提示（未开始播放时显示）
     if ((st.t ?? 0) === 0 && !st.rest) {
-      ctx.set('drag-hint', 'text', { x: BALL_X + 20, y: by - 14, 'font-size': 12, fill: C.accent, text: '↕ 拖我改高度' })
+      ctx.set('drag-hint', 'text', { x: BALL_X + 20, y: by - 14, 'font-size': 13, fill: C.accent, text: '↕ 拖我改高度' })
     } else ctx.remove('drag-hint')
 
     // 速度与重力箭头（g 为示意箭头，固定可见长度）
@@ -140,7 +140,7 @@ export const freeFallScene: LabScene = {
     else tips.push('自由落体：初速为 0，只受重力')
     if (params.e > 0) tips.push(`反弹系数 e=${fmt(params.e, 1)}，每次反弹速率变为 e 倍`)
     if (st.rest) tips.push('已落地静止，点「重置」再来')
-    ctx.set('tip', 'text', { x: 130, y: 40, 'font-size': 12, fill: C.warn, text: tips.join('；') })
+    ctx.set('tip', 'text', { x: 130, y: 40, 'font-size': 13, fill: C.warn, text: tips.join('；') })
 
     // 图像面板：上 y-t、下 v-t
     if (ctx.gw) {

@@ -94,15 +94,15 @@ export const eDeflectionScene: LabScene = {
     // 装置
     ctx.set('axis', 'line', { x1: GUN_X, y1: MID_Y, x2: SCREEN_X, y2: MID_Y, stroke: 'currentColor', 'stroke-opacity': 0.2, 'stroke-dasharray': '4 4' })
     ctx.set('cathode', 'rect', { x: GUN_X - 10, y: MID_Y - 30, width: 10, height: 60, fill: '#475569' })
-    ctx.set('cathode-l', 'text', { x: GUN_X - 4, y: MID_Y + 48, 'font-size': 11, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: `阴极 U=${fmt(params.U1, 0)}V` })
+    ctx.set('cathode-l', 'text', { x: GUN_X - 4, y: MID_Y + 48, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: `阴极 U=${fmt(params.U1, 0)}V` })
     ctx.set('anode', 'rect', { x: GUN_X + 34, y: MID_Y - 30, width: 8, height: 60, fill: '#94a3b8' })
     ctx.set('anode-hole', 'rect', { x: GUN_X + 34, y: MID_Y - 5, width: 8, height: 10, fill: '#fde68a' })
     ctx.set('plate-top', 'rect', { x: PLATE_X0, y: MID_Y - gapPx - 8, width: PLATE_X1 - PLATE_X0, height: 8, fill: '#8b5cf6' })
     ctx.set('plate-bot', 'rect', { x: PLATE_X0, y: MID_Y + gapPx, width: PLATE_X1 - PLATE_X0, height: 8, fill: '#8b5cf6' })
-    ctx.set('plate-l', 'text', { x: (PLATE_X0 + PLATE_X1) / 2, y: MID_Y - gapPx - 15, 'font-size': 11, 'text-anchor': 'middle', fill: C.field, text: `U′=${fmt(params.U2, 0)}V` })
-    ctx.set('plate-d', 'text', { x: PLATE_X1 + 14, y: MID_Y + 4, 'font-size': 10, fill: 'currentColor', 'fill-opacity': 0.5, text: `d=${fmt(d * 100, 1)}cm` })
+    ctx.set('plate-l', 'text', { x: (PLATE_X0 + PLATE_X1) / 2, y: MID_Y - gapPx - 15, 'font-size': 13, 'text-anchor': 'middle', fill: C.field, text: `U′=${fmt(params.U2, 0)}V` })
+    ctx.set('plate-d', 'text', { x: PLATE_X1 + 14, y: MID_Y + 4, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.5, text: `d=${fmt(d * 100, 1)}cm` })
     ctx.set('screen', 'rect', { x: SCREEN_X, y: 60, width: 12, height: 300, fill: '#334155', rx: 4 })
-    ctx.set('screen-l', 'text', { x: SCREEN_X + 6, y: 50, 'font-size': 11, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: '荧光屏' })
+    ctx.set('screen-l', 'text', { x: SCREEN_X + 6, y: 50, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: '荧光屏' })
 
     // 轨迹：板内抛物线 + 板外直线（撞板截断）
     const trajPts: string[] = []
@@ -168,7 +168,7 @@ export const eDeflectionScene: LabScene = {
       const cxg = gx(box, -u2Max, u2Max, clamp(params.U2, -u2Max, u2Max))
       const cyg = gy(box, -yMax, yMax, clamp(yScreenM * 1000, -yMax, yMax))
       ctx.gset('g-dot', 'circle', { cx: cxg, cy: cyg, r: 5, fill: C.warn })
-      ctx.gset('g-dot-l', 'text', { x: cxg + 8, y: cyg - 6, 'font-size': 10, fill: C.warn, text: `(${fmt(params.U2, 0)}V, ${fmt(Math.abs(yScreenM) * 1000, 1)}mm)` })
+      ctx.gset('g-dot-l', 'text', { x: cxg + 8, y: cyg - 6, 'font-size': 13, fill: C.warn, text: `(${fmt(params.U2, 0)}V, ${fmt(Math.abs(yScreenM) * 1000, 1)}mm)` })
     }
 
     data['出加速场速度 v₀'] = `${sciFmt(v0)} m/s`

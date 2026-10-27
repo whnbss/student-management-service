@@ -100,7 +100,7 @@ export const lenzScene: LabScene = {
 
     // 灵敏电流计
     ctx.set('meter', 'rect', { x: 300, y: gY - 34, width: 170, height: 52, rx: 10, fill: '#f8fafc', stroke: '#64748b', 'stroke-width': 2 })
-    ctx.set('meter-l', 'text', { x: 385, y: gY - 20, 'font-size': 10, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: '灵敏电流计（G）' })
+    ctx.set('meter-l', 'text', { x: 385, y: gY - 20, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: '灵敏电流计（G）' })
     // 表盘刻度
     ctx.set('meter-axis', 'line', { x1: 330, y1: gY, x2: 440, y2: gY, stroke: 'currentColor', 'stroke-opacity': 0.3 })
     for (let i = -3; i <= 3; i++) {
@@ -114,7 +114,7 @@ export const lenzScene: LabScene = {
     for (let i = 0; i < 4; i++) {
       ctx.set(`coil${i}`, 'ellipse', { cx: COIL_X, cy: 210, rx: 26 + i * 2, ry: 92 - i * 3, fill: 'none', stroke: '#b45309', 'stroke-width': 2.2, 'stroke-opacity': 0.85 })
     }
-    ctx.set('coil-l', 'text', { x: COIL_X, y: 320, 'font-size': 11, 'text-anchor': 'middle', fill: '#b45309', text: `N=${params.N} 匝` })
+    ctx.set('coil-l', 'text', { x: COIL_X, y: 320, 'font-size': 13, 'text-anchor': 'middle', fill: '#b45309', text: `N=${params.N} 匝` })
 
     // 线圈上的感应电流方向箭头（顺/逆时针：屏幕上取上缘箭头方向表示）
     if (st.currDir !== 0) {
@@ -127,7 +127,7 @@ export const lenzScene: LabScene = {
         points: dirRight ? `${x2 + 8},${topY} ${x2 - 8},${topY - 5} ${x2 - 8},${topY + 5}` : `${x1 - 8},${topY} ${x1 + 8},${topY - 5} ${x1 + 8},${topY + 5}`,
         fill: '#059669',
       })
-      ctx.set('curr-l', 'text', { x: COIL_X, y: topY - 10, 'font-size': 11, 'text-anchor': 'middle', fill: '#059669', text: st.currDir > 0 ? '感应电流（顺时针）' : '感应电流（逆时针）' })
+      ctx.set('curr-l', 'text', { x: COIL_X, y: topY - 10, 'font-size': 13, 'text-anchor': 'middle', fill: '#059669', text: st.currDir > 0 ? '感应电流（顺时针）' : '感应电流（逆时针）' })
     } else {
       ctx.remove('curr-arrow', 'curr-head', 'curr-l')
     }
@@ -166,7 +166,7 @@ export const lenzScene: LabScene = {
       text: lenzText || (st.auto ? '自动插拔演示中（可拖磁铁接管）' : '拖动磁铁：插入/拔出线圈，观察指针与电流方向'),
     })
     ctx.set('tip2', 'text', {
-      x: 44, y: 60, 'font-size': 11, fill: 'currentColor', 'fill-opacity': 0.45,
+      x: 44, y: 60, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.45,
       text: '插得越快 |ΔΦ/Δt| 越大 → 指针偏转越大；方向由「增反减同」判断',
     })
 

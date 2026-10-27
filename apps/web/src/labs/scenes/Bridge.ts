@@ -48,6 +48,13 @@ export const bridgeScene: LabScene = {
     '拱桥顶恰好飞车（N=0）时 mg 全部充当向心力：vc = √(gR)',
     '飞车后车只受重力，做平抛/斜抛运动，桥面对它再无作用力',
   ],
+  challenge: {
+    question: '拱桥半径 R = 40 m，车速达到多少时桥面对车的支持力恰好为零（飞车临界）？',
+    options: ['约 20 m/s', '约 15 m/s', '约 25 m/s', '任何速度都不会'],
+    answer: 0,
+    explanation: '最高点由重力提供向心力：mg = mv²/R → v = √(gR) = √400 = 20 m/s。超过这个速度，桥面「压不住」车，车做抛体运动飞离桥面。',
+    reveal_preset: '拱桥·临界飞车 v=√(gR)',
+  },
   init(): S {
     return { a: A0, air: null }
   },
@@ -179,18 +186,20 @@ export const bridgeScene: LabScene = {
       ctx.requestRender()
     })
 
-    // 力箭头：G 向下，N 沿法线（背离圆心；飞行中脱离桥面无 N）
+    // 力箭头：全局归一化——场景内最大力 = 90px 基准，其余按比例（避免小力箭头短到不可见）
     if (opts.showForces) {
-      drawArrow(ctx, 'fg', carP, add(carP, v(0, params.m * G * 0.004)), { color: C.gravity, label: `G=${fmt((params.m * G) / 1000, 1)}kN` })
+      const kF = 90 / Math.max(params.m * G, Nshow, 1)
+      drawArrow(ctx, 'fg', carP, add(carP, v(0, params.m * G * kF)), { color: C.gravity, label: `G=${fmt((params.m * G) / 1000, 1)}kN` })
       if (!carAir) {
-        const nEnd = add(carP, { x: normalUp.x * Nshow * 0.004, y: normalUp.y * Nshow * 0.004 })
+        const nEnd = add(carP, { x: normalUp.x * Nshow * kF, y: normalUp.y * Nshow * kF })
         drawArrow(ctx, 'fn', carP, nEnd, { color: C.normal, label: `N=${fmt(N / 1000, 2)}kN` })
       } else ctx.remove('fn', 'fn-head', 'fn-label')
       // 向心力示意（凸桥顶：G 与 N 的合力提供向心力，指向圆心）
       if (opts.showComponents && !carAir) {
         const fNet = Math.abs((params.m * params.v * params.v) / params.R)
+        const kNet = 70 / Math.max(fNet, 1)
         const dirC = convex ? v(0, 1) : v(0, -1)
-        drawArrow(ctx, 'fnet', add(carP, v(30, -14)), add(add(carP, v(30, -14)), { x: dirC.x * fNet * 0.02, y: dirC.y * fNet * 0.02 }), { color: C.net, dashed: true, label: '向心力 mv²/R' })
+        drawArrow(ctx, 'fnet', add(carP, v(30, -14)), add(add(carP, v(30, -14)), { x: dirC.x * fNet * kNet, y: dirC.y * fNet * kNet }), { color: C.net, dashed: true, label: '向心力 mv²/R' })
       } else ctx.remove('fnet', 'fnet-head', 'fnet-label')
     } else {
       ctx.remove('fg', 'fg-head', 'fg-label', 'fn', 'fn-head', 'fn-label', 'fnet', 'fnet-head', 'fnet-label')
@@ -202,7 +211,7 @@ export const bridgeScene: LabScene = {
     else if (flying || (convex && params.v > vCritical)) tips.push(`v > vc=√(gR)=${fmt(vCritical, 1)} m/s：桥面托不住车，N<0 → 飞车做抛体`)
     else if (convex && params.v > vCritical * 0.95) tips.push(`接近飞车临界 vc=√(gR)=${fmt(vCritical, 2)} m/s`)
     if (!convex && !carAir) tips.push('凹桥：N=mg+mv²/R 以桥底（最低点）计算，斜坡段数值不适用')
-    ctx.set('tip', 'text', { x: 60, y: 40, 'font-size': 12, fill: C.warn, text: tips.join('；') })
+    ctx.set('tip', 'text', { x: 60, y: 40, 'font-size': 13, fill: C.warn, text: tips.join('；') })
     if (carAir) {
       ctx.set('fly-hint', 'text', { x: carP.x + 30, y: carP.y - 30, 'font-size': 16, fill: C.gravity, text: '✈ 抛体飞行！' })
     } else ctx.remove('fly-hint')

@@ -87,14 +87,14 @@ export const circuitScene: LabScene = {
     // 电源（长短线）
     ctx.set('bat1', 'line', { x1: bx, y1: by - 16, x2: bx, y2: by + 16, stroke: wire, 'stroke-width': 3 })
     ctx.set('bat2', 'line', { x1: bx + 14, y1: by - 8, x2: bx + 14, y2: by + 8, stroke: wire, 'stroke-width': 6 })
-    ctx.set('bat-l', 'text', { x: bx + 34, y: by + 4, 'font-size': 12, fill: 'currentColor', 'fill-opacity': 0.7, text: `E=${EMF}V r=${R_INT}Ω` })
+    ctx.set('bat-l', 'text', { x: bx + 34, y: by + 4, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.7, text: `E=${EMF}V r=${R_INT}Ω` })
     // 灯泡（顶部中央）
     const bulbX = 300
     const bulbY = 120
     const glowR = clamp(10 + Pbulb * 22, 8, 46)
     ctx.set('bulb-glow', 'circle', { cx: bulbX, cy: bulbY - 22, r: glowR, fill: '#fde047', 'fill-opacity': clamp(0.15 + Pbulb / 3, 0.1, 0.85) })
     ctx.set('bulb', 'circle', { cx: bulbX, cy: bulbY - 22, r: 14, fill: '#fef9c3', stroke: '#a16207', 'stroke-width': 2 })
-    ctx.set('bulb-l', 'text', { x: bulbX, y: bulbY + 16, 'font-size': 11, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.7, text: `灯 ${R_BULB}Ω` })
+    ctx.set('bulb-l', 'text', { x: bulbX, y: bulbY + 16, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.7, text: `灯 ${R_BULB}Ω` })
     // 变阻器（右侧竖直，四端示意）
     const rx = 500
     const ry0 = 140
@@ -111,7 +111,7 @@ export const circuitScene: LabScene = {
       ctx.setParam('slider', clamp((p.y - ry0) / rh, 0, 1))
       ctx.requestRender()
     })
-    ctx.set('rh-l', 'text', { x: rx + 28, y: sy + 4, 'font-size': 11, fill: '#b45309', text: `滑片 x=${fmt(x, 2)}` })
+    ctx.set('rh-l', 'text', { x: rx + 28, y: sy + 4, 'font-size': 13, fill: '#b45309', text: `滑片 x=${fmt(x, 2)}` })
 
     if (mode === 0) {
       // 限流：变阻器下端接回路，滑片经上部导线到灯
@@ -130,11 +130,11 @@ export const circuitScene: LabScene = {
     // 电流方向箭头
     const ia = clamp(I / 0.6, 0.15, 1)
     ctx.set('i-arrow', 'polygon', { points: `200,120 188,115 188,125`, fill: '#059669', 'fill-opacity': ia })
-    ctx.set('i-label', 'text', { x: 205, y: 112, 'font-size': 11, fill: '#059669', text: `I=${fmt(I, 3)}A` })
+    ctx.set('i-label', 'text', { x: 205, y: 112, 'font-size': 13, fill: '#059669', text: `I=${fmt(I, 3)}A` })
 
     // 提示
     ctx.set('tip', 'text', {
-      x: 44, y: 40, 'font-size': 12, fill: 'currentColor', 'fill-opacity': 0.55,
+      x: 44, y: 40, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.55,
       text: mode === 0 ? '限流：滑片向下滑 → 接入电阻变小 → 灯变亮；调压范围有限' : '分压：滑片从最下端起调，灯的电压可从 0 连续调到接近 E',
     })
 
@@ -153,7 +153,7 @@ export const circuitScene: LabScene = {
       // 工作点
       const iDisp = clamp(I, 0, Math.ceil(iMax * 10) / 10)
       ctx.gset('g-dot', 'circle', { cx: gx(box, 0, Math.ceil(iMax * 10) / 10, iDisp), cy: gy(box, 0, uMax, clamp(Uterm, 0, uMax)), r: 5, fill: C.warn })
-      ctx.gset('g-dot-l', 'text', { x: gx(box, 0, Math.ceil(iMax * 10) / 10, iDisp) + 8, y: gy(box, 0, uMax, clamp(Uterm, 0, uMax)) - 6, 'font-size': 10, fill: C.warn, text: `(${fmt(I, 2)}A, ${fmt(Uterm, 2)}V)` })
+      ctx.gset('g-dot-l', 'text', { x: gx(box, 0, Math.ceil(iMax * 10) / 10, iDisp) + 8, y: gy(box, 0, uMax, clamp(Uterm, 0, uMax)) - 6, 'font-size': 13, fill: C.warn, text: `(${fmt(I, 2)}A, ${fmt(Uterm, 2)}V)` })
     }
 
     data['电流 I'] = `${fmt(I, 3)} A`

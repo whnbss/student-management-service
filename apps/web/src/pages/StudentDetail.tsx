@@ -1,14 +1,19 @@
-// 学生详情：概况 / 学情日志 / 课时缴费 / 课表 四个子 Tab
+// 学生详情：看板 / 学情日志 / 课时缴费 / 课表 四个子 Tab
+// 桌面端两栏：左（当前 Tab 内容）/ 右（学情看板 + 快捷入口）
 import { useCallback, useEffect, useState } from 'react'
+import {BarChart3, CalendarClock, Camera, Mail, PenLine, Pin, Wallet} from 'lucide-react'
 import { useParams, Link } from 'react-router-dom'
 import { get, post, del } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
-import type { Student, HourPackage, Payment, StudyLog, Schedule } from '@workbench/shared'
+import { NextKeyText } from '@/components/Kp'
+import { aggregateKp, KpMasteryBars, KP_LEGEND, MistakeTrend, ErrorTypeBars } from '@/components/Charts'
+import { TieredPracticeModal, ParentReportModal } from '@/components/Practice'
+import type { Student, HourPackage, Payment, StudyLog, Schedule, Mistake } from '@workbench/shared'
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 const LOG_TYPES = ['上课', '作业', '考试', '其他']
 
-type SubTab = 'logs' | 'hours' | 'schedule'
+type SubTab = 'board' | 'logs' | 'hours' | 'schedule'
 
 export default function StudentDetail() {
   const { id } = useParams()
@@ -20,6 +25,7 @@ export default function StudentDetail() {
   const [packages, setPackages] = useState<HourPackage[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
   const [schedules, setSchedules] = useState<Schedule[]>([])
+  const [mistakes, setMistakes] = useState<Mistake[]>([])
   const [loading, setLoading] = useState(true)
 
   // 学情日志表单
@@ -30,22 +36,27 @@ export default function StudentDetail() {
   const [pkgSaving, setPkgSaving] = useState(false)
   // 课表表单
   const [schForm, setSchForm] = useState({ weekday: 1, start_time: '19:00', end_time: '21:00', note: '' })
+  // P1 弹层：分层练习 / 家长阶段报告
+  const [showTiered, setShowTiered] = useState(false)
+  const [showReport, setShowReport] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [s, l, p, pay, sch] = await Promise.all([
+      const [s, l, p, pay, sch, mk] = await Promise.all([
         get<Student>(`/api/students/${id}`),
         get<StudyLog[]>(`/api/students/${id}/logs`),
         get<HourPackage[]>(`/api/students/${id}/packages`),
         get<Payment[]>(`/api/students/${id}/payments`),
         get<Schedule[]>(`/api/students/${id}/schedules`),
+        get<Mistake[]>(`/api/mistakes?student_id=${id}`),
       ])
       setStudent(s)
       setLogs(l)
       setPackages(p)
       setPayments(pay)
       setSchedules(sch)
+      setMistakes(mk)
     } catch (e: any) {
       show(e.message || '加载失败')
     } finally {
@@ -139,11 +150,16 @@ export default function StudentDetail() {
           </div>
         </div>
         {student.note && <p className="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">备注：{student.note}</p>}
+        {/* P1 内容生产入口：分层练习 + 家长阶段报告 */}
+        <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+          <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setShowTiered(true)}><BarChart3 className="w-4 h-4 inline-block align-[-2px]" /> 生成分层练习</button>
+          <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setShowReport(true)}><Mail className="w-4 h-4 inline-block align-[-2px]" /> 生成阶段报告</button>
+        </div>
       </div>
 
       {/* 子 Tab */}
       <div className="flex gap-1 bg-slate-200/60 dark:bg-slate-800/60 rounded-xl p-1 text-sm">
-        {([['logs', '学情日志'], ['hours', '课时缴费'], ['schedule', '课表']] as const).map(([key, label]) => (
+        {([['board', '学情看板'], ['logs', '学情日志'], ['hours', '课时缴费'], ['schedule', '课表']] as const).map(([key, label]) => (
           <button
             key={key}
             className={`flex-1 py-2 rounded-lg font-medium ${tab === key ? 'bg-white dark:bg-slate-900 shadow-sm' : 'text-slate-500'}`}
@@ -153,6 +169,16 @@ export default function StudentDetail() {
           </button>
         ))}
       </div>
+
+      {/* P1 弹层 */}
+      {showTiered && <TieredPracticeModal student={student} mistakes={mistakes} onClose={() => setShowTiered(false)} />}
+      {showReport && <ParentReportModal student={student} onClose={() => setShowReport(false)} />}
+
+      <div className={tab !== 'board' ? 'lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6 lg:items-start' : ''}>
+        {/* 左栏：当前 Tab 内容 */}
+        <div className="min-w-0">
+      {/* 学情看板（移动端/选中时整栏展示） */}
+      {tab === 'board' && <MasteryBoard mistakes={mistakes} />}
 
       {/* 学情日志 */}
       {tab === 'logs' && (
@@ -222,7 +248,7 @@ export default function StudentDetail() {
                       )}
                       {log.next_class_key && (
                         <p className="text-xs mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-primary-600 dark:text-primary-400">
-                          📌 下次课重点：{log.next_class_key}
+                          <Pin className="w-3.5 h-3.5 inline-block align-[-2px]" /> 下次课重点：<NextKeyText text={log.next_class_key} />
                         </p>
                       )}
                     </div>
@@ -336,6 +362,64 @@ export default function StudentDetail() {
           <p className="text-xs text-slate-400 px-1">到课签到在「今日」工作台进行，每次到课自动扣 1 课时。</p>
         </div>
       )}
+        </div>
+
+        {/* 右栏（桌面端）：学情看板 + 快捷入口（看板 Tab 选中时隐藏，避免重复） */}
+        {tab !== 'board' && (
+          <aside className="hidden lg:block space-y-4 min-w-0">
+            <MasteryBoard mistakes={mistakes} compact />
+            <div className="card p-4 space-y-2">
+              <h2 className="font-semibold text-sm mb-1">快捷入口</h2>
+              <Link to={`/analyze?student=${id}`} className="btn-primary !px-3 !py-1.5 text-xs w-full text-center"><Camera className="w-4 h-4 inline-block align-[-2px]" /> 给该学生拍作业分析</Link>
+              <button className="btn-outline !px-3 !py-1.5 text-xs w-full" onClick={() => setShowTiered(true)}><BarChart3 className="w-4 h-4 inline-block align-[-2px]" /> 生成分层练习</button>
+              <button className="btn-outline !px-3 !py-1.5 text-xs w-full" onClick={() => setShowReport(true)}><Mail className="w-4 h-4 inline-block align-[-2px]" /> 生成阶段报告</button>
+              <button className="btn-outline !px-3 !py-1.5 text-xs w-full" onClick={() => setTab('logs')}><PenLine className="w-4 h-4 inline-block align-[-2px]" /> 记学情流水</button>
+              <button className="btn-outline !px-3 !py-1.5 text-xs w-full" onClick={() => setTab('hours')}><Wallet className="w-4 h-4 inline-block align-[-2px]" /> 课时缴费</button>
+            </div>
+          </aside>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** 学情看板：知识点掌握度条形图 + 30 天错题趋势 + 错因分布 */
+function MasteryBoard({ mistakes, compact = false }: { mistakes: Mistake[]; compact?: boolean }) {
+  const unmastered = mistakes.filter((m) => m.mastery_status === '未掌握').length
+  const redone = mistakes.filter((m) => m.mastery_status === '已重做一次').length
+  const mastered = mistakes.filter((m) => m.mastery_status === '已掌握').length
+  return (
+    <div className="card p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold text-sm">学情看板</h2>
+        <span className="text-[11px] text-slate-400">共 {mistakes.length} 道错题</span>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-xl bg-red-50 dark:bg-red-900/20 py-2">
+          <div className="text-lg font-bold num text-red-500">{unmastered}</div>
+          <div className="text-[11px] text-slate-400">未掌握</div>
+        </div>
+        <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 py-2">
+          <div className="text-lg font-bold num text-amber-500">{redone}</div>
+          <div className="text-[11px] text-slate-400">重做中</div>
+        </div>
+        <div className="rounded-xl bg-green-50 dark:bg-green-900/20 py-2">
+          <div className="text-lg font-bold num text-green-600">{mastered}</div>
+          <div className="text-[11px] text-slate-400">已掌握</div>
+        </div>
+      </div>
+      <div>
+        <h3 className="text-xs font-semibold text-slate-500 mb-2">知识点掌握度</h3>
+        {KP_LEGEND}
+        <div className="mt-2">
+          <KpMasteryBars aggs={aggregateKp(mistakes)} maxRows={compact ? 6 : 10} />
+        </div>
+      </div>
+      <div>
+        <h3 className="text-xs font-semibold text-slate-500 mb-1">错题趋势</h3>
+        <MistakeTrend mistakes={mistakes} />
+      </div>
+      {!compact && <ErrorTypeBars mistakes={mistakes} />}
     </div>
   )
 }

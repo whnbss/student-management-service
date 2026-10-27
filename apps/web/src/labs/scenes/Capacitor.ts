@@ -79,22 +79,22 @@ export const capacitorScene: LabScene = {
       ctx.requestRender()
     })
     const handle = ctx.set('s-handle', 'circle', { cx: cx + plateW / 2 + 10, cy: topY + 4, r: 9, fill: '#fff', stroke: C.accent, 'stroke-width': 2 })
-    ctx.set('s-handle-t', 'text', { x: cx + plateW / 2 + 10, y: topY + 8, 'font-size': 10, 'text-anchor': 'middle', fill: C.accent, text: 'S' })
+    ctx.set('s-handle-t', 'text', { x: cx + plateW / 2 + 10, y: topY + 8, 'font-size': 13, 'text-anchor': 'middle', fill: C.accent, text: 'S' })
     ctx.drag(handle, (p) => {
       const wNew = clamp(p.x - (cx - plateW / 2), 60, 320)
       const sCm2 = clamp(wNew / 2.2, 10, 100)
       ctx.setParam('S', Math.round(sCm2 / 5) * 5)
       ctx.requestRender()
     })
-    ctx.set('d-label', 'text', { x: cx - plateW / 2 - 10, y: cy + 4, 'font-size': 11, 'text-anchor': 'end', fill: 'currentColor', 'fill-opacity': 0.55, text: `d=${fmt(params.d, 1)}mm` })
+    ctx.set('d-label', 'text', { x: cx - plateW / 2 - 10, y: cy + 4, 'font-size': 13, 'text-anchor': 'end', fill: 'currentColor', 'fill-opacity': 0.55, text: `d=${fmt(params.d, 1)}mm` })
 
     // 板上电荷符号 + 场强箭头
     if (U > 0.01) {
       const n = Math.min(10, Math.max(3, Math.round(cap * 1e12 * U * 8)))
       for (let i = 0; i < n; i++) {
         const x = cx - plateW / 2 + 12 + (i * (plateW - 24)) / Math.max(n - 1, 1)
-        ctx.set(`ch-t${i}`, 'text', { x, y: topY - 5, 'font-size': 11, 'text-anchor': 'middle', fill: '#b91c1c', text: '+' })
-        ctx.set(`ch-b${i}`, 'text', { x, y: botY + 14, 'font-size': 11, 'text-anchor': 'middle', fill: '#1d4ed8', text: '−' })
+        ctx.set(`ch-t${i}`, 'text', { x, y: topY - 5, 'font-size': 13, 'text-anchor': 'middle', fill: '#b91c1c', text: '+' })
+        ctx.set(`ch-b${i}`, 'text', { x, y: botY + 14, 'font-size': 13, 'text-anchor': 'middle', fill: '#1d4ed8', text: '−' })
       }
       for (let i = n; i < 10; i++) ctx.remove(`ch-t${i}`, `ch-b${i}`)
       const nE = Math.min(6, Math.max(2, Math.round(Efield / 2000)))
@@ -112,18 +112,18 @@ export const capacitorScene: LabScene = {
     // 电源/断开开关示意
     if (connected) {
       ctx.set('bat', 'rect', { x: 40, y: cy - 22, width: 44, height: 44, fill: '#10b981', rx: 6 })
-      ctx.set('bat-l', 'text', { x: 62, y: cy + 4, 'font-size': 12, 'text-anchor': 'middle', fill: '#fff', text: `${fmt(params.U, 1)}V` })
-      ctx.set('bat-l2', 'text', { x: 62, y: cy - 30, 'font-size': 11, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: '接通' })
+      ctx.set('bat-l', 'text', { x: 62, y: cy + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: `${fmt(params.U, 1)}V` })
+      ctx.set('bat-l2', 'text', { x: 62, y: cy - 30, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: '接通' })
       ctx.remove('bat-l3')
     } else {
       ctx.set('bat', 'rect', { x: 40, y: cy - 22, width: 44, height: 44, fill: '#94a3b8', rx: 6 })
-      ctx.set('bat-l', 'text', { x: 62, y: cy + 4, 'font-size': 12, 'text-anchor': 'middle', fill: '#fff', text: '✂' })
-      ctx.set('bat-l2', 'text', { x: 62, y: cy - 30, 'font-size': 11, 'text-anchor': 'middle', fill: C.warn, text: '已断开' })
-      ctx.set('bat-l3', 'text', { x: 62, y: cy + 40, 'font-size': 10, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: 'Q 保持不变' })
+      ctx.set('bat-l', 'text', { x: 62, y: cy + 4, 'font-size': 13, 'text-anchor': 'middle', fill: '#fff', text: '✂' })
+      ctx.set('bat-l2', 'text', { x: 62, y: cy - 30, 'font-size': 13, 'text-anchor': 'middle', fill: C.warn, text: '已断开' })
+      ctx.set('bat-l3', 'text', { x: 62, y: cy + 40, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.5, text: 'Q 保持不变' })
     }
 
     ctx.set('tip', 'text', {
-      x: 44, y: 34, 'font-size': 12, fill: 'currentColor', 'fill-opacity': 0.55,
+      x: 44, y: 34, 'font-size': 13, fill: 'currentColor', 'fill-opacity': 0.55,
       text: connected ? '接电源模式：U 恒定，拖极板改 d/S 看 C 与 Q 变化' : '断开模式：Q 恒定，拉大 d → C 减小 → U=Q/C 升高，但 E=U/d 不变',
     })
 

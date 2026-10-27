@@ -51,6 +51,13 @@ export const elevatorScene: LabScene = {
     '视重 F = m(g+a)：a 向上为超重，a 向下为失重；a=−g 时完全失重，F=0',
     '匀速段 a=0：无论多快，视重都等于实重——电梯里感受不到匀速',
   ],
+  challenge: {
+    question: '电梯以 a = 9.8 m/s² 向下加速（完全失重），站在体重计上的人读数是多少？',
+    options: ['等于 mg', '约 0.5mg', '0', '约 2mg'],
+    answer: 2,
+    explanation: '完全失重时人与体重计以同样的加速度下落，相互之间没有挤压——支持力 N = m(g − a) = 0，体重计读数为零。',
+    reveal_preset: '完全失重 a=g',
+  },
   init(): S {
     return { t: 0, y: FLOOR - CAB_H, vel: 0, phase: 0, stoppedBy: '' }
   },
@@ -105,7 +112,7 @@ export const elevatorScene: LabScene = {
     for (let i = 0; i <= 6; i++) {
       const y = FLOOR - i * 50
       ctx.set(`fl${i}`, 'line', { x1: SHAFT_L - 30, y1: y, x2: SHAFT_L - 20, y2: y, stroke: 'currentColor', 'stroke-opacity': 0.4 })
-      ctx.set(`flt${i}`, 'text', { x: SHAFT_L - 34, y: y + 4, 'font-size': 10, 'text-anchor': 'end', fill: 'currentColor', 'fill-opacity': 0.5, text: `${i}F` })
+      ctx.set(`flt${i}`, 'text', { x: SHAFT_L - 34, y: y + 4, 'font-size': 13, 'text-anchor': 'end', fill: 'currentColor', 'fill-opacity': 0.5, text: `${i}F` })
     }
 
     // 轿厢
@@ -133,9 +140,9 @@ export const elevatorScene: LabScene = {
     const gripX = SHAFT_R + 60
     const gripY = 230 - params.a * 15
     const grip = ctx.set('a-grip', 'circle', { cx: gripX, cy: gripY, r: 14, fill: '#fff', stroke: C.field, 'stroke-width': 3 })
-    ctx.set('a-grip-t', 'text', { x: gripX, y: gripY + 4, 'font-size': 12, 'text-anchor': 'middle', fill: C.field, text: 'a' })
+    ctx.set('a-grip-t', 'text', { x: gripX, y: gripY + 4, 'font-size': 13, 'text-anchor': 'middle', fill: C.field, text: 'a' })
     ctx.set('a-axis', 'line', { x1: gripX, y1: 80, x2: gripX, y2: 380, stroke: 'currentColor', 'stroke-opacity': 0.2, 'stroke-dasharray': '4 4' })
-    ctx.set('a-label', 'text', { x: gripX, y: 60, 'font-size': 12, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: `拖我调 a（当前 ${fmt(params.a, 1)} m/s²）` })
+    ctx.set('a-label', 'text', { x: gripX, y: 60, 'font-size': 13, 'text-anchor': 'middle', fill: 'currentColor', 'fill-opacity': 0.6, text: `拖我调 a（当前 ${fmt(params.a, 1)} m/s²）` })
     ctx.drag(grip, (p) => {
       ctx.setParam('a', clamp(Math.round((230 - p.y) / 15 * 2) / 2, 0, 10))
     })
@@ -159,7 +166,7 @@ export const elevatorScene: LabScene = {
     }
     ctx.set('badge-bg', 'rect', { x: 470, y: 100, width: 150, height: 46, rx: 10, fill: color, 'fill-opacity': 0.12 })
     ctx.set('badge', 'text', { x: 545, y: 120, 'font-size': 13, 'text-anchor': 'middle', fill: color, text: badge.split('（')[0] })
-    ctx.set('badge2', 'text', { x: 545, y: 138, 'font-size': 10, 'text-anchor': 'middle', fill: color, 'fill-opacity': 0.8, text: badge.split('（')[1]?.replace('）', '') ?? '' })
+    ctx.set('badge2', 'text', { x: 545, y: 138, 'font-size': 13, 'text-anchor': 'middle', fill: color, 'fill-opacity': 0.8, text: badge.split('（')[1]?.replace('）', '') ?? '' })
 
     // 受力（人）：重力 + 支持力（箭头限制在轿厢内）
     const personC: V = v(px, cy + CAB_H - 24)

@@ -12,6 +12,7 @@ import Mistakes from '@/pages/Mistakes'
 import Labs from '@/pages/Labs'
 import LabDetail from '@/pages/LabDetail'
 import Bank from '@/pages/Bank'
+import Stats from '@/pages/Stats'
 import Placeholder from '@/pages/Placeholder'
 void Placeholder // 暂留：M3 题库/讲义占位时复用
 
@@ -41,6 +42,7 @@ const router = createBrowserRouter([
       { path: 'labs', element: <Labs /> },
       { path: 'labs/:id', element: <LabDetail /> },
       { path: 'settings', element: <Settings /> },
+      { path: 'stats', element: <Stats /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },
