@@ -353,8 +353,8 @@ export type QuizLevel = keyof typeof QUIZ_LEVELS
 export const QUIZ_SYSTEM_PROMPT = `你是一名高中物理命题专家，正在为一线教师出练习题。
 要求：
 1. 每题紧扣给定的知识点与题型，情境真实、数据自洽、设问明确；
-2. 难度必须在指定档位区间内；答案必须物理正确、单位规范；
-3. 每题必须附答案、详细解析（分步）、易错点提示；
+2. 难度必须在指定档位区间内；答案必须物理正确、单位规范。难度定义：基础=单步代入或直接套公式（D1~2）；中档/高考=2~3 步综合计算（多对象或多过程，但套路常规，D3）；压轴/竞赛=3 步以上多过程综合、临界与图像分析或跨知识点拼合（D4~5），压轴题情境优先取「综合专题」类跨章综合；
+3. 每题必须附答案、详细解析（分步）、易错点提示；实验题必须按「实验目的 → 实验步骤（或装置与器材）→ 数据处理 → 误差分析」四段结构完整作答；
 4. 题干与解析中的公式用 LaTeX 语法（$...$ 包裹行内公式）；
 5. 选择题的选项写在题干内（A. B. C. D. 各占一行），答案写选项字母与理由；
 6. 解析必须是最终正确版本，严禁出现试错、疑问、「重新分析」「等等」等推理过程，直接给出规范解答；
@@ -385,13 +385,13 @@ template 可选模板及 params 说明：
 - rod_hinge：直杆+铰链 A+水平绳系墙上 C（angle 杆与竖直方向夹角（度）、label）
 params 里的数值一律用国际单位制基本量（角度用度，其余 m/s、kg、T 等）。`
 
-export function quizUserPrompt(p: { kps: string[]; qtypes: string[]; count: number; level: QuizLevel; grade: string }): string {
+export function quizUserPrompt(p: { kps: string[]; qtypes: string[]; count: number; level: QuizLevel; grade: string; hint?: string }): string {
   const [lo, hi] = QUIZ_LEVELS[p.level]
   return `请出 ${p.count} 道高中物理题：
 - 知识点：${p.kps.join('、')}
 - 题型：${p.qtypes.join('、')}（按题型分组输出：先输出全部选择题，再填空题、实验题，最后计算题；组内按难度从低到高）
 - 难度档：${p.level}（difficulty 取 ${lo}~${hi} 的整数）
-- 年级：${p.grade || '高一'}
+- 年级：${p.grade || '高一'}${p.hint ? `\n- 补充要求：${p.hint}` : ''}
 请按约定 JSON 数组结构输出 ${p.count} 道题。`
 }
 

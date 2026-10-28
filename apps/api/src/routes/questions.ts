@@ -180,11 +180,13 @@ export default async function questionRoutes(app: FastifyInstance) {
   // ---------- AI 出题器：生成草稿 + 自动二审（不入库，前端确认后走 bulk） ----------
   // 出题按题型分批：按「选择→填空→实验→计算」固定顺序逐题型单独生成，保证输出顺序与试卷大题一致（双保险之一，前端另有稳定排序兜底）
   app.post('/api/quiz/generate', async (req, reply) => {
-    const b = (req.body || {}) as { kps?: unknown; qtypes?: unknown; count?: unknown; level?: unknown; grade?: unknown }
+    const b = (req.body || {}) as { kps?: unknown; qtypes?: unknown; count?: unknown; level?: unknown; grade?: unknown; hint?: unknown }
     const kps = Array.isArray(b.kps) ? b.kps.map(String).map((s) => s.trim()).filter(Boolean) : []
     if (!kps.length) { reply.code(400).send({ error: '请至少填写一个知识点' }); return }
     const qtypes = Array.isArray(b.qtypes) && b.qtypes.length ? b.qtypes.map(String) : ['计算']
-    const count = [5, 10, 20].includes(Number(b.count)) ? Number(b.count) : 5
+    // 题量放宽为 1~20（界面仍提供 5/10/20 档，脚本按题型配比精确补题时可用任意数量）
+    const rawCount = Number(b.count)
+    const count = Number.isFinite(rawCount) ? Math.min(20, Math.max(1, Math.round(rawCount))) : 5
     const level: QuizLevel = (['基础', '高考', '竞赛'] as const).includes(b.level as any) ? (b.level as QuizLevel) : '高考'
     const provider = pickProvider('text')
     if (!provider) { reply.code(400).send({ error: '尚未配置 AI 供应商 API Key，请到「我的 → AI 配置」填写' }); return }
@@ -196,7 +198,7 @@ export default async function questionRoutes(app: FastifyInstance) {
       let completion_tokens = 0
       let cost = 0
       for (const { qtype, n } of batches) {
-        const { result: qs, usage } = await generateQuiz(provider, { kps, qtypes: [qtype], count: n, level, grade: String(b.grade || '') })
+        const { result: qs, usage } = await generateQuiz(provider, { kps, qtypes: [qtype], count: n, level, grade: String(b.grade || ''), hint: typeof b.hint === 'string' ? b.hint.slice(0, 500) : undefined })
         // 强制落本批题型（防止模型返回的 qtype 与批次不符）
         result.push(...qs.map((q) => ({ ...q, qtype })))
         prompt_tokens += usage.prompt_tokens || 0

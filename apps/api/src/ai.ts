@@ -402,7 +402,7 @@ export function validateQuizDrafts(arr: any, max = 30): QuizDraft[] {
 // AI 出题器：按知识点/题型/数量/难度档命题，返回草稿（教师编辑确认后才入库）
 export async function generateQuiz(
   provider: AiProvider,
-  p: { kps: string[]; qtypes: string[]; count: number; level: QuizLevel; grade: string }
+  p: { kps: string[]; qtypes: string[]; count: number; level: QuizLevel; grade: string; hint?: string }
 ): Promise<{ result: QuizDraft[]; usage: ReturnType<typeof recordUsage> }> {
   return chatJson(
     provider,
