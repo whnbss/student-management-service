@@ -2,7 +2,7 @@
 // 性能铁律：动画帧内不 setState 渲染场景；实时数据面板节流 ~10Hz；拖拽用 Pointer Events
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LabData, LabScene, LabState, RenderOpts, SceneParams } from './types'
-import { encodeLabShare } from './share'
+import { encodeLabShare, sanitizeLabShare } from './share'
 import type { LabShare } from './share'
 import { SvgCtx } from './ctx'
 import { FIXED_DT, useAnimationLoop } from './useAnimationLoop'
@@ -286,20 +286,53 @@ export default function LabFrame({ scene, initialPreset, initialShare }: { scene
   }, [initialPreset])
 
   // 「分享状态」直达：带 ?s=编码 进入时还原分享的参数与画面状态（备课→课堂衔接）
-  const initialShareApplied = useRef(false)
+  // 按内容签名去重：页内切换不同 ?s= 链接时重新应用；同一链接不重复应用
+  const lastShareSig = useRef('')
   useEffect(() => {
-    if (initialShareApplied.current || !initialShare) return
-    initialShareApplied.current = true
-    paramsRef.current = { ...initialParams(scene), ...initialShare.p }
+    if (!initialShare) return
+    const sig = JSON.stringify(initialShare)
+    if (lastShareSig.current === sig) return
+    lastShareSig.current = sig
+    const share = sanitizeLabShare(initialShare, scene.params)
+    if (!share) return
+    paramsRef.current = { ...initialParams(scene), ...share.p }
     setParams(paramsRef.current)
     setPlaying(false)
-    resetState(paramsRef.current, initialShare.s)
+    resetState(paramsRef.current, share.s)
     ctxRef.current?.gclear()
     doRender(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialShare])
 
-  // 生成当前状态分享链接：复制到剪贴板；非安全上下文（局域网 HTTP）剪贴板不可用时弹窗手动复制
+  // 「分享状态」弹层：链接展示 + 自动尝试复制；局域网 HTTP 是非安全上下文，clipboard API 不存在，
+  // 必须显式分支兜底到 execCommand + 手动复制（绝不能静默失败）
+  const [shareModal, setShareModal] = useState<{ url: string; copied: boolean | null } | null>(null)
+  const shareInputRef = useRef<HTMLInputElement>(null)
+
+  const tryCopyShare = useCallback((url: string) => {
+    const done = (ok: boolean) => setShareModal((m) => (m && m.url === url ? { url, copied: ok } : m))
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(url).then(
+        () => done(true),
+        () => done(false)
+      )
+      return
+    }
+    // 非安全上下文（局域网 HTTP）：execCommand 需要先聚焦并全选输入框
+    const input = shareInputRef.current
+    if (!input) {
+      done(false)
+      return
+    }
+    input.focus()
+    input.select()
+    try {
+      done(document.execCommand('copy'))
+    } catch {
+      done(false)
+    }
+  }, [])
+
   const shareStateLink = () => {
     const enc = encodeLabShare(paramsRef.current, stateRef.current)
     if (!enc) {
@@ -307,11 +340,14 @@ export default function LabFrame({ scene, initialPreset, initialShare }: { scene
       return
     }
     const url = `${location.origin}${location.pathname}?s=${enc}`
-    navigator.clipboard?.writeText(url).then(
-      () => window.alert('状态链接已复制，发给另一台设备打开即可还原当前参数与画面'),
-      () => window.prompt('自动复制不可用，请长按/全选下面的链接手动复制：', url)
-    )
+    setShareModal({ url, copied: null })
   }
+
+  // 弹层挂载后（输入框已渲染）自动尝试复制；copied 非 null 后不再重试
+  useEffect(() => {
+    if (shareModal && shareModal.copied === null) tryCopyShare(shareModal.url)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shareModal?.url])
 
   // 全屏模式 Esc 退出
   useEffect(() => {
@@ -531,6 +567,40 @@ export default function LabFrame({ scene, initialPreset, initialShare }: { scene
     </div>
   ) : null
 
+  // —— 分享状态弹层：展示链接并自动复制；复制失败（局域网 HTTP 等）给出手动复制指引 ——
+  const sharePanel = shareModal ? (
+    <div className="fixed inset-0 z-[70] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4" onMouseDown={() => setShareModal(null)}>
+      <div className="w-full max-w-lg card !bg-white dark:!bg-slate-900 p-5 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-base font-bold">🔗 分享状态</span>
+          <button className="ml-auto text-slate-400 hover:text-slate-600 text-lg leading-none" onClick={() => setShareModal(null)} aria-label="关闭">×</button>
+        </div>
+        <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+          已生成状态链接。发给另一台设备（如课堂电脑/手机）打开，即还原当前参数与画面进度。
+        </p>
+        <input
+          ref={shareInputRef}
+          readOnly
+          value={shareModal.url}
+          onFocus={(e) => e.currentTarget.select()}
+          className="input !text-xs num w-full"
+        />
+        {shareModal.copied === true && (
+          <div className="mt-2 text-xs text-green-600 dark:text-green-400">✓ 已复制到剪贴板，直接粘贴发送即可</div>
+        )}
+        {shareModal.copied === false && (
+          <div className="mt-2 text-xs text-amber-600 dark:text-amber-400 leading-relaxed">
+            自动复制不可用（局域网 HTTP 下浏览器的剪贴板限制）。请点击上方输入框全选后手动复制（Ctrl+C，手机长按复制）。
+          </div>
+        )}
+        <div className="mt-4 flex gap-2 justify-end">
+          <button className="btn-outline !px-4 !py-1.5 text-xs" onClick={() => tryCopyShare(shareModal.url)}>再试复制</button>
+          <button className="btn-primary !px-4 !py-1.5 text-xs" onClick={() => setShareModal(null)}>关闭</button>
+        </div>
+      </div>
+    </div>
+  ) : null
+
   // —— 全屏课件模式：舞台与图像面板同屏并排、字号放大、参数面板收进抽屉 ——
   if (fullscreen) {
     return (
@@ -560,6 +630,7 @@ export default function LabFrame({ scene, initialPreset, initialShare }: { scene
           </div>
         )}
         {challengePanel}
+        {sharePanel}
       </div>
     )
   }
@@ -584,6 +655,7 @@ export default function LabFrame({ scene, initialPreset, initialShare }: { scene
         </div>
       </div>
       {challengePanel}
+      {sharePanel}
     </div>
   )
 }
