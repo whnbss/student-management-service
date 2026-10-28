@@ -484,11 +484,136 @@ export function sanitizeLatexChinese(s: unknown): string {
   return t
 }
 
-// ---------- 数值机器复核（验收 #7 长期修法）：解析中「纯数字两步算式 = 结果」独立复验 ----------
-// 背景：#244（0.5/0.2 误写 1）、#273（2+1 误写 2.5）——模型心算错、二审 AI 也心算，全靠人眼兜不住。
-// 做法：抽取 $...$ / $$...$$ 数学段，去掉单位宏与 \frac 后，按「=」分段；仅当某段整体恰为
-// 「两个纯数字的四则运算」且结果段是纯数字时才复验（±2% 或 0.05 容差吸收四舍五入）。
-// 多步链（如 0.5×0.5×4=1）与含变量/幂的式子一律跳过——宁漏判不误杀，机器只兜最简单的算术错。
+// ---------- 数值机器复核（验收 #12 根因修法：通用表达式求值） ----------
+// 背景：#244（0.5/0.2 误写 1）、#273（2+1 误写 2.5）、#375（1/8e11 量级错）、#414（三因子 0.4×2×0.5 误写 0.8）
+// ——旧版只认「两个纯数字一步运算」，三因子乘积/带幂/嵌套 \frac 一律漏判。
+// 做法：抽取 $...$ / $$...$$ 数学段 → 归一（单位宏剥离、\times→×、纯数字 \frac → ((A)/(B))、
+// 其余 LaTeX 命令剥离）→ 按「=」分段；任一相邻对若「左段整体是纯数字算式、右段是纯数字」，
+// 用递归下降求值器独立复验（±2% 或 0.05 容差吸收四舍五入）。
+// 含变量/字母/未知命令的段一律跳过——宁漏判不误杀，机器只兜「纯数字算式」这一类。
+
+/** 纯数字算式判定：只含 数字/四则/幂/括号（用于决定是否值得求值） */
+function isPureArith(t: string): boolean {
+  return /^[\d+\-×÷*/^().]+$/.test(t) && /\d/.test(t)
+}
+
+/** 递归下降求值：+ - × ÷ / ^（右结合）与括号、一元负号；解析失败返回 null */
+function evalArith(src: string): number | null {
+  let i = 0
+  const s = src
+  const ws = () => { while (i < s.length && s[i] === ' ') i++ }
+  function expr(): number | null {
+    let v = term(); if (v === null) return null
+    for (;;) {
+      ws()
+      if (s[i] === '+') { i++; const r = term(); if (r === null) return null; v += r }
+      else if (s[i] === '-') { i++; const r = term(); if (r === null) return null; v -= r }
+      else return v
+    }
+  }
+  function term(): number | null {
+    let v = pow(); if (v === null) return null
+    for (;;) {
+      ws()
+      if (s[i] === '×' || s[i] === '*') { i++; const r = pow(); if (r === null) return null; v *= r }
+      else if (s[i] === '÷' || s[i] === '/') { i++; const r = pow(); if (r === null) return null; if (r === 0) return null; v /= r }
+      else return v
+    }
+  }
+  function pow(): number | null {
+    const base = factor(); if (base === null) return null
+    ws()
+    if (s[i] === '^') { i++; const e = pow(); if (e === null) return null; const v = Math.pow(base, e); return Number.isFinite(v) ? v : null }
+    return base
+  }
+  function factor(): number | null {
+    ws()
+    if (s[i] === '-') { i++; const v = factor(); return v === null ? null : -v }
+    if (s[i] === '+') { i++; return factor() }
+    if (s[i] === '(') {
+      i++
+      const v = expr()
+      ws()
+      if (v === null || s[i] !== ')') return null
+      i++
+      return v
+    }
+    const m = /^\d+(?:\.\d+)?/.exec(s.slice(i))
+    if (!m) return null
+    i += m[0].length
+    return Number(m[0])
+  }
+  const v = expr()
+  ws()
+  if (i !== s.length || v === null || !Number.isFinite(v)) return null
+  return v
+}
+
+/** 读一个平衡花括号组（pos 指向「{」），返回内容与结束下标；不匹配返回 null */
+function readBrace(t: string, pos: number): { content: string; end: number } | null {
+  if (t[pos] !== '{') return null
+  let depth = 0
+  for (let j = pos; j < t.length; j++) {
+    if (t[j] === '{') depth++
+    else if (t[j] === '}') { depth--; if (depth === 0) return { content: t.slice(pos + 1, j), end: j + 1 } }
+  }
+  return null
+}
+
+/** 剥离 \text{...} / \mathrm{...} 等带参命令（含嵌套花括号） */
+function stripBracedCmds(t: string, cmds: string[]): string {
+  for (const cmd of cmds) {
+    for (;;) {
+      const m = new RegExp(`\\\\${cmd}\\s*\\{`).exec(t)
+      if (!m) break
+      const g = readBrace(t, m.index + m[0].length - 1)
+      if (!g) break
+      t = t.slice(0, m.index) + t.slice(g.end)
+    }
+  }
+  return t
+}
+
+/** 读一个 \frac/\sqrt 参数：花括号组，或无花括号时的单字符（LaTeX 单 token），如 \dfrac12、\sqrt3 */
+function readArg(t: string, pos: number): { content: string; end: number } | null {
+  if (t[pos] === '{') return readBrace(t, pos)
+  if (pos < t.length && /\S/.test(t[pos])) return { content: t[pos], end: pos + 1 }
+  return null
+}
+
+/** 纯数字 \frac{A}{B} → ((A)/(B))（支持嵌套与乘式参数）；非纯数字的 \frac 用占位符替换（后续整段必被跳过） */
+function fracToExpr(t: string): string {
+  for (;;) {
+    const m = /\\(?:d|t)?frac\s*/.exec(t)
+    if (!m) break
+    let k = m.index + m[0].length
+    const a = readArg(t, k)
+    if (!a) break
+    k = a.end
+    while (k < t.length && /\s/.test(t[k])) k++
+    const b = readArg(t, k)
+    if (!b) break
+    const loose = (x: string) => isPureArith(x.replace(/[{}\s]/g, ''))
+    const rep = loose(a.content) && loose(b.content) ? `((${a.content})/(${b.content}))` : '@FRAC@'
+    t = t.slice(0, m.index) + rep + t.slice(b.end)
+  }
+  return t
+}
+
+/** \sqrt{A}：A 为纯数字算式 → ((A)^{0.5})；否则占位替换（剥掉 \sqrt 会让 4^2+3^2 伪装成 5，必须先处理） */
+function sqrtToExpr(t: string): string {
+  for (;;) {
+    const m = /\\(?:sqrt)\s*(?:\[[^\]]*\])?\s*/.exec(t)
+    if (!m) break
+    const a = readArg(t, m.index + m[0].length)
+    if (!a) break
+    const loose = isPureArith(a.content.replace(/[{}\s]/g, ''))
+    const rep = loose ? `((${a.content})^{0.5})` : '@SQRT@'
+    t = t.slice(0, m.index) + rep + t.slice(a.end)
+  }
+  return t
+}
+
 export interface ArithIssue {
   /** 原始算式片段（含上下文，便于定位） */
   expr: string
@@ -506,33 +631,35 @@ export function checkSolutionArithmetic(solution: unknown): ArithIssue[] {
     segs.push(String(a || b || c || ''))
     return _m
   })
-  const NUM = String.raw`-?\d+(?:\.\d+)?`
   for (const raw of segs) {
-    // 归一：\times/\cdot → ×，\div → ÷，简单数字 \frac{a}{b} → (a)/(b)，剥掉单位宏与空白
-    let t = raw.replace(/\\(times|cdot)/g, '×').replace(/\\div/g, '÷')
-    t = t.replace(/\\(?:d|t)?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, (_m, a, b) => {
-      const isNum = (x: string) => new RegExp(String.raw`^\s*${NUM}\s*$`).test(x)
-      return isNum(a) && isNum(b) ? `(${a.trim()})/(${b.trim()})` : _m
-    })
-    t = t.replace(/\\(mathrm|text)\{[^{}]*\}/g, '').replace(/\\[,;:! ]|\\quad|\\qquad|[{}]/g, '').replace(/\s+/g, '')
+    // 归一：\times/\cdot → ×，\div → ÷，−/· 归一，\neq → ≠，单位上标并入单位宏，剥单位宏，\frac/\sqrt 求值化，其余命令剥离
+    let t = raw.replace(/\\(times|cdot)/g, '×').replace(/\\div/g, '÷').replace(/−/g, '-').replace(/·/g, '×')
+    t = t.replace(/\\ne(q)?|\\approx/g, '≠')
+    // \text{m}^{2} → \text{m^2}（单位的幂随单位一起剥离，否则 ^2 会错误挂到前面的数字上：0.50×0.160^2）
+    t = t.replace(/\\(?:text|mathrm)\{([^{}]*)\}\s*\^\s*(\{[^{}]*\}|[-\d]+)/g, (_m, inner, sup) => `\\text{${inner}^${String(sup).replace(/[{}]/g, '')}}`)
+    t = stripBracedCmds(t, ['text', 'mathrm', 'mathit', 'mathbf', 'operatorname'])
+    t = fracToExpr(t)
+    t = sqrtToExpr(t)
+    t = t.replace(/\\[,;:! ]|~/g, '').replace(/\\[a-zA-Z]+/g, '').replace(/[{}\s\\,]|°|℃/g, '')
     if (!/\d/.test(t)) continue
-    // 按 = 分段，逐相邻对复验
-    const parts = t.split('=')
-    for (let i = 0; i < parts.length - 1; i++) {
-      const lhs = parts[i]
-      const rhs = parts[i + 1]
-      const m = lhs.match(new RegExp(String.raw`^\(?(${NUM})\)?([+×*/÷-])(\(?${NUM}\)?)$`))
-      if (!m) continue
-      const gotM = rhs.match(new RegExp(String.raw`^(${NUM})$`))
-      if (!gotM) continue
-      const x = Number(m[1])
-      const op = m[2]
-      const y = Number(m[3].replace(/[()]/g, ''))
-      const got = Number(gotM[1])
-      const expect = op === '+' ? x + y : op === '-' ? x - y : op === '×' || op === '*' ? x * y : x / y
-      if (!Number.isFinite(expect)) continue
-      if (Math.abs(expect - got) > Math.max(0.05, Math.abs(expect) * 0.02)) {
-        issues.push({ expr: lhs, expect: Number(expect.toFixed(4)), got })
+    // 按 = 分段，逐相邻对复验：左段整体是纯数字算式（可求值）、右段是纯数字
+    // 左段必须含运算符——裸数字对裸数字多为单位换算（300s=5min、4000kg=4t），不能按恒等式复验
+    // 按 ≠ 分块：≠ 两侧不是相等关系（5m≠10m），跨块的相邻段不构成复验对
+    const chunks = t.split('≠')
+    for (const chunk of chunks) {
+      const parts = chunk.split('=')
+      for (let i = 0; i < parts.length - 1; i++) {
+        const lhs = parts[i]
+        const rhs = parts[i + 1]
+        if (!isPureArith(lhs) || !/[+\-×÷*/^]/.test(lhs)) continue
+        const gotM = rhs.match(/^-?\d+(?:\.\d+)?$/)
+        if (!gotM) continue
+        const expect = evalArith(lhs)
+        if (expect === null) continue
+        const got = Number(gotM[0])
+        if (Math.abs(expect - got) > Math.max(0.05, Math.abs(expect) * 0.02)) {
+          issues.push({ expr: lhs, expect: Number(expect.toFixed(4)), got })
+        }
       }
     }
   }

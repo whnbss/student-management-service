@@ -107,6 +107,47 @@ function expandSlots(total: number, mix: Array<[string, number]> | null, diff: [
   return slots
 }
 
+// ---------- 同批数据指纹查重（验收 #12 P2-20 长期修法） ----------
+// 现有查重只比题干前 40 字，同批两道「数据全同/正确选项逐字相同」的题互不知晓（#419/#420、#424/#427）。
+// 指纹 = 题干数字多重集（降序拼接）+ 选择题正确选项原文（去空白）；仅当两题共享知识点时才判重，避免误杀同数字不同考点。
+function stemFingerprint(stem: string, answer: string): string {
+  const norm = String(stem || '')
+    .replace(/\\(?:text|mathrm|mathit|mathbf)\{[^{}]*\}/g, '')
+    .replace(/\\[a-zA-Z]+/g, '')
+    .replace(/[{}$]/g, '')
+  const nums = (norm.match(/\d+(?:\.\d+)?/g) || []).map(Number).sort((a, b) => b - a).join(',')
+  const m = /^\s*([A-D])\s*$/.exec(String(answer || ''))
+  let opt = ''
+  if (m) {
+    const re = new RegExp(`^${m[1]}\\s*[.、．:：]`)
+    const line = String(stem || '').split('\n').map((l) => l.trim()).find((l) => re.test(l))
+    if (line) opt = line.replace(/\s+/g, '')
+  }
+  return nums + (opt ? '|' + opt : '')
+}
+const batchFp = new Map<string, string[]>() // 指纹 → 已入库题的知识点列表
+
+// 返回过滤掉同批指纹重复题后的列表；重复题记入 skipped
+function dedupBatchFingerprint(drafts: any[], kps: string[], label: string, out: { skipped: string[] }): any[] {
+  const outList: any[] = []
+  for (const d of drafts) {
+    const fp = stemFingerprint(d.stem, d.answer)
+    if (fp && fp !== ',') {
+      const prevKps = batchFp.get(fp)
+      const myKps: string[] = d.knowledge_points || kps || []
+      if (prevKps && prevKps.some((k) => myKps.includes(k))) {
+        out.skipped.push(`${label}：同批数据指纹重复（数字组合/正确选项与已入库题相同），未入库`)
+        continue
+      }
+      const list = batchFp.get(fp) || []
+      list.push(...myKps)
+      batchFp.set(fp, [...new Set(list)])
+    }
+    outList.push(d)
+  }
+  return outList
+}
+
 async function req(method: string, path: string, body?: unknown) {
   const res = await fetch(BASE + path, {
     method,
@@ -168,7 +209,7 @@ async function generateAndSave(opts: {
     const noFig = pairs.filter(({ d }) => /如图|图所示/.test(d.stem || '') && !(d.figure_spec && specToSvg(d.figure_spec)))
     if (noFig.length) out.skipped.push(`${label}：${noFig.length} 题题干称「如图」但配图渲染失败，已弃用`)
     pairs = pairs.filter(({ d }) => !(/如图|图所示/.test(d.stem || '') && !(d.figure_spec && specToSvg(d.figure_spec))))
-    const good = pairs.filter(({ review }) => !review || review.pass).map(({ d }) => d)
+    const good = dedupBatchFingerprint(pairs.filter(({ review }) => !review || review.pass).map(({ d }) => d), kps, label, out)
     const bad = drafts.length - good.length
     if (bad > 0) out.skipped.push(`${label}：${bad} 题二审未过，已弃用`)
     if (!good.length) { console.log('  二审全部未过，跳过入库'); return 0 }
@@ -262,11 +303,12 @@ async function main() {
   // 逐组出题；组内一题未入库（二审全拒/缺图/失败）时自动重试，最多 3 次尝试（重试附加更严格的命题纪律）
   // 中途任何异常也要保证还原用户的智能服务配置
   const RETRY_HINT = '前次草稿被二审驳回。请务必：先在解析中完整严格推导（禁止近似估算下结论、禁止过程性试错文字），再核对每个数值与单位；若用「如图」必须给出完整可绘图的 figure_spec 参数。'
+  const GLOBAL_HINT = '题干第一句直接从物理情境开始，禁止以知识点或节名开头，不得出现与题目无关的标题行。'
   try {
     for (const g of planGroups) {
       let got = 0
       for (let attempt = 1; attempt <= 3 && got < g.n; attempt++) {
-        const note = attempt === 1 ? g.note : [g.note, RETRY_HINT].filter(Boolean).join(' ')
+        const note = [g.note, ...(attempt > 1 ? [RETRY_HINT] : []), GLOBAL_HINT].filter(Boolean).join(' ')
         if (attempt > 1) console.log(`  ↻ 第 ${attempt} 次重试（还差 ${g.n - got} 题）`)
         got += await generateAndSave({ ...g, n: g.n - got, note }, out)
       }

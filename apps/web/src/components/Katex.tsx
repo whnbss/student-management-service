@@ -15,6 +15,8 @@ function render(tex: string, displayMode: boolean): string {
 export default function Katex({ text, className = '' }: { text: string; className?: string }) {
   const html = useMemo(() => {
     if (!text) return ''
+    // \[...\] 块级定界符先归一为 $$...$$（题库解析中使用 \[ \] 分行推导块时同样正确渲染）
+    const src = String(text).replace(/\\\[([\s\S]+?)\\\]/g, (_m, inner) => `$$${inner}$$`)
     const parts: string[] = []
     // 先按 $$ 块级切，再按 $ 或 \( \) 行内切
     const blockRe = /\$\$([\s\S]+?)\$\$/g
@@ -33,12 +35,12 @@ export default function Katex({ text, className = '' }: { text: string; classNam
       }
       parts.push(escapeHtml(s.slice(l)))
     }
-    while ((m = blockRe.exec(text))) {
-      pushPlain(text.slice(last, m.index))
+    while ((m = blockRe.exec(src))) {
+      pushPlain(src.slice(last, m.index))
       parts.push(render(m[1], true))
       last = m.index + m[0].length
     }
-    pushPlain(text.slice(last))
+    pushPlain(src.slice(last))
     return parts.join('')
   }, [text])
   return <span className={className} dangerouslySetInnerHTML={{ __html: html }} />

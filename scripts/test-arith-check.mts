@@ -12,6 +12,14 @@ const cases: Array<[string, string, number]> = [
   ['正确减法 不误杀', '$$\\Delta U=80\\ \\mathrm{J}-84\\ \\mathrm{J}=-4\\ \\mathrm{J}$$', 0],
   ['变量式 不误杀', '$$v=at=2t$$', 0],
   ['整数乘法正确 不误杀', '$$Q=4\\times4\\ \\mathrm{J}=16\\ \\mathrm{J}$$', 0],
+  // 验收 #12 后新增：表达式求值升级用例
+  ['414 三因子乘积 应检出', '$F=BIL=0.4\\times 2\\times 0.5\\ \\text{N}=0.8\\ \\text{N}$', 1],
+  ['414 修正后 三因子 不误杀', '$F=BIL=0.4\\times 2\\times 0.5\\ \\text{N}=0.4\\ \\text{N}$', 0],
+  ['427 带乘式 frac 应检出', '$v_1=\\dfrac{P}{F}=\\dfrac{60\\times10^{3}}{4.0\\times10^{3}}=20\\,\\text{m/s}$', 1],
+  ['427 修正后 带乘式 frac 不误杀', '$v_1=\\dfrac{P}{F}=\\dfrac{72\\times10^{3}}{3.6\\times10^{3}}=20\\,\\text{m/s}$', 0],
+  ['幂运算错误 应检出', '$E=\\frac{1}{2}\\times2\\times2^{2}=3\\ \\text{J}$', 1],
+  ['幂运算正确 不误杀', '$E=\\frac{1}{2}\\times2\\times2^{2}=4\\ \\text{J}$', 0],
+  ['多段链 应检出', '$$I=\\frac{E}{R}=\\frac{0.4}{0.2}=2\\ \\text{A},\\ F=BIL=0.4\\times2\\times0.5=0.8\\ \\text{N}$$', 1],
 ]
 let fail = 0
 for (const [name, input, expectIssues] of cases) {

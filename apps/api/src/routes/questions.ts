@@ -224,8 +224,8 @@ export default async function questionRoutes(app: FastifyInstance) {
       } catch (e: any) {
         console.error('[quiz] 二审失败（已降级为不审查）:', e.message)
       }
-      // 机器数值复核（验收 #7 长期修法）：解析中「纯数字两步算式 = 结果」由代码独立复验，
-      // 不依赖模型心算（#244 / #273 这类 0.5/0.2=1、2+1=2.5 的算术 slip 二审 AI 也查不出来）。
+      // 机器数值复核（验收 #12 根因修法：通用表达式求值）：解析中「纯数字算式 = 结果」由代码独立复验，
+      // 不依赖模型心算（#244 / #273 / #414 这类 0.5/0.2=1、2+1=2.5、0.4×2×0.5=0.8 的算术 slip 二审 AI 也查不出来）。
       // 复核未过的题直接判二审不通过（模型给出的 pass 被覆盖），教师终审时也能看到未过原因
       const machineReview: Array<{ pass: boolean; issues: string[]; fixed: null } | null> = result.map((q) => {
         const arith = checkSolutionArithmetic(q.solution || '')
