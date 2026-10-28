@@ -49,6 +49,9 @@ export default function StudentShell() {
     }
   }
 
+  // 强制改密期间不渲染子页面：避免业务接口在 403 拦截下的无效请求噪音
+  const blocked = !!(me?.must_change_pwd || mustChangePwd)
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       {/* 顶部：学生姓名 + 改密/退出 */}
@@ -70,7 +73,7 @@ export default function StudentShell() {
       </header>
 
       <main className="max-w-2xl mx-auto p-4 pb-24">
-        <Outlet context={{ me, reloadMe: () => get<StudentMe>('/api/student/me').then(setMe).catch(() => {}) }} />
+        {!blocked && <Outlet context={{ me, reloadMe: () => get<StudentMe>('/api/student/me').then(setMe).catch(() => {}) }} />}
       </main>
 
       {/* 学生底部 4 Tab */}

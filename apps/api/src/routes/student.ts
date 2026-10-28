@@ -1,7 +1,7 @@
 // 学生工作台（/api/student/*，仅 student 角色可访问，守卫在 auth.ts）
 // 学生只能看到自己的数据；「我已重做」走与教师端同一套艾宾浩斯流转并给教师发通知
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
-import { db, nowISO, remainingHours } from '../db'
+import { db, nowISO, remainingHours, billingModeOf } from '../db'
 import { hashPassword, verifyPassword } from '../crypto'
 import { REDO_INTERVALS } from '@workbench/shared'
 
@@ -18,6 +18,11 @@ function myAccount(req: FastifyRequest, reply: FastifyReply): any {
   }
   if (acc.status !== 'active') {
     reply.code(403).send({ error: '该账号已被停用，请联系老师' })
+    return null
+  }
+  // 充值课时模式余额耗尽：拒绝访问（双保险，登录处已拦一道；per_lesson 不受影响）
+  if (billingModeOf(acc.student_id) === 'package' && remainingHours(acc.student_id) <= 0) {
+    reply.code(403).send({ error: '课时已用完，请联系老师续费' })
     return null
   }
   return acc
@@ -48,6 +53,8 @@ export default async function studentRoutes(app: FastifyInstance) {
       grade: st.grade,
       status: st.status,
       remaining_hours: remainingHours(st.id),
+      billing_mode: billingModeOf(st.id),
+      lesson_price: Number(st.lesson_price) || 0,
       must_change_pwd: !!acc.must_change_pwd,
       account_status: acc.status,
     }
@@ -104,13 +111,19 @@ export default async function studentRoutes(app: FastifyInstance) {
     return { ok: true, mastery_status: mastered ? '已掌握' : '已重做一次', redo_due: mastered ? null : addDays(nowISO().slice(0, 10), REDO_INTERVALS[stage]) }
   })
 
-  // 我的课时：剩余课时 + 课时包 + 最近签到
+  // 我的课时：剩余课时 + 课时包 + 最近签到 +（一课一结算时）结算记录与本月合计
   app.get('/api/student/hours', async (req, reply) => {
     const acc = requireReady(req, reply)
     if (!acc) return
+    const mode = billingModeOf(acc.student_id)
     const packages = db.prepare('SELECT * FROM hour_packages WHERE student_id = ? ORDER BY purchase_date DESC, id DESC').all(acc.student_id)
     const attendance = db.prepare('SELECT * FROM attendance WHERE student_id = ? ORDER BY date DESC, id DESC LIMIT 30').all(acc.student_id)
-    return { ok: true, remaining_hours: remainingHours(acc.student_id), packages, attendance }
+    const month = nowISO().slice(0, 7)
+    const settlements = mode === 'per_lesson'
+      ? db.prepare("SELECT * FROM settlements WHERE student_id = ? AND date LIKE ? ORDER BY date DESC, id DESC LIMIT 50").all(acc.student_id, `${month}-%`)
+      : []
+    const month_total = settlements.reduce((s: number, x: any) => s + (Number(x.amount) || 0), 0)
+    return { ok: true, remaining_hours: remainingHours(acc.student_id), billing_mode: mode, lesson_price: Number((db.prepare('SELECT lesson_price FROM students WHERE id = ?').get(acc.student_id) as any)?.lesson_price) || 0, packages, attendance, settlements, month_total }
   })
 
   // 我的课表

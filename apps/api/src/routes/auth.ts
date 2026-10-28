@@ -1,6 +1,6 @@
 // 登录路由：账号 + 密码（scrypt 校验），签发角色化 token；带登录限速
 import type { FastifyInstance } from 'fastify'
-import { db, nowISO } from '../db'
+import { db, nowISO, remainingHours, billingModeOf } from '../db'
 import { issueToken, verifyPassword, rateLimitCheck, rateLimitFail, rateLimitSuccess } from '../crypto'
 
 export default async function authRoutes(app: FastifyInstance) {
@@ -21,6 +21,14 @@ export default async function authRoutes(app: FastifyInstance) {
       rateLimitFail(ip)
       reply.code(401).send({ error: '账号或密码错误' })
       return
+    }
+    // 充值课时模式：余额耗尽的学生账号拒绝登录（per_lesson 一课一结算不受课时影响）
+    // 放在停用判断之前：因「课时耗尽」被自动停用的账号，提示续费而非「已停用」
+    if (acc.role === 'student' && acc.student_id) {
+      if (billingModeOf(acc.student_id) === 'package' && remainingHours(acc.student_id) <= 0) {
+        reply.code(403).send({ error: '课时已用完，请联系老师续费' })
+        return
+      }
     }
     if (acc.status !== 'active') {
       reply.code(403).send({ error: '该账号已被停用，请联系老师' })

@@ -1,6 +1,6 @@
 // 今日工作台：今日课表、剩余课时预警、下次课重点
 import type { FastifyInstance } from 'fastify'
-import { db, remainingHours } from '../db'
+import { db, remainingHours, billingModeOf } from '../db'
 
 export default async function todayRoutes(app: FastifyInstance) {
   app.get('/api/today', async () => {
@@ -19,13 +19,14 @@ export default async function todayRoutes(app: FastifyInstance) {
 
     const lessonList = lessons.map((l) => ({
       schedule: { id: l.id, student_id: l.student_id, weekday: l.weekday, start_time: l.start_time, end_time: l.end_time, note: l.note },
-      student: { id: l.student_id, name: l.student_name, grade: l.grade, remaining_hours: remainingHours(l.student_id) },
+      student: { id: l.student_id, name: l.student_name, grade: l.grade, remaining_hours: remainingHours(l.student_id), billing_mode: billingModeOf(l.student_id) },
       attendance: l.attendance_id ? { id: l.attendance_id, status: l.attendance_status } : null,
     }))
 
-    // 剩余课时 ≤3 的在读学生预警
+    // 剩余课时 ≤3 的在读学生预警（一课一结算的学生不按课时预警）
     const active = db.prepare("SELECT id, name FROM students WHERE status = '在读'").all() as any[]
     const low_hours = active
+      .filter((s) => billingModeOf(s.id) === 'package')
       .map((s) => ({ id: s.id, name: s.name, remaining_hours: remainingHours(s.id) }))
       .filter((s) => s.remaining_hours <= 3)
 

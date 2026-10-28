@@ -32,8 +32,14 @@ export default function Today() {
 
   const sign = async (studentId: number, scheduleId: number, status: string) => {
     try {
-      await post('/api/attendance', { student_id: studentId, date: info!.date, status, schedule_id: scheduleId })
-      show(status === '到课' ? '已签到，扣 1 课时' : `已记录${status}`)
+      const r = await post<any>('/api/attendance', { student_id: studentId, date: info!.date, status, schedule_id: scheduleId })
+      if (status === '到课' && r?.billing_mode === 'per_lesson') {
+        show(`已签到，已按次结算记账 ¥${r.settlement_amount || 0}`)
+      } else if (status === '到课' && r?.account_suspended) {
+        show('已签到扣 1 课时；⚠️ 课时已用完，该学生的学生端登录已自动暂停（续费后自动恢复）')
+      } else {
+        show(status === '到课' ? '已签到，扣 1 课时' : `已记录${status}`)
+      }
       load()
     } catch (e: any) {
       show(e.message || '操作失败')
@@ -93,7 +99,9 @@ export default function Today() {
                         </Link>
                         <div className="text-xs text-slate-400">
                           {student.grade || '未设年级'}
-                          {student.remaining_hours !== undefined && (
+                          {student.billing_mode === 'per_lesson' ? (
+                            <span className=" text-violet-500"> · 按次结算</span>
+                          ) : student.remaining_hours !== undefined && (
                             <span className={student.remaining_hours <= 3 ? ' text-red-500 num' : ' text-slate-400 num'}>
                               {' '}· 剩 {student.remaining_hours} 课时
                             </span>

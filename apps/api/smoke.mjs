@@ -487,6 +487,70 @@ log('删除学生账号', r.status === 200)
 r = await req('POST', '/api/auth/login', { username: '张小明', password: '13800000000' })
 log('删除后登录被拒', r.status === 401)
 
+// ==================== Phase 3 课时结算模式（package / per_lesson） ====================
+
+// 35a. 建「按次结算」学生 + 开通账号
+r = await req('POST', '/api/students', { name: '结算测试生', grade: '高二', status: '在读', phone: '13900000000', billing_mode: 'per_lesson', lesson_price: 200 })
+const sid3 = r.data?.id
+log('新建按次结算学生', r.status === 200 && r.data?.student?.billing_mode === 'per_lesson' && r.data?.student?.lesson_price === 200)
+r = await req('POST', '/api/accounts', { student_id: sid3 })
+log('开通按次结算学生账号', r.status === 200)
+
+// 35b. 到课签到：per_lesson 不扣课时，自动生成结算记录（金额 = 单次课费）
+r = await req('POST', '/api/attendance', { student_id: sid3, date, status: '到课' })
+const settleId = r.data?.settlement_id
+log('按次结算签到不扣课时', r.status === 200 && r.data?.deducted === 0 && r.data?.remaining_hours === 0 && r.data?.billing_mode === 'per_lesson', `deducted=${r.data?.deducted}`)
+log('按次结算自动记账', !!settleId && r.data?.settlement_amount === 200, `settlement_id=${settleId} amount=${r.data?.settlement_amount}`)
+
+// 35b2. 按次结算学生不进课时预警
+r = await req('GET', '/api/today')
+log('按次结算学生不进课时预警', r.status === 200 && !(r.data?.low_hours || []).some((s) => s.id === sid3))
+
+// 35c. 结算记录查询（按月）+ 合计
+r = await req('GET', `/api/students/${sid3}/settlements?month=${date.slice(0, 7)}`)
+log('结算记录按月查询', r.status === 200 && r.data?.items?.length === 1 && r.data?.total === 200, `total=${r.data?.total}`)
+
+// 35d. per_lesson 余额为 0 也能登录（不受课时影响）；首登强制改密后查学生端数据
+r = await req('POST', '/api/auth/login', { username: '结算测试生', password: '13900000000' })
+log('按次结算余额0可登录', r.status === 200 && r.data?.role === 'student')
+const stuToken3 = r.data?.token
+token = stuToken3
+r = await req('PUT', '/api/student/password', { old_password: '13900000000', new_password: 'stud654321' })
+log('按次结算学生改密', r.status === 200)
+r = await req('GET', '/api/student/me')
+log('me 返回结算模式', r.status === 200 && r.data?.billing_mode === 'per_lesson' && r.data?.lesson_price === 200)
+r = await req('GET', '/api/student/hours')
+log('学生端结算数据', r.status === 200 && r.data?.billing_mode === 'per_lesson' && r.data?.settlements?.length === 1 && r.data?.month_total === 200, `month_total=${r.data?.month_total}`)
+token = savedTeacherToken
+
+// 35e. 切回 package 模式 → 余额 0：账号立即自动停用，登录被拒「课时已用完」
+r = await req('PUT', `/api/students/${sid3}`, { billing_mode: 'package' })
+log('切回充值课时模式', r.status === 200 && r.data?.student?.billing_mode === 'package')
+r = await req('POST', '/api/auth/login', { username: '结算测试生', password: 'stud654321' })
+log('课时耗尽登录被拒', r.status === 403 && (r.data?.error || '').includes('课时已用完'), r.data?.error)
+
+// 35f. 续费加课时 → 账号自动恢复，登录恢复
+r = await req('POST', `/api/students/${sid3}/packages`, { hours: 1, amount: 600, purchase_date: date })
+log('续费自动恢复账号', r.status === 200 && r.data?.account_restored === true && r.data?.remaining_hours === 1, `restored=${r.data?.account_restored} remaining=${r.data?.remaining_hours}`)
+r = await req('POST', '/api/auth/login', { username: '结算测试生', password: 'stud654321' })
+log('恢复后可登录', r.status === 200)
+
+// 35g. 再签到耗尽 → 账号自动停用（suspended），登录被拒
+r = await req('POST', '/api/attendance', { student_id: sid3, date: `${date}T22`, status: '到课' })
+log('耗尽签到自动停用', r.status === 200 && r.data?.account_suspended === true && r.data?.remaining_hours === 0, `suspended=${r.data?.account_suspended} remaining=${r.data?.remaining_hours}`)
+r = await req('POST', '/api/auth/login', { username: '结算测试生', password: 'stud654321' })
+log('停用后登录被拒', r.status === 403)
+
+// 35h. 再续费 → 再恢复；package 模式余额 ≤3 进入预警
+r = await req('POST', `/api/students/${sid3}/packages`, { hours: 1, amount: 300, purchase_date: date })
+log('再次续费恢复', r.status === 200 && r.data?.account_restored === true && r.data?.remaining_hours === 1)
+r = await req('GET', '/api/today')
+log('package余额≤3进预警', r.status === 200 && (r.data?.low_hours || []).some((s) => s.id === sid3 && s.remaining_hours === 1))
+
+// 35i. 清理 sid3
+r = await req('DELETE', `/api/students/${sid3}`)
+log('清理按次结算学生', r.status === 200)
+
 // 31. 恢复测试前的 AI 配置 + 清理测试数据（不能 reset 成默认值，会清掉用户真实填写的 Key）
 await req('PUT', '/api/settings/ai', { providers: savedProviders || [], proxy: savedProxy, active_id: savedActiveId })
 r = await req('GET', '/api/settings/ai')

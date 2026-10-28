@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS students (
   avatar TEXT DEFAULT '',
   note TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT '在读' CHECK(status IN ('在读','停课','结课')),
+  billing_mode TEXT NOT NULL DEFAULT 'package' CHECK(billing_mode IN ('package','per_lesson')),
+  lesson_price REAL NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS hour_packages (
@@ -165,6 +167,15 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_target ON notifications(target_role, read);
+CREATE TABLE IF NOT EXISTS settlements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  amount REAL NOT NULL DEFAULT 0,
+  note TEXT DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_settlements_student ON settlements(student_id, date);
 `)
 
 // ---------- settings 读写 ----------
@@ -188,9 +199,17 @@ function sanitizeStoredText(s: string): string {
 
 function migrateSchema() {
   // questions 表补 figure 列（题目配图：SVG 模板渲染结果或上传图片路径）
-  const cols = db.prepare('PRAGMA table_info(questions)').all() as Array<{ name: string }>
+  let cols = db.prepare('PRAGMA table_info(questions)').all() as Array<{ name: string }>
   if (!cols.some((c) => c.name === 'figure')) {
     db.exec("ALTER TABLE questions ADD COLUMN figure TEXT NOT NULL DEFAULT ''")
+  }
+  // Phase 3：学生课时结算模式（package 充值课时 | per_lesson 一课一结算）+ 单次课费用
+  cols = db.prepare('PRAGMA table_info(students)').all() as Array<{ name: string }>
+  if (!cols.some((c) => c.name === 'billing_mode')) {
+    db.exec("ALTER TABLE students ADD COLUMN billing_mode TEXT NOT NULL DEFAULT 'package'")
+  }
+  if (!cols.some((c) => c.name === 'lesson_price')) {
+    db.exec('ALTER TABLE students ADD COLUMN lesson_price REAL NOT NULL DEFAULT 0')
   }
   // 存量题目一次性清洗：字面 \n → 真实换行、字面 \\ → \（只跑一次，标记在 settings）
   if (!getSetting('question_text_sanitized_v1')) {
@@ -247,4 +266,32 @@ export function remainingHours(studentId: number): number {
   const bought = db.prepare('SELECT COALESCE(SUM(hours),0) AS s FROM hour_packages WHERE student_id = ?').get(studentId) as { s: number }
   const used = db.prepare("SELECT COALESCE(SUM(deducted),0) AS s FROM attendance WHERE student_id = ? AND status = '到课'").get(studentId) as { s: number }
   return bought.s - used.s
+}
+
+// ---------- Phase 3：课时两种结算模式（package 充值课时 | per_lesson 一课一结算） ----------
+
+export type BillingMode = 'package' | 'per_lesson'
+
+export function billingModeOf(studentId: number): BillingMode {
+  const st = db.prepare('SELECT billing_mode FROM students WHERE id = ?').get(studentId) as { billing_mode?: BillingMode } | undefined
+  return st?.billing_mode === 'per_lesson' ? 'per_lesson' : 'package'
+}
+
+// package 模式余额耗尽 → 自动停用该生的学生账号（登录被拒）；per_lesson 不受课时影响
+// 返回 true 表示本次发生了「自动停用」
+export function suspendStudentAccountIfDepleted(studentId: number): boolean {
+  if (billingModeOf(studentId) !== 'package') return false
+  if (remainingHours(studentId) > 0) return false
+  const r = db.prepare("UPDATE accounts SET status = 'suspended' WHERE student_id = ? AND role = 'student' AND status = 'active'").run(studentId)
+  return r.changes > 0
+}
+
+// package 模式续费加课时后余额 > 0 → 自动恢复被「课时耗尽」停用的账号
+// （教师手动停用的账号也会被恢复，这是按已批方案的简化设计：续费即恢复）
+// 返回 true 表示本次发生了「自动恢复」
+export function restoreStudentAccountIfRenewed(studentId: number): boolean {
+  if (billingModeOf(studentId) !== 'package') return false
+  if (remainingHours(studentId) <= 0) return false
+  const r = db.prepare("UPDATE accounts SET status = 'active' WHERE student_id = ? AND role = 'student' AND status = 'suspended'").run(studentId)
+  return r.changes > 0
 }

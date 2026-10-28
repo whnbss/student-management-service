@@ -1,15 +1,15 @@
 // 学生详情：看板 / 学情日志 / 课时缴费 / 课表 四个子 Tab
 // 桌面端两栏：左（当前 Tab 内容）/ 右（学情看板 + 快捷入口）
 import { useCallback, useEffect, useState } from 'react'
-import {BarChart3, BookOpen, CalendarClock, Camera, Mail, PenLine, Pin, Wallet} from 'lucide-react'
-import { useParams, Link } from 'react-router-dom'
+import {BarChart3, BookOpen, CalendarClock, Camera, Download, Mail, PenLine, Pin, SquarePen, Wallet} from 'lucide-react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { get, post, del } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
 import TextbookPicker from '@/components/TextbookPicker'
 import { NextKeyText } from '@/components/Kp'
 import { aggregateKp, KpMasteryBars, KP_LEGEND, MistakeTrend, ErrorTypeBars } from '@/components/Charts'
 import { TieredPracticeModal, ParentReportModal } from '@/components/Practice'
-import type { Student, HourPackage, Payment, StudyLog, Schedule, Mistake } from '@workbench/shared'
+import type { Student, HourPackage, Payment, StudyLog, Schedule, Mistake, Settlement } from '@workbench/shared'
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 const LOG_TYPES = ['上课', '作业', '考试', '其他']
@@ -18,6 +18,7 @@ type SubTab = 'board' | 'logs' | 'hours' | 'schedule'
 
 export default function StudentDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const [student, setStudent] = useState<Student | null>(null)
   const [tab, setTab] = useState<SubTab>('logs')
   const show = useToastStore((s) => s.show)
@@ -28,6 +29,10 @@ export default function StudentDetail() {
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [mistakes, setMistakes] = useState<Mistake[]>([])
   const [loading, setLoading] = useState(true)
+  // 一课一结算：结算记录（按月过滤）与导账单
+  const [settleMonth, setSettleMonth] = useState(new Date().toISOString().slice(0, 7))
+  const [settlements, setSettlements] = useState<Settlement[]>([])
+  const [settleTotal, setSettleTotal] = useState(0)
 
   // 学情日志表单
   const [logForm, setLogForm] = useState({ date: new Date().toISOString().slice(0, 10), type: '上课', content: '', next_class_key: '' })
@@ -68,6 +73,32 @@ export default function StudentDetail() {
   useEffect(() => {
     load()
   }, [load])
+
+  // 结算记录：按月加载（一课一结算学生）
+  const loadSettlements = useCallback(async () => {
+    try {
+      const r = await get<{ items: Settlement[]; total: number }>(`/api/students/${id}/settlements?month=${settleMonth}`)
+      setSettlements(r.items)
+      setSettleTotal(r.total)
+    } catch { /* 忽略 */ }
+  }, [id, settleMonth])
+
+  useEffect(() => {
+    loadSettlements()
+  }, [loadSettlements])
+
+  // 导出月度账单 CSV（Excel 可直接打开）
+  const exportBill = () => {
+    const rows = [['日期', '金额(元)', '备注'], ...[...settlements].reverse().map((s) => [s.date, String(s.amount), s.note || '按次结算'])]
+    rows.push([`${settleMonth} 合计`, settleTotal.toFixed(2), ''])
+    const csv = '﻿' + rows.map((r) => r.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${student?.name || '学生'}-${settleMonth}-课时账单.csv`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
 
   const saveLog = async () => {
     if (!logForm.content.trim()) { show('请填写记录内容'); return }
@@ -145,10 +176,20 @@ export default function StudentDetail() {
               {student.parent_wechat && `· 家长：${student.parent_wechat}`}
             </p>
           </div>
-          <div className={`text-right num shrink-0 ${student.remaining_hours! <= 3 ? 'text-red-500' : 'text-primary-600'}`}>
-            <div className="text-2xl font-bold leading-none">{student.remaining_hours}</div>
-            <div className="text-[10px]">剩余课时{student.remaining_hours! <= 3 && ' ⚠️'}</div>
-          </div>
+          {student.billing_mode === 'per_lesson' ? (
+            <div className="text-right shrink-0">
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300">一课一结算</span>
+              <div className="text-[10px] text-slate-400 num mt-1">¥{student.lesson_price || 0}/课</div>
+            </div>
+          ) : (
+            <div className={`text-right num shrink-0 ${student.remaining_hours! <= 3 ? 'text-red-500' : 'text-primary-600'}`}>
+              <div className="text-2xl font-bold leading-none">{student.remaining_hours}</div>
+              <div className="text-[10px]">剩余课时{student.remaining_hours! <= 3 && ' ⚠️'}</div>
+            </div>
+          )}
+          <button className="shrink-0 text-slate-400 hover:text-primary-600" title="编辑档案" onClick={() => navigate(`/students?edit=${id}`)}>
+            <SquarePen className="w-4 h-4" />
+          </button>
         </div>
         {student.note && <p className="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">备注：{student.note}</p>}
         {/* P1 内容生产入口：分层练习 + 家长阶段报告 */}
@@ -264,6 +305,36 @@ export default function StudentDetail() {
       {/* 课时缴费 */}
       {tab === 'hours' && (
         <div className="space-y-4">
+          {/* 一课一结算：结算记录 + 月度账单 */}
+          {student.billing_mode === 'per_lesson' && (
+            <div className="card p-4 space-y-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="font-semibold text-sm">按次结算记录</h2>
+                <span className="text-xs text-slate-400 num">单次 ¥{student.lesson_price || 0}/课</span>
+                <span className="flex-1" />
+                <input type="month" className="input num !w-36" value={settleMonth} onChange={(e) => setSettleMonth(e.target.value)} />
+                <button className="btn-outline !px-3 !py-1.5 text-xs" disabled={settlements.length === 0} onClick={exportBill}>
+                  <Download className="w-4 h-4 inline-block align-[-2px]" /> 导出月度账单
+                </button>
+              </div>
+              <div className="rounded-xl bg-violet-50 dark:bg-violet-900/20 px-3 py-2 text-xs text-violet-600 dark:text-violet-300 num">
+                {settleMonth} 应收合计：¥{settleTotal.toFixed(2)}（共 {settlements.length} 次课）
+              </div>
+              {settlements.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-4">本月暂无结算记录（到课签到后自动按次记账）</p>
+              ) : (
+                <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-72 overflow-y-auto">
+                  {settlements.map((s) => (
+                    <div key={s.id} className="flex items-center justify-between py-2 text-sm">
+                      <span className="num text-slate-500">{s.date}</span>
+                      <span className="num font-medium">¥{s.amount.toFixed(2)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {student.billing_mode !== 'per_lesson' && (
           <div className="card p-4 space-y-3">
             <h2 className="font-semibold text-sm">＋ 录入课时包</h2>
             <div className="grid grid-cols-3 gap-2">
@@ -283,9 +354,11 @@ export default function StudentDetail() {
             <input className="input" placeholder="备注（可选）" value={pkgForm.note} onChange={(e) => setPkgForm({ ...pkgForm, note: e.target.value })} />
             <button className="btn-primary w-full" disabled={pkgSaving} onClick={savePackage}>{pkgSaving ? '保存中…' : '保存课时包（同时记缴费流水）'}</button>
           </div>
+          )}
 
           <div className="card p-4">
             <h2 className="font-semibold text-sm mb-3">课时包（共 {packages.length} 次，累计缴费 ¥{totalPaid.toFixed(2)}）</h2>
+            {student.billing_mode === 'per_lesson' && <p className="text-[11px] text-slate-400 mb-2">该学生为「一课一结算」模式，课时包仅作历史记录，不再自动扣次。</p>}
             {packages.length === 0 ? (
               <p className="text-sm text-slate-400 text-center py-4">尚无课时包</p>
             ) : (

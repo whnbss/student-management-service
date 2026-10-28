@@ -1,16 +1,22 @@
 // 学生列表：搜索/筛选 + 新建/编辑
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
+import { SquarePen } from 'lucide-react'
 import { get, post, put } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
-import type { Student, Grade, StudentStatus } from '@workbench/shared'
+import type { Student, Grade, StudentStatus, BillingMode } from '@workbench/shared'
 
 const GRADES: Grade[] = ['高一', '高二', '高三']
 const STATUSES: StudentStatus[] = ['在读', '停课', '结课']
+const BILLING_MODES: Array<{ value: BillingMode; label: string; hint: string }> = [
+  { value: 'package', label: '充值课时包', hint: '按课时包扣次数，耗尽自动暂停学生端登录' },
+  { value: 'per_lesson', label: '一课一结算', hint: '不扣课时，每次到课自动记一条结算，可导月度账单' },
+]
 
 const emptyForm = {
   name: '', grade: '' as Grade | '', school: '', textbook: '人教版',
   phone: '', parent_wechat: '', note: '', status: '在读' as StudentStatus,
+  billing_mode: 'package' as BillingMode, lesson_price: 0,
 }
 
 export default function Students() {
@@ -22,6 +28,7 @@ export default function Students() {
   const [editing, setEditing] = useState<typeof emptyForm | null>(null)
   const [editId, setEditId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
+  const [params, setParams] = useSearchParams()
   const show = useToastStore((s) => s.show)
 
   const load = useCallback(async () => {
@@ -38,6 +45,26 @@ export default function Students() {
   useEffect(() => {
     load()
   }, [load])
+
+  // 从学生详情页跳过来的「编辑档案」（/students?edit=ID）：定位并打开编辑弹窗
+  useEffect(() => {
+    const editParam = params.get('edit')
+    if (!editParam) return
+    const s = list.find((x) => x.id === Number(editParam))
+    if (s) {
+      openEdit(s)
+      setParams({}, { replace: true })
+    }
+  }, [params, list]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openEdit = (s: Student) => {
+    setEditing({
+      name: s.name, grade: s.grade || '', school: s.school, textbook: s.textbook,
+      phone: s.phone, parent_wechat: s.parent_wechat, note: s.note, status: s.status,
+      billing_mode: (s.billing_mode as BillingMode) || 'package', lesson_price: s.lesson_price || 0,
+    })
+    setEditId(s.id)
+  }
 
   const save = async () => {
     if (!editing?.name.trim()) { show('姓名必填'); return }
@@ -117,7 +144,19 @@ export default function Students() {
                 </div>
                 <div className="text-xs text-slate-400 truncate">{s.grade} {s.school && `· ${s.school}`}</div>
               </div>
-              {s.remaining_hours !== undefined && (
+              <button
+                className="shrink-0 text-slate-300 hover:text-primary-600 dark:text-slate-600 dark:hover:text-primary-400"
+                title="编辑档案"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEdit(s) }}
+              >
+                <SquarePen className="w-4 h-4" />
+              </button>
+              {s.billing_mode === 'per_lesson' ? (
+                <div className="text-right shrink-0">
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300">按次结算</span>
+                  {!!s.lesson_price && <div className="text-[10px] text-slate-400 num mt-1">¥{s.lesson_price}/课</div>}
+                </div>
+              ) : s.remaining_hours !== undefined && (
                 <div className={`text-right shrink-0 num ${s.remaining_hours <= 3 ? 'text-red-500' : 'text-slate-500'}`}>
                   <div className="text-lg font-semibold leading-none">{s.remaining_hours}</div>
                   <div className="text-[10px]">剩余课时{s.remaining_hours <= 3 && ' ⚠️'}</div>
@@ -151,6 +190,20 @@ export default function Students() {
                   {STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
                 </select>
               </div>
+              <div className="col-span-2">
+                <label className="label">课时结算方式</label>
+                <select className="input" value={editing.billing_mode} onChange={(e) => setEditing({ ...editing, billing_mode: e.target.value as BillingMode })}>
+                  {BILLING_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+                <p className="text-[11px] text-slate-400 mt-1">{BILLING_MODES.find((m) => m.value === editing.billing_mode)?.hint}</p>
+              </div>
+              {editing.billing_mode === 'per_lesson' && (
+                <div className="col-span-2">
+                  <label className="label">单次课费用（元/课）</label>
+                  <input type="number" className="input num" min={0} value={editing.lesson_price} onChange={(e) => setEditing({ ...editing, lesson_price: Number(e.target.value) })} />
+                  <p className="text-[11px] text-slate-400 mt-1">每次到课签到自动按此金额记一条结算，可在学生详情「课时缴费」导月度账单</p>
+                </div>
+              )}
               <div>
                 <label className="label">学校</label>
                 <input className="input" value={editing.school} onChange={(e) => setEditing({ ...editing, school: e.target.value })} />

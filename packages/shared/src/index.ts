@@ -6,6 +6,8 @@ export type Grade = '高一' | '高二' | '高三'
 export type StudentStatus = '在读' | '停课' | '结课'
 export type LogType = '上课' | '作业' | '考试' | '其他'
 export type AttendanceStatus = '到课' | '请假' | '缺勤'
+// Phase 3 课时结算模式：package 充值课时（耗尽自动停用学生账号）| per_lesson 一课一结算
+export type BillingMode = 'package' | 'per_lesson'
 
 export interface Student {
   id: number
@@ -18,6 +20,8 @@ export interface Student {
   avatar: string
   note: string
   status: StudentStatus
+  billing_mode?: BillingMode
+  lesson_price?: number
   created_at: string
   remaining_hours?: number
 }
@@ -64,6 +68,16 @@ export interface Attendance {
   created_at: string
 }
 
+// 一课一结算：每次到课签到生成一条结算记录（金额取学生档案的单次课费用）
+export interface Settlement {
+  id: number
+  student_id: number
+  date: string
+  amount: number
+  note: string
+  created_at: string
+}
+
 export interface StudyLog {
   id: number
   student_id: number
@@ -83,7 +97,7 @@ export interface TodayInfo {
   weekday: number
   lessons: Array<{
     schedule: Schedule
-    student: Pick<Student, 'id' | 'name' | 'grade' | 'remaining_hours'>
+    student: Pick<Student, 'id' | 'name' | 'grade' | 'remaining_hours' | 'billing_mode'>
     attendance: { id: number; status: AttendanceStatus } | null
   }>
   low_hours: Array<Pick<Student, 'id' | 'name' | 'remaining_hours'>>
@@ -175,6 +189,8 @@ export interface StudentMe {
   grade: string
   status: StudentStatus
   remaining_hours: number
+  billing_mode: BillingMode
+  lesson_price?: number
   must_change_pwd: boolean
   account_status: 'active' | 'suspended'
 }
