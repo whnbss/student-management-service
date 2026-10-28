@@ -28,6 +28,7 @@ export class SvgCtx implements LabCtx {
       getParam: (key: string) => number
       setParam: (key: string, value: number) => void
       requestRender: () => void
+      onDragEnd?: () => void
     }
   ) {
     const vb = stageSvg.getAttribute('viewBox')?.split(/\s+/).map(Number) ?? [0, 0, 640, 420]
@@ -121,6 +122,7 @@ export class SvgCtx implements LabCtx {
         el.removeEventListener('pointercancel', up)
         el.classList.remove('lab-dragging')
         onEnd?.()
+        this.hooks.onDragEnd?.() // 拖拽结束统一通知壳层（实验记录表在松手时记一组读数）
       }
       el.addEventListener('pointermove', move)
       el.addEventListener('pointerup', up)

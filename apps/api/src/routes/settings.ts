@@ -1,9 +1,10 @@
-// 系统设置：修改登录密码、系统信息（端口/AI 配置在 M2 引入）
+// 系统设置：修改登录密码（teacher 账号 scrypt）、系统信息（端口/AI 配置在 M2 引入）
 import type { FastifyInstance } from 'fastify'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { db, getSetting, setSetting, UPLOADS_DIR, DB_PATH } from '../db'
+import { db, getSetting, UPLOADS_DIR, DB_PATH, syncBackupPassword } from '../db'
+import { hashPassword, verifyPassword } from '../crypto'
 
 export default async function settingsRoutes(app: FastifyInstance) {
   // 系统信息：「关于」卡片展示（版本、端口、数据目录）
@@ -34,13 +35,17 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
   app.put('/api/settings/password', async (req, reply) => {
     const { old_password, new_password } = (req.body || {}) as { old_password?: string; new_password?: string }
-    if (!old_password || old_password !== getSetting('password')) {
+    const teacher = db.prepare("SELECT * FROM accounts WHERE role = 'teacher' LIMIT 1").get() as any
+    if (!teacher) { reply.code(500).send({ error: '教师账号不存在' }); return }
+    if (!old_password || !verifyPassword(old_password, teacher.pwd_hash, teacher.pwd_salt)) {
       reply.code(400).send({ error: '原密码错误' }); return
     }
     if (!new_password || new_password.length < 6) {
       reply.code(400).send({ error: '新密码至少 6 位' }); return
     }
-    setSetting('password', new_password)
+    const { hash, salt } = hashPassword(new_password)
+    db.prepare('UPDATE accounts SET pwd_hash = ?, pwd_salt = ? WHERE id = ?').run(hash, salt, teacher.id)
+    syncBackupPassword(new_password)
     return { ok: true }
   })
 }

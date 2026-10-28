@@ -131,6 +131,54 @@ export interface AiAnalysisResult {
   unrecognized: string[]
 }
 
+// ---------- Phase 2：账号系统与同步通知 ----------
+export type AccountRole = 'teacher' | 'student'
+
+export interface Account {
+  id: number
+  role: AccountRole
+  student_id: number | null // student 角色对应的学生；teacher 为 null
+  username: string
+  phone: string
+  status: 'active' | 'suspended'
+  must_change_pwd: number // 1 = 首次登录（初始密码为手机号），前端强制改密
+  last_login: string | null
+  created_at: string
+  student_name?: string
+  remaining_hours?: number
+}
+
+export interface LoginResp {
+  ok: boolean
+  token: string
+  role: AccountRole
+  username: string
+  must_change_pwd: boolean
+}
+
+export interface NotificationItem {
+  id: number
+  target_role: AccountRole
+  target_user_id: number | null
+  type: string // redo | system ...
+  title: string
+  body: string
+  ref_id: number | null
+  read: number
+  created_at: string
+}
+
+// 学生工作台「我的」信息
+export interface StudentMe {
+  username: string
+  name: string
+  grade: string
+  status: StudentStatus
+  remaining_hours: number
+  must_change_pwd: boolean
+  account_status: 'active' | 'suspended'
+}
+
 // ---------- M2：AI 供应商配置 ----------
 export interface AiProvider {
   id: string

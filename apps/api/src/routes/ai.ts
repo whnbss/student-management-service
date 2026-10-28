@@ -16,7 +16,7 @@ export default async function aiRoutes(app: FastifyInstance) {
       providers,
       active_id: getActiveProviderId(),
       proxy: getSetting('ai_proxy') || '',
-      privacy_notice: '调用外部 AI 分析时，作业图片会被传输至所选 AI 供应商的服务器。学生数据本身仅存本机。',
+      privacy_notice: '调用外部智能分析时，作业图片会被传输至所选智能服务供应商的服务器。学生数据本身仅存本机。',
     }
   })
 

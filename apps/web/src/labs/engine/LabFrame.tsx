@@ -161,6 +161,10 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
     [scene, resetState, requestRender]
   )
 
+  // 舞台拖拽结束 → 记一组实验读数（与滑块松手同等对待；commitRecord 走 ref 防闭包过期）
+  const commitRecordRef = useRef(commitRecord)
+  commitRecordRef.current = commitRecord
+
   // ctx 生命周期：场景切换或全屏切换都会重建 SVG DOM，需重建 ctx 绑定
   useEffect(() => {
     if (!stageRef.current || !graphRef.current) return
@@ -169,6 +173,7 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
       getParam: (k) => paramsRef.current[k],
       setParam: setParamFromStage,
       requestRender,
+      onDragEnd: () => commitRecordRef.current(),
     })
     ctxRef.current = ctx
     if (isNewScene) {

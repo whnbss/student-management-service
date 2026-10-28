@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { CalendarDays, Users, BookOpen, CircleX, Settings as SettingsIcon, FlaskConical, ChartLine, Camera, Search } from 'lucide-react'
 import { useToastStore } from '@/stores/auth'
 import CommandPalette from '@/components/CommandPalette'
+import NotificationBell from '@/components/NotificationBell'
 
 const TABS = [
   { to: '/', label: '今日', icon: <CalendarDays className="w-5 h-5" /> },
@@ -36,7 +37,10 @@ export default function Layout() {
       <CommandPalette />
       {/* 宽屏侧栏（课件详情页隐藏：投屏时舞台最大化，顶部有「← 全部课件」返回） */}
       <aside className={`hidden md:flex md:flex-col w-56 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 min-h-screen p-4 gap-1 ${isLabDetail ? 'md:hidden' : ''}`}>
-        <div className="text-lg font-bold text-primary-700 dark:text-primary-300 px-3 mb-4">教学管理工作台</div>
+        <div className="text-lg font-bold text-primary-700 dark:text-primary-300 px-3 mb-4 flex items-center gap-2">
+          <span className="flex-1">教学管理工作台</span>
+          <NotificationBell />
+        </div>
         {DESKTOP_TABS.map((t) => (
           <NavLink
             key={t.to}
@@ -61,6 +65,10 @@ export default function Layout() {
       </aside>
 
       <div className="flex-1 pb-20 md:pb-0">
+        {/* 移动端通知铃（固定右上角） */}
+        <div className="fixed top-2 right-2 z-30 md:hidden">
+          <NotificationBell />
+        </div>
         {/* 顶部标题栏（仅移动端，详情页有返回键） */}
         {onDetail && (
           <header className="sticky top-0 z-10 md:hidden flex items-center gap-2 px-4 h-12 bg-white/90 dark:bg-slate-900/90 backdrop-blur border-b border-slate-200 dark:border-slate-800">

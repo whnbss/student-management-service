@@ -1,10 +1,11 @@
-// 我的：外观（深色模式）、修改密码、AI 供应商配置（多供应商/多 Key/连通性测试/费用估算/用量统计）、关于、备份占位（M4）
+// 我的：外观（深色模式）、修改密码、学生账号管理、智能服务配置（多供应商/多 Key/连通性测试/费用估算/用量统计）、关于、备份占位（M4）
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {ChartLine, TriangleAlert} from 'lucide-react'
+import {ChartLine, TriangleAlert, UserRoundPlus} from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useBlocker, useNavigate } from 'react-router-dom'
-import { get, put, post } from '@/lib/api'
+import { get, put, post, del } from '@/lib/api'
 import { useToastStore, useAuthStore } from '@/stores/auth'
-import type { AiProvider } from '@workbench/shared'
+import type { AiProvider, Account } from '@workbench/shared'
 import { getThemePref, setThemePref, type ThemePref } from '@/lib/theme'
 
 interface UsageSummary { model: string; calls: number; prompt_tokens: number; completion_tokens: number; cost: number }
@@ -79,6 +80,69 @@ export default function Settings() {
 
   // 系统信息（关于卡片）
   const [system, setSystem] = useState<SystemInfo | null>(null)
+
+  // 学生账号管理
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [openable, setOpenable] = useState<Array<{ id: number; name: string; phone: string }>>([])
+  const [accBusy, setAccBusy] = useState(false)
+
+  const loadAccounts = useCallback(async () => {
+    try {
+      const r = await get<{ accounts: Account[]; openable_students: Array<{ id: number; name: string; phone: string }> }>('/api/accounts')
+      setAccounts(r.accounts || [])
+      setOpenable(r.openable_students || [])
+    } catch (e: any) { show(e.message || '加载账号失败') }
+  }, [show])
+  useEffect(() => { loadAccounts() }, [loadAccounts])
+
+  const openAccount = async (sid: number, name: string) => {
+    if (!window.confirm(`为学生「${name}」开通账号？初始密码为其手机号，登录后将强制修改。`)) return
+    setAccBusy(true)
+    try {
+      const r = await post<{ username: string }>('/api/accounts', { student_id: sid })
+      show(`已开通，账号 ${r.username}，初始密码为手机号`)
+      loadAccounts()
+    } catch (e: any) { show(e.message || '开通失败') } finally { setAccBusy(false) }
+  }
+
+  const batchOpen = async () => {
+    if (openable.length === 0) { show('没有可开通的学生（已全部开通或未填手机号）'); return }
+    if (!window.confirm(`为 ${openable.length} 名未开通学生批量开通账号？初始密码为各自手机号。`)) return
+    setAccBusy(true)
+    try {
+      const r = await post<{ results: Array<{ username?: string; error?: string }> }>('/api/accounts/batch-open', {})
+      const okN = r.results.filter((x) => x.username).length
+      const errN = r.results.filter((x) => x.error)
+      show(`批量开通完成：成功 ${okN} 名${errN.length ? `，失败 ${errN.length} 名（${errN[0].error}）` : ''}`)
+      loadAccounts()
+    } catch (e: any) { show(e.message || '批量开通失败') } finally { setAccBusy(false) }
+  }
+
+  const resetPwd = async (a: Account) => {
+    if (!window.confirm(`将「${a.username}」的密码重置为其手机号？重置后学生需重新改密。`)) return
+    try {
+      await post(`/api/accounts/${a.id}/reset-password`)
+      show('已重置为手机号')
+    } catch (e: any) { show(e.message || '重置失败') }
+  }
+
+  const toggleStatus = async (a: Account) => {
+    const next = a.status === 'active' ? 'suspended' : 'active'
+    try {
+      await put(`/api/accounts/${a.id}`, { status: next })
+      show(next === 'suspended' ? '已停用' : '已启用')
+      loadAccounts()
+    } catch (e: any) { show(e.message || '操作失败') }
+  }
+
+  const delAccount = async (a: Account) => {
+    if (!window.confirm(`删除「${a.username}」的账号？学生档案与学情数据不受影响。`)) return
+    try {
+      await del(`/api/accounts/${a.id}`)
+      show('已删除账号')
+      loadAccounts()
+    } catch (e: any) { show(e.message || '删除失败') }
+  }
 
   const loadAi = useCallback(async () => {
     try {
@@ -293,7 +357,7 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* AI 供应商配置 */}
+      {/* 智能服务配置（供应商） */}
       <div className="card p-5 space-y-4">
         <div className="flex items-center">
           <h2 className="font-semibold text-sm">智能服务配置</h2>
@@ -479,6 +543,73 @@ export default function Settings() {
         <input type="password" className="input" placeholder="新密码（至少 6 位）" value={newPassword} onChange={(e) => setNew(e.target.value)} />
         <input type="password" className="input" placeholder="确认新密码" value={confirmPassword} onChange={(e) => setConfirm(e.target.value)} />
         <button className="btn-primary w-full" disabled={saving} onClick={change}>{saving ? '保存中…' : '确认修改'}</button>
+        {/* 登录校验只走 scrypt 哈希；本机库中另存一份明文仅作忘密找回，需向教师明示（本地单机部署，无云端） */}
+        <p className="text-[11px] text-slate-400">安全说明：登录校验使用加盐哈希，明文不参与校验；本机数据库中会保留一份当前密码明文，仅用于忘记密码时找回（数据仅存本机，不上传）。修改密码会同步更新这份备份。</p>
+      </div>
+
+      {/* 学生账号管理：开通 / 批量开通 / 重置密码 / 停用 */}
+      <div className="card p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <h2 className="font-semibold text-sm">学生账号管理</h2>
+          <span className="flex-1" />
+          <button className="btn-primary !px-3 !py-1.5 text-xs" disabled={accBusy} onClick={batchOpen}>
+            <UserRoundPlus className="w-4 h-4 inline-block align-[-2px]" /> 批量开通（{openable.length}）
+          </button>
+        </div>
+        <p className="text-xs text-slate-500">学生用「账号 + 密码」登录学生工作台（/student）：看自己的错题并提交重做、查课时、看老师分享的报告。初始密码为手机号，首次登录强制改密。</p>
+
+        {accounts.filter((a) => a.role === 'student').length === 0 && openable.length === 0 ? (
+          <p className="text-xs text-slate-400">还没有学生档案</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs whitespace-nowrap">
+              <thead>
+                <tr className="text-slate-400 text-left">
+                  <th className="pr-3 font-normal py-1.5">账号</th>
+                  <th className="pr-3 font-normal py-1.5">学生</th>
+                  <th className="pr-3 font-normal py-1.5">剩余课时</th>
+                  <th className="pr-3 font-normal py-1.5">状态</th>
+                  <th className="pr-3 font-normal py-1.5">最后登录</th>
+                  <th className="font-normal py-1.5">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accounts.filter((a) => a.role === 'student').map((a) => (
+                  <tr key={a.id} className="border-t border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-300">
+                    <td className="pr-3 py-1.5 font-medium">{a.username}{a.must_change_pwd ? <span className="ml-1 text-[10px] text-amber-500">未改密</span> : null}</td>
+                    <td className="pr-3 py-1.5">
+                      {a.student_id ? <Link className="text-primary-600" to={`/students/${a.student_id}`}>{a.student_name}</Link> : '—'}
+                    </td>
+                    <td className="pr-3 py-1.5 num">{typeof a.remaining_hours === 'number' ? a.remaining_hours : '—'}</td>
+                    <td className="pr-3 py-1.5">
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full ${a.status === 'active' ? 'bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-400'}`}>
+                        {a.status === 'active' ? '正常' : '已停用'}
+                      </span>
+                    </td>
+                    <td className="pr-3 py-1.5 num">{a.last_login ? String(a.last_login).slice(0, 10) : '从未'}</td>
+                    <td className="py-1.5 flex gap-2">
+                      <button className="text-primary-600" onClick={() => resetPwd(a)}>重置密码</button>
+                      <button className={a.status === 'active' ? 'text-amber-500' : 'text-green-600'} onClick={() => toggleStatus(a)}>{a.status === 'active' ? '停用' : '启用'}</button>
+                      <button className="text-slate-400 hover:text-red-500" onClick={() => delAccount(a)}>删除</button>
+                    </td>
+                  </tr>
+                ))}
+                {openable.map((s) => (
+                  <tr key={`open-${s.id}`} className="border-t border-dashed border-slate-200 dark:border-slate-800 text-slate-400">
+                    <td className="pr-3 py-1.5">（未开通）</td>
+                    <td className="pr-3 py-1.5"><Link className="text-primary-600" to={`/students/${s.id}`}>{s.name}</Link></td>
+                    <td className="pr-3 py-1.5 num">—</td>
+                    <td className="pr-3 py-1.5">—</td>
+                    <td className="pr-3 py-1.5">—</td>
+                    <td className="py-1.5">
+                      <button className="text-primary-600" disabled={accBusy} onClick={() => openAccount(s.id, s.name)}>开通</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card p-5 space-y-2 opacity-60">

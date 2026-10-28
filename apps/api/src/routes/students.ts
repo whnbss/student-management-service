@@ -70,6 +70,11 @@ export default async function studentRoutes(app: FastifyInstance) {
 
   app.delete('/api/students/:id', async (req, reply) => {
     const { id } = req.params as { id: string }
+    // 级联清理通知：该生错题引发的重做通知（ref_id = 错题 id）随错题一并删除
+    const mkIds = (db.prepare('SELECT id FROM mistakes WHERE student_id = ?').all(id) as any[]).map((m) => m.id)
+    for (const mid of mkIds) {
+      db.prepare('DELETE FROM notifications WHERE ref_id = ?').run(mid)
+    }
     db.prepare('DELETE FROM students WHERE id = ?').run(id)
     return { ok: true }
   })

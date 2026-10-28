@@ -15,6 +15,9 @@ import analysisRoutes from './routes/analysis'
 import mistakeRoutes from './routes/mistakes'
 import questionRoutes from './routes/questions'
 import shareRoutes from './routes/share'
+import accountRoutes from './routes/accounts'
+import studentPortalRoutes from './routes/student'
+import notificationRoutes from './routes/notifications'
 import { statsRoutes } from './routes/stats'
 
 const app = Fastify({ logger: false })
@@ -33,6 +36,9 @@ await app.register(analysisRoutes)
 await app.register(mistakeRoutes)
 await app.register(questionRoutes)
 await app.register(shareRoutes)
+await app.register(accountRoutes)
+await app.register(studentPortalRoutes)
+await app.register(notificationRoutes)
 await app.register(statsRoutes)
 
 // 统一错误处理：返回 { error } 而非堆栈

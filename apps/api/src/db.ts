@@ -139,6 +139,32 @@ CREATE TABLE IF NOT EXISTS shares (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_shares_token ON shares(token);
+CREATE TABLE IF NOT EXISTS accounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  role TEXT NOT NULL CHECK(role IN ('teacher','student')),
+  student_id INTEGER UNIQUE REFERENCES students(id) ON DELETE CASCADE,
+  username TEXT NOT NULL UNIQUE,
+  pwd_hash TEXT NOT NULL,
+  pwd_salt TEXT NOT NULL,
+  phone TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended')),
+  must_change_pwd INTEGER NOT NULL DEFAULT 0,
+  last_login TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_accounts_student ON accounts(student_id);
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  target_role TEXT NOT NULL DEFAULT 'teacher',
+  target_user_id INTEGER,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT DEFAULT '',
+  ref_id INTEGER,
+  read INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_target ON notifications(target_role, read);
 `)
 
 // ---------- settings 读写 ----------
@@ -187,22 +213,32 @@ export function nowISO() {
   return new Date().toISOString()
 }
 
-// ---------- 鉴权：首次启动生成持久 token 与默认密码 ----------
+// ---------- 账号：首次启动种子数据与老库迁移 ----------
 
+// 老库迁移：把 settings 里的明文密码升级为 teacher 账号的 scrypt 哈希（一次性）
 export function initAuth() {
-  if (!getSetting('auth_token')) {
-    setSetting('auth_token', crypto.randomBytes(24).toString('hex'))
-  }
-  if (!getSetting('password')) {
-    setSetting('password', 'admin123') // 首次登录默认密码，登录后可在设置中修改
-  }
   if (!getSetting('port')) {
     setSetting('port', '3210')
   }
+  const teacher = db.prepare("SELECT id FROM accounts WHERE role = 'teacher' LIMIT 1").get() as { id: number } | undefined
+  if (!teacher) {
+    // 沿用现有密码值（默认 admin123）；settings.password 同步保留一份仅作找回备份，登录校验只走哈希
+    const pwd = getSetting('password') || 'admin123'
+    if (!getSetting('password')) setSetting('password', pwd)
+    const salt = crypto.randomBytes(16).toString('hex')
+    const hash = crypto.scryptSync(pwd, salt, 64).toString('hex')
+    db.prepare(`INSERT INTO accounts(role, student_id, username, pwd_hash, pwd_salt, phone, status, must_change_pwd, created_at)
+      VALUES('teacher', NULL, 'teacher', ?, ?, '', 'active', 0, ?)`).run(hash, salt, nowISO())
+  }
+  // 旧版全局 token 不再使用：清理掉，迁移后教师重新登录
+  if (getSetting('auth_token')) {
+    db.prepare('DELETE FROM settings WHERE key = ?').run('auth_token')
+  }
 }
 
-export function getAuthToken() {
-  return getSetting('auth_token') as string
+// 同步更新 settings.password（仅作找回备份；登录校验一律走 accounts 的 scrypt 哈希）
+export function syncBackupPassword(pwd: string) {
+  setSetting('password', pwd)
 }
 
 // ---------- 学生剩余课时：课时包合计 − 已扣课时 ----------

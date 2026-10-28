@@ -22,14 +22,20 @@ async function req(method, path, body) {
 
 const date = new Date().toISOString().slice(0, 10)
 
-// 1. 错误密码 → 401
-let r = await req('POST', '/api/auth/login', { password: 'wrong' })
-log('错误密码拒绝', r.status === 401)
+// 1. 缺用户名 → 400（新版登录必须账号+密码；不触碰限速计数，故放最前）
+let r = await req('POST', '/api/auth/login', { password: 'admin123' })
+log('缺用户名拒绝', r.status === 400)
 
-// 2. 正确登录
-r = await req('POST', '/api/auth/login', { password: 'admin123' })
+// 2. 正确登录（teacher 账号，scrypt 校验）；失败登录用例已集中到脚本末尾，避免污染登录限速计数
+r = await req('POST', '/api/auth/login', { username: 'teacher', password: 'admin123' })
+if (r.status === 429) {
+  console.error(`⛔ 登录被限速锁定：${r.data?.error || ''}`)
+  console.error('   说明：15 分钟内累计 5 次失败登录会触发锁定（10 分钟）。请稍后重试，或重启后端进程后重跑本脚本。')
+  process.exit(1)
+}
 token = r.data?.token
 log('登录返回 token', r.status === 200 && !!token)
+log('登录返回角色', r.data?.role === 'teacher', `role=${r.data?.role}`)
 
 // 3. 未登录访问 → 401（临时清掉 token 再请求）
 const savedToken = token
@@ -98,7 +104,7 @@ log('剩余课时≤3预警', r.data?.low_hours?.some((s) => s.id === sid2 && s.
 // 16. 修改密码
 r = await req('PUT', '/api/settings/password', { old_password: 'admin123', new_password: 'admin456' })
 log('修改密码', r.status === 200 && r.data?.ok)
-r = await req('POST', '/api/auth/login', { password: 'admin456' })
+r = await req('POST', '/api/auth/login', { username: 'teacher', password: 'admin456' })
 log('新密码可登录', r.status === 200)
 // 改回默认，方便用户首次使用
 await req('PUT', '/api/settings/password', { old_password: 'admin456', new_password: 'admin123' })
@@ -370,6 +376,117 @@ r = await req('GET', `/api/public/share/${shareToken}`)
 log('撤销后公开访问 404', r.status === 404)
 token = savedTok
 
+// ==================== Phase 2 冒烟：学生账号系统 + 同步通知 ====================
+
+// 32a. 账号列表：含 teacher；张小明（有手机号）在可开通列表里
+r = await req('GET', '/api/accounts')
+log('账号列表含教师', r.status === 200 && r.data?.accounts?.some((a) => a.role === 'teacher' && a.username === 'teacher'))
+log('可开通学生列表', r.data?.openable_students?.some((s) => s.id === sid), `n=${r.data?.openable_students?.length}`)
+
+// 32b. 开通学生账号（初始密码 = 手机号）
+r = await req('POST', '/api/accounts', { student_id: sid })
+const accId = r.data?.id
+const accUsername = r.data?.username
+log('开通学生账号', r.status === 200 && !!accId && accUsername === '张小明', `id=${accId} username=${accUsername}`)
+
+// 32c. 重复开通 → 409
+r = await req('POST', '/api/accounts', { student_id: sid })
+log('重复开通拒绝', r.status === 409)
+
+// 32d. 学生登录：初始密码手机号，must_change_pwd=true
+r = await req('POST', '/api/auth/login', { username: '张小明', password: '13800000000' })
+const stuToken0 = r.data?.token
+log('学生首次登录', r.status === 200 && r.data?.role === 'student' && r.data?.must_change_pwd === true, `role=${r.data?.role}`)
+
+// 32e. 学生未改密时：只能 me/password，其他学生接口 403
+const savedTeacherToken = token
+token = stuToken0
+r = await req('GET', '/api/student/mistakes')
+log('未改密拦截业务接口', r.status === 403, `status=${r.status}`)
+r = await req('PUT', '/api/student/password', { old_password: '13800000000', new_password: 'stud123456' })
+log('学生改密', r.status === 200 && r.data?.ok)
+r = await req('GET', '/api/student/me')
+log('改密后 me 正常', r.status === 200 && r.data?.name === '张小明' && r.data?.must_change_pwd === false)
+
+// 32f. 学生只能看自己的错题（前面为张小明建了 2 条）
+r = await req('GET', '/api/student/mistakes')
+const myMistakes = r.data || []
+log('学生看自己错题', r.status === 200 && myMistakes.length >= 2 && myMistakes.every((m) => m.student_id === sid), `count=${myMistakes.length}`)
+
+// 32g. 学生访问教师接口 → 403
+r = await req('GET', '/api/students')
+log('学生访问学生列表 403', r.status === 403)
+r = await req('GET', '/api/questions')
+log('学生访问题库 403', r.status === 403)
+r = await req('GET', '/api/settings/ai')
+log('学生访问智能配置 403', r.status === 403)
+
+// 32h. 学生「我已重做」→ 状态流转 + 教师收到通知
+const redoTarget = myMistakes.find((m) => m.mastery_status !== '已掌握')
+r = await req('POST', `/api/student/mistakes/${redoTarget.id}/redo`)
+log('学生提交重做', r.status === 200 && r.data?.mastery_status === '已重做一次' && r.data?.redo_due > date, `status=${r.data?.mastery_status} due=${r.data?.redo_due}`)
+r = await req('GET', `/api/student/mistakes`)
+log('重做后状态回读', r.data.find((m) => m.id === redoTarget.id)?.mastery_status === '已重做一次')
+
+token = savedTeacherToken
+r = await req('GET', '/api/notifications')
+const redoNotif = (r.data?.items || []).find((n) => n.type === 'redo' && n.title.includes('张小明'))
+log('教师收到重做通知', r.status === 200 && !!redoNotif, `unread=${r.data?.unread}`)
+r = await req('POST', '/api/notifications/read-all')
+r = await req('GET', '/api/notifications')
+log('全部已读', r.data?.unread === 0, `unread=${r.data?.unread}`)
+
+// 32h2. 删除单条通知（新增 DELETE 接口）
+r = await req('DELETE', `/api/notifications/${redoNotif.id}`)
+r = await req('GET', '/api/notifications')
+log('删除单条通知', r.status === 200 && !(r.data?.items || []).some((n) => n.id === redoNotif.id))
+
+// 32h3. 再提交一次重做，留一条通知用于「删除学生级联清通知」验证
+const redoTarget2 = myMistakes.find((m) => m.mastery_status !== '已掌握' && m.id !== redoTarget.id)
+let cascadeNotifRef = null
+if (redoTarget2) {
+  token = stuToken0
+  r = await req('POST', `/api/student/mistakes/${redoTarget2.id}/redo`)
+  token = savedTeacherToken
+  r = await req('GET', '/api/notifications')
+  const cascadeNotif = (r.data?.items || []).find((n) => n.type === 'redo' && n.ref_id === redoTarget2.id)
+  cascadeNotifRef = cascadeNotif?.ref_id ?? null
+  log('级联验证用通知已生成', !!cascadeNotif)
+}
+
+// 32i. 学生课时 / 报告 / 课表接口
+token = stuToken0
+r = await req('GET', '/api/student/hours')
+log('学生课时接口', r.status === 200 && typeof r.data?.remaining_hours === 'number' && Array.isArray(r.data?.packages))
+r = await req('GET', '/api/student/reports')
+log('学生报告接口', r.status === 200 && Array.isArray(r.data))
+token = savedTeacherToken
+
+// 32j. 停用账号 → 学生登录被拒；启用恢复
+r = await req('PUT', `/api/accounts/${accId}`, { status: 'suspended' })
+log('停用账号', r.status === 200)
+r = await req('POST', '/api/auth/login', { username: '张小明', password: 'stud123456' })
+log('停用后登录被拒', r.status === 403)
+r = await req('PUT', `/api/accounts/${accId}`, { status: 'active' })
+r = await req('POST', '/api/auth/login', { username: '张小明', password: 'stud123456' })
+log('启用后可登录', r.status === 200)
+
+// 32k. 教师重置密码为手机号
+r = await req('POST', `/api/accounts/${accId}/reset-password`)
+log('重置密码为手机号', r.status === 200 && r.data?.password === '13800000000')
+r = await req('POST', '/api/auth/login', { username: '张小明', password: '13800000000' })
+log('重置后手机号可登录', r.status === 200 && r.data?.must_change_pwd === true)
+
+// 32l. 批量开通接口（空目标也返回 ok 结构）
+r = await req('POST', '/api/accounts/batch-open', {})
+log('批量开通接口', r.status === 200 && r.data?.ok && Array.isArray(r.data?.results))
+
+// 32m. 删除学生账号
+r = await req('DELETE', `/api/accounts/${accId}`)
+log('删除学生账号', r.status === 200)
+r = await req('POST', '/api/auth/login', { username: '张小明', password: '13800000000' })
+log('删除后登录被拒', r.status === 401)
+
 // 31. 恢复测试前的 AI 配置 + 清理测试数据（不能 reset 成默认值，会清掉用户真实填写的 Key）
 await req('PUT', '/api/settings/ai', { providers: savedProviders || [], proxy: savedProxy, active_id: savedActiveId })
 r = await req('GET', '/api/settings/ai')
@@ -380,5 +497,19 @@ log('清理测试学生', r.status === 200)
 r = await req('GET', `/api/mistakes`)
 log('错题随学生级联删除', r.status === 200 && !r.data.some((m) => m.student_id === sid))
 
+// 通知随学生级联删除（32h3 留下的重做通知）
+r = await req('GET', '/api/notifications')
+log('通知随学生级联删除', r.status === 200 && (cascadeNotifRef === null || !(r.data?.items || []).some((n) => n.ref_id === cascadeNotifRef)))
+
+// 33. 错误密码 → 401（失败登录会计入登录限速，本脚本所有失败登录用例集中到末尾）
+r = await req('POST', '/api/auth/login', { username: 'teacher', password: 'wrong' })
+log('错误密码拒绝', r.status === 401)
+
+// 34. 末次成功登录：成功登录会清空限速计数，保证连续多轮跑冒烟不会累计触发锁定
+r = await req('POST', '/api/auth/login', { username: 'teacher', password: 'admin123' })
+log('末次成功登录清空限速计数', r.status === 200 && !!r.data?.token)
+token = r.data?.token
+
 console.log(`\n结果：${pass} 通过，${fail} 失败`)
+console.log('提示：本脚本失败登录用例共 2 次（删除账号后登录、错误密码），且末尾以成功登录清空限速计数，正常不会触发登录锁定（15 分钟 5 次失败才锁 10 分钟）。')
 process.exit(fail ? 1 : 0)
