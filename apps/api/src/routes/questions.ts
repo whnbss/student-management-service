@@ -3,7 +3,7 @@
 import type { FastifyInstance } from 'fastify'
 import { db, nowISO, remainingHours } from '../db'
 import { pickProvider, generateQuiz, generateTiered, generateParentReport, validateQuizDrafts, reviewQuizDrafts } from '../ai'
-import { sanitizeAiText, daysAgo } from '@workbench/shared'
+import { sanitizeAiText, sanitizeLatexChinese, mergeSectionKps, daysAgo } from '@workbench/shared'
 import type { QuizLevel } from '@workbench/shared'
 
 function kpOf(raw: string): string[] {
@@ -103,7 +103,7 @@ export default async function questionRoutes(app: FastifyInstance) {
     const r = db.prepare(`INSERT INTO questions(
       stem, answer, solution, pitfall, knowledge_points, difficulty, qtype, source, mistake_id, grade, figure, created_at
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      sanitizeAiText(b.stem).trim(), sanitizeAiText(b.answer), sanitizeAiText(b.solution), sanitizeAiText(b.pitfall),
+      sanitizeLatexChinese(sanitizeAiText(b.stem)).trim(), sanitizeLatexChinese(sanitizeAiText(b.answer)), sanitizeLatexChinese(sanitizeAiText(b.solution)), sanitizeLatexChinese(sanitizeAiText(b.pitfall)),
       JSON.stringify(Array.isArray(b.knowledge_points) ? b.knowledge_points : []),
       Math.min(5, Math.max(1, Number(b.difficulty) || 3)),
       String(b.qtype || '计算'), String(b.source || 'manual'), b.mistake_id || null, String(b.grade || ''),
@@ -136,8 +136,12 @@ export default async function questionRoutes(app: FastifyInstance) {
     const ids: number[] = []
     for (let i = 0; i < drafts.length; i++) {
       const fig = sanitizeFigureJson(figs[i]?.figure)
+      // 强制注入节名标签：出题/补题时传入的教材节名（inject_kps）必须进入 knowledge_points，
+      // 模型自由发挥的碎片标签只作补充，保证教材目录筛选与覆盖统计不漏题
+      const injectKps = Array.isArray(figs[i]?.inject_kps) ? figs[i].inject_kps.map(String).filter(Boolean) : []
+      const kps = mergeSectionKps(injectKps, drafts[i].knowledge_points)
       const r = ins.run(
-        drafts[i].stem, drafts[i].answer, drafts[i].solution, drafts[i].pitfall, JSON.stringify(drafts[i].knowledge_points),
+        drafts[i].stem, drafts[i].answer, drafts[i].solution, drafts[i].pitfall, JSON.stringify(kps),
         drafts[i].difficulty, drafts[i].qtype, source, figs[i]?.mistake_id ?? null, String(figs[i]?.grade || ''),
         fig, nowISO()
       )
@@ -156,7 +160,7 @@ export default async function questionRoutes(app: FastifyInstance) {
     const sets: string[] = []
     const args: any[] = []
     for (const f of fields) {
-      if (b[f] !== undefined) { sets.push(`${f} = ?`); args.push(sanitizeAiText(b[f])) }
+      if (b[f] !== undefined) { sets.push(`${f} = ?`); args.push(sanitizeLatexChinese(sanitizeAiText(b[f]))) }
     }
     if (b.knowledge_points !== undefined) {
       sets.push('knowledge_points = ?')
@@ -199,8 +203,8 @@ export default async function questionRoutes(app: FastifyInstance) {
       let cost = 0
       for (const { qtype, n } of batches) {
         const { result: qs, usage } = await generateQuiz(provider, { kps, qtypes: [qtype], count: n, level, grade: String(b.grade || ''), hint: typeof b.hint === 'string' ? b.hint.slice(0, 500) : undefined })
-        // 强制落本批题型（防止模型返回的 qtype 与批次不符）
-        result.push(...qs.map((q) => ({ ...q, qtype })))
+        // 强制落本批题型（防止模型返回的 qtype 与批次不符），并把传入的节名原文注入知识点
+        result.push(...qs.map((q) => ({ ...q, qtype, knowledge_points: mergeSectionKps(kps, q.knowledge_points) })))
         prompt_tokens += usage.prompt_tokens || 0
         completion_tokens += usage.completion_tokens || 0
         cost += usage.cost || 0
@@ -254,6 +258,10 @@ export default async function questionRoutes(app: FastifyInstance) {
 
     try {
       const { result, usage } = await generateTiered(provider, { kps, grade: student.grade, mastery_note: masteryNote })
+      // 传入/推导出的节名注入每档草稿的知识点（同 quiz/generate，保证教材筛选可命中）
+      for (const t of ['基础', '巩固', '拔尖'] as const) {
+        result[t] = result[t].map((q) => ({ ...q, knowledge_points: mergeSectionKps(kps, q.knowledge_points) }))
+      }
       return { ok: true, tiers: result, recommended_tier: recommended, kps, usage }
     } catch (e: any) {
       reply.code(502).send({ error: e.message || '生成分层练习失败' })

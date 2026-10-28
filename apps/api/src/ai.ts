@@ -9,7 +9,7 @@ import {
   VARIANT_SYSTEM_PROMPT, QUIZ_SYSTEM_PROMPT, quizUserPrompt,
   TIERED_SYSTEM_PROMPT, REPORT_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT, reviewUserPrompt,
-  sanitizeAiText, FIGURE_TEMPLATES,
+  sanitizeAiText, sanitizeLatexChinese, FIGURE_TEMPLATES,
 } from '@workbench/shared'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -331,10 +331,10 @@ function validateVariants(obj: any): Array<{ stem: string; answer: string; solut
   const arr = Array.isArray(obj) ? obj : obj?.questions
   if (!Array.isArray(arr) || arr.length === 0) throw new Error('变式题结果不是非空数组')
   return arr.slice(0, 3).map((q: any) => ({
-    stem: sanitizeAiText(q?.stem).trim(),
-    answer: sanitizeAiText(q?.answer).trim(),
-    solution: sanitizeAiText(q?.solution).trim(),
-    pitfall: sanitizeAiText(q?.pitfall).trim(),
+    stem: sanitizeLatexChinese(sanitizeAiText(q?.stem)).trim(),
+    answer: sanitizeLatexChinese(sanitizeAiText(q?.answer)).trim(),
+    solution: sanitizeLatexChinese(sanitizeAiText(q?.solution)).trim(),
+    pitfall: sanitizeLatexChinese(sanitizeAiText(q?.pitfall)).trim(),
     knowledge_points: Array.isArray(q?.knowledge_points) ? q.knowledge_points.map(String) : [],
     difficulty: Math.min(5, Math.max(1, Number(q?.difficulty) || 3)),
     qtype: ['选择', '填空', '实验', '计算'].includes(q?.qtype) ? q.qtype : '计算',
@@ -384,14 +384,14 @@ function sanitizeFigureSpec(raw: any): { template: string; params: Record<string
   return { template: t, params }
 }
 
-// 出题/分层练习共用的题目草稿校验（题干必填，难度收敛 1~5，题型白名单，文本清洗字面 \n，figure_spec 白名单）
+// 出题/分层练习共用的题目草稿校验（题干必填，难度收敛 1~5，题型白名单，文本清洗字面 \n 与裸中文上下标，figure_spec 白名单）
 export function validateQuizDrafts(arr: any, max = 30): QuizDraft[] {
   if (!Array.isArray(arr) || arr.length === 0) throw new Error('出题结果不是非空数组')
   return arr.slice(0, max).map((q: any) => ({
-    stem: sanitizeAiText(q?.stem).trim(),
-    answer: sanitizeAiText(q?.answer).trim(),
-    solution: sanitizeAiText(q?.solution).trim(),
-    pitfall: sanitizeAiText(q?.pitfall).trim(),
+    stem: sanitizeLatexChinese(sanitizeAiText(q?.stem)).trim(),
+    answer: sanitizeLatexChinese(sanitizeAiText(q?.answer)).trim(),
+    solution: sanitizeLatexChinese(sanitizeAiText(q?.solution)).trim(),
+    pitfall: sanitizeLatexChinese(sanitizeAiText(q?.pitfall)).trim(),
     knowledge_points: Array.isArray(q?.knowledge_points) ? q.knowledge_points.map((k: any) => String(k)) : [],
     difficulty: Math.min(5, Math.max(1, Number(q?.difficulty) || 3)),
     qtype: ['选择', '填空', '实验', '计算'].includes(q?.qtype) ? q.qtype : '计算',

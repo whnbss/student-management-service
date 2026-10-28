@@ -18,6 +18,35 @@ function argOf(name: string): string | undefined {
 const MIX_ARG = argOf('--mix')
 const DIFF_ARG = argOf('--diff')
 const PLAN_ARG = argOf('--plan')
+// 压轴/实验组生成持续被二审驳回时，可临时切换供应商/模型跑本批（跑完自动还原用户原配置）：
+// --provider <供应商id> --model <模型名>（只临时替换该供应商的 text_model）
+const PROVIDER_ARG = argOf('--provider')
+const MODEL_ARG = argOf('--model')
+let savedProviderState: { providers: unknown; active_id: string } | null = null
+
+// 临时切换当前使用的供应商/模型（脚本结束前 restoreProviders 还原，绝不动用户的 Key 与其它配置）
+async function switchProvider(providerId?: string, model?: string) {
+  const cur = await req('GET', '/api/settings/ai')
+  if (cur.status !== 200 || !cur.data?.providers?.length) throw new Error('读取 AI 配置失败')
+  savedProviderState = { providers: cur.data.providers, active_id: cur.data.active_id || '' }
+  const providers = (cur.data.providers as any[]).map((p) => ({
+    ...p,
+    text_model: p.id === providerId && model ? model : p.text_model,
+  }))
+  if (providerId && !providers.some((p: any) => p.id === providerId)) throw new Error(`供应商 ${providerId} 不存在`)
+  const put = await req('PUT', '/api/settings/ai', { providers, active_id: providerId || cur.data.active_id })
+  if (put.status !== 200 || !put.data?.ok) throw new Error('切换供应商失败：' + JSON.stringify(put.data))
+  console.log(`（已临时切换当前模型 → ${providerId}${model ? ` / ${model}` : ''}）`)
+}
+
+async function restoreProviders() {
+  if (!savedProviderState) return
+  await req('PUT', '/api/settings/ai', { providers: savedProviderState.providers, active_id: savedProviderState.active_id })
+  const back = await req('GET', '/api/settings/ai')
+  const ok = back.status === 200 && back.data?.active_id === savedProviderState.active_id
+  console.log(`（已还原你的智能服务配置，active=${savedProviderState.active_id}${ok ? ' ✓回读确认' : ' ⚠回读不一致，请到设置页检查'}）`)
+  savedProviderState = null
+}
 
 // 难度档 → level（接口三档）与落库难度收敛规则
 const TIER_LEVEL: Record<string, '基础' | '高考' | '竞赛'> = { 基础: '基础', 中档: '高考', 压轴: '竞赛' }
@@ -146,6 +175,8 @@ async function generateAndSave(opts: {
     const payload = good.map((d) => ({
       ...d,
       grade,
+      // 强制注入节名标签（P1-7）：模型标签仅作补充，教材节名原文必须进 knowledge_points
+      inject_kps: kps,
       figure: d.figure_spec ? JSON.stringify({ kind: 'svg', data: specToSvg(d.figure_spec) }) : '',
     }))
     const b = await req('POST', '/api/questions/bulk', { questions: payload, force: false })
@@ -172,6 +203,9 @@ async function main() {
   const r0 = await req('POST', '/api/auth/login', { username: 'teacher', password: 'admin123' })
   if (r0.status !== 200) { console.error('登录失败', r0.status, JSON.stringify(r0.data)); process.exit(1) }
   token = r0.data.token
+
+  // 临时切换供应商/模型（--provider/--model，结束时还原）
+  if (PROVIDER_ARG || MODEL_ARG) await switchProvider(PROVIDER_ARG, MODEL_ARG)
 
   // 2. 覆盖统计
   const qs = (await req('GET', '/api/questions')).data as Array<{ id: number; knowledge_points: string; stem: string }>
@@ -226,14 +260,19 @@ async function main() {
   }
 
   // 逐组出题；组内一题未入库（二审全拒/缺图/失败）时自动重试，最多 3 次尝试（重试附加更严格的命题纪律）
+  // 中途任何异常也要保证还原用户的智能服务配置
   const RETRY_HINT = '前次草稿被二审驳回。请务必：先在解析中完整严格推导（禁止近似估算下结论、禁止过程性试错文字），再核对每个数值与单位；若用「如图」必须给出完整可绘图的 figure_spec 参数。'
-  for (const g of planGroups) {
-    let got = 0
-    for (let attempt = 1; attempt <= 3 && got < g.n; attempt++) {
-      const note = attempt === 1 ? g.note : [g.note, RETRY_HINT].filter(Boolean).join(' ')
-      if (attempt > 1) console.log(`  ↻ 第 ${attempt} 次重试（还差 ${g.n - got} 题）`)
-      got += await generateAndSave({ ...g, n: g.n - got, note }, out)
+  try {
+    for (const g of planGroups) {
+      let got = 0
+      for (let attempt = 1; attempt <= 3 && got < g.n; attempt++) {
+        const note = attempt === 1 ? g.note : [g.note, RETRY_HINT].filter(Boolean).join(' ')
+        if (attempt > 1) console.log(`  ↻ 第 ${attempt} 次重试（还差 ${g.n - got} 题）`)
+        got += await generateAndSave({ ...g, n: g.n - got, note }, out)
+      }
     }
+  } finally {
+    await restoreProviders()
   }
 
   // 3. 终态分布统计（全库）

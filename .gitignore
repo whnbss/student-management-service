@@ -17,3 +17,4 @@ workbench-migrate.zip
 *.zip
 # 根目录日志
 logs-api.txt
+logs-batch3*.txt

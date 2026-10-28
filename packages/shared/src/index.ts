@@ -2,6 +2,8 @@
 
 export * from './textbook'
 export * from './date'
+// 显式引入供本模块内使用（TEXTBOOK_SECTIONS 构建）
+import { TEXTBOOK } from './textbook'
 
 export type Grade = '高一' | '高二' | '高三'
 export type StudentStatus = '在读' | '停课' | '结课'
@@ -330,7 +332,7 @@ export const VARIANT_SYSTEM_PROMPT = `你是一名高中物理命题专家。针
 1. 变式题要改变情境/数据/设问角度，但考查本质相同；
 2. 难度相对原题 ±1 档（原题难度 d，出题难度在 d-1 到 d+1 之间）；
 3. 每题必须附完整答案、详细解析、易错点提示；
-4. 题干、解析中的公式用 LaTeX 语法（$...$ 包裹行内公式）；
+4. 题干、解析中的公式用 LaTeX 语法（$...$ 包裹行内公式）；LaTeX 公式里的中文（含上下标）必须用 \text{} 包裹（如 $v_{\text{甲}}$、$W_{\text{电}}$），严禁裸中文进数学模式；
 5. 解析必须是最终正确版本，严禁出现试错、疑问、「重新分析」「等等」等推理过程；情境与数据必须自洽；
 6. 需要配图的几何/受力题，在 figure_spec 中给出模板与参数；只有给出了 figure_spec 时题干才允许出现「如图所示」，否则必须用文字把几何条件描述完整；
 7. 严格输出 JSON 数组，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
@@ -355,13 +357,14 @@ export const QUIZ_SYSTEM_PROMPT = `你是一名高中物理命题专家，正在
 1. 每题紧扣给定的知识点与题型，情境真实、数据自洽、设问明确；
 2. 难度必须在指定档位区间内；答案必须物理正确、单位规范。难度定义：基础=单步代入或直接套公式（D1~2）；中档/高考=2~3 步综合计算（多对象或多过程，但套路常规，D3）；压轴/竞赛=3 步以上多过程综合、临界与图像分析或跨知识点拼合（D4~5），压轴题情境优先取「综合专题」类跨章综合；
 3. 每题必须附答案、详细解析（分步）、易错点提示；实验题必须按「实验目的 → 实验步骤（或装置与器材）→ 数据处理 → 误差分析」四段结构完整作答；
-4. 题干与解析中的公式用 LaTeX 语法（$...$ 包裹行内公式）；
+4. 题干与解析中的公式用 LaTeX 语法（$...$ 包裹行内公式）；LaTeX 公式里的中文（含上下标，如物体甲的速度、电场力做的功）必须用 \text{} 包裹，写成 $v_{\text{甲}}$、$W_{\text{电}}$，严禁裸中文进数学模式；
 5. 选择题的选项写在题干内（A. B. C. D. 各占一行），答案写选项字母与理由；
 6. 解析必须是最终正确版本，严禁出现试错、疑问、「重新分析」「等等」等推理过程，直接给出规范解答；
 7. 严禁编造不存在的物理常识，严禁超纲（不得使用大学物理工具，除非知识点明确要求）；
 8. 配图规则：几何/受力/电路类题目必须在 figure_spec 中给出配图规格（从模板列表中选并给参数）；只有给出了 figure_spec 时题干才允许出现「如图所示」，否则必须用文字把几何条件描述完整，严禁出现「如图」却无图；
-9. 输出顺序必须按题型分组：先输出全部选择题，再全部填空题、实验题，最后计算题（与试卷大题顺序一致），组内按难度从低到高；
-10. 严格输出 JSON 数组，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
+9. knowledge_points 必须包含题目要求里给出的知识点/节名原文（原样照抄，不要改写、不要拆分、不要增删括号），可再补充其它通用标签；
+10. 输出顺序必须按题型分组：先输出全部选择题，再全部填空题、实验题，最后计算题（与试卷大题顺序一致），组内按难度从低到高；
+11. 严格输出 JSON 数组，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
 
 输出 JSON 结构（数量与要求一致）：
 [{"stem": "题干", "answer": "答案", "solution": "解析", "pitfall": "易错点提示", "knowledge_points": ["知识点"], "difficulty": 3, "qtype": "计算", "figure_spec": {"template": "模板名", "params": {}}}]
@@ -399,10 +402,11 @@ export function quizUserPrompt(p: { kps: string[]; qtypes: string[]; count: numb
 export const TIERED_SYSTEM_PROMPT = `你是一名高中物理命题专家。针对同一批知识点，出「基础 / 巩固 / 拔尖」三档分层练习，供教师按学生水平选用：
 1. 基础档：直接套用公式与基本模型，帮学生建立信心；巩固档：高考常规难度，一两步综合；拔尖档：多过程综合或临界/图像分析，不超纲；
 2. 每档 2~3 题，每题附答案、解析、易错点提示；
-3. 公式用 LaTeX 语法（$...$ 包裹行内公式）；
+3. 公式用 LaTeX 语法（$...$ 包裹行内公式）；LaTeX 公式里的中文（含上下标）必须用 \text{} 包裹（如 $v_{\text{甲}}$、$W_{\text{电}}$），严禁裸中文进数学模式；
 4. 解析必须是最终正确版本，严禁出现试错、疑问、「重新分析」等过程；情境与数据必须自洽；
 5. 几何/受力类题目用 figure_spec 给出配图模板与参数；只有给出 figure_spec 时题干才允许出现「如图所示」，否则用文字把几何条件写全；
-6. 严格输出 JSON，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
+6. knowledge_points 必须包含题目要求里给出的知识点/节名原文（原样照抄），可再补充其它通用标签；
+7. 严格输出 JSON，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
 
 输出 JSON 结构：
 {"基础": [同变式题结构], "巩固": [同上], "拔尖": [同上]}
@@ -460,12 +464,77 @@ export function sanitizeAiText(s: unknown): string {
     .replace(/\\\\/g, '\\')
 }
 
+// ---------- P2-12：LaTeX 中文下标清洗 ----------
+// 公式里裸中文（$v_甲$、$W_{电}$）会被 KaTeX 按数学变量渲染（斜体不规范）并刷 console 警告；
+// 入库前统一把上/下标中的中文包上 \text{}（已在 \text{} 内的不重复处理）
+function wrapChineseScript(source: string, mark: string): string {
+  // 形式一：mark{中文...} → mark{\text{...}}（花括号内含中文且尚未包 \text）
+  let t = source.replace(new RegExp(`\\${mark}\\{([^{}]*)\\}`, 'g'), (m: string, inner: string) => {
+    if (!/[一-龥]/.test(inner) || inner.includes('\\text')) return m
+    return `${mark}{\\text{${inner}}}`
+  })
+  // 形式二：mark中文 → mark{\text{中文}}（紧跟的连续中文/括号/间隔号串）
+  t = t.replace(new RegExp(`\\${mark}([\\u4e00-\\u9fa5][\\u4e00-\\u9fa5·（）()0-9]*)`, 'g'), (_m: string, cs: string) => `${mark}{\\text{${cs}}}`)
+  return t
+}
+export function sanitizeLatexChinese(s: unknown): string {
+  let t = String(s ?? '')
+  t = wrapChineseScript(t, '_')
+  t = wrapChineseScript(t, '^')
+  return t
+}
+
+// ---------- P1-7：知识点标签与教材节名对齐 ----------
+// 教材全部节名（扁平列表，220 节）
+export const TEXTBOOK_SECTIONS: string[] = TEXTBOOK.flatMap((v) => v.chapters.flatMap((c) => c.sections))
+
+// 比较用归一：去空白、统一破折号（半角 - / 全角 — / 连字符 – 视为同一字符）
+function kpNorm(s: string): string {
+  return String(s || '').replace(/\s+/g, '').replace(/[—–-]/g, '—')
+}
+
+// 单个标签 → 对应教材节名：归一后完全相等直接命中；否则仅当「唯一候选」且
+// （标签是节名前缀 或 标签 ≥4 字足够具体）才注入——像「电势」「加速度」这类泛化标签
+// 候选多（电势差/电势能与电场力做功/向心加速度…），宁可不挂节名也不错挂
+export function alignKpToSection(k: string): string | null {
+  const nk = kpNorm(k)
+  if (!nk) return null
+  for (const s of TEXTBOOK_SECTIONS) if (kpNorm(s) === nk) return s
+  const cands = TEXTBOOK_SECTIONS.filter((s) => {
+    const ns = kpNorm(s)
+    return ns.includes(nk) || nk.includes(ns)
+  })
+  if (cands.length !== 1) return null
+  const ns = kpNorm(cands[0])
+  if (ns.startsWith(nk) || nk.length >= 4) return cands[0]
+  return null
+}
+
+// 合并知识点：出题时教师/脚本传入的节名原文必须注入（放最前，避免模型自由发挥的碎片标签顶掉节名导致教材筛选漏题）
+export function mergeSectionKps(requested: string[], modelKps: string[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  const push = (k: string) => {
+    const key = kpNorm(k)
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    out.push(k)
+  }
+  for (const k of requested || []) push(String(k).trim())
+  for (const k of modelKps || []) {
+    const s = alignKpToSection(String(k))
+    if (s) push(s)
+    push(String(k).trim())
+  }
+  return out
+}
+
 // 二审（自动质检）：出题生成后的第二次 AI 调用，逐题挑错；不过审的草稿在前端标黄由教师终审
 export const REVIEW_SYSTEM_PROMPT = `你是一名严格的高中物理审题专家（二审质检）。给你一批题目草稿（题干/答案/解析），请逐题独立检查：
 1. 物理与数值自洽：把数据代入解析重算，答案数值、单位、有效数字是否正确；
 2. 情境与几何自洽：题目描述的装置/角度/方向是否矛盾（例：「绳跨过定滑轮一端水平、另一端竖直」与「绳与水平方向夹角 53°」即矛盾，不合格）；
 3. 是否超纲：是否使用高中未学的工具（微积分、矢量点叉乘等）；
-4. 解析规范性：是否残留试错、疑问、「重新分析」「等等」等过程文字（必须是最终正确版本）；
+4. 解析规范性：是否残留试错、疑问、「重新分析」「等等」等过程文字（必须是最终正确版本）；LaTeX 公式内的中文（含上下标）是否已用 \text{} 包裹（如 $v_{\text{甲}}$，裸中文下标不合格）；
 5. 配图检查：题干出现「如图」却没有任何配图描述 → 指出该问题，并在 fixed 的 figure_spec 中补一个模板配图，或改写题干用文字描述几何条件；
 6. 「如图」检查通过时不要误报；题目完全合格则 pass 为 true、issues 为空数组、fixed 为 null。
 
