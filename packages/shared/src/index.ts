@@ -1,6 +1,7 @@
 // 共享类型定义：前后端统一引用，保证接口契约一致
 
 export * from './textbook'
+export * from './date'
 
 export type Grade = '高一' | '高二' | '高三'
 export type StudentStatus = '在读' | '停课' | '结课'
@@ -359,7 +360,8 @@ export const QUIZ_SYSTEM_PROMPT = `你是一名高中物理命题专家，正在
 6. 解析必须是最终正确版本，严禁出现试错、疑问、「重新分析」「等等」等推理过程，直接给出规范解答；
 7. 严禁编造不存在的物理常识，严禁超纲（不得使用大学物理工具，除非知识点明确要求）；
 8. 配图规则：几何/受力/电路类题目必须在 figure_spec 中给出配图规格（从模板列表中选并给参数）；只有给出了 figure_spec 时题干才允许出现「如图所示」，否则必须用文字把几何条件描述完整，严禁出现「如图」却无图；
-9. 严格输出 JSON 数组，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
+9. 输出顺序必须按题型分组：先输出全部选择题，再全部填空题、实验题，最后计算题（与试卷大题顺序一致），组内按难度从低到高；
+10. 严格输出 JSON 数组，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
 
 输出 JSON 结构（数量与要求一致）：
 [{"stem": "题干", "answer": "答案", "solution": "解析", "pitfall": "易错点提示", "knowledge_points": ["知识点"], "difficulty": 3, "qtype": "计算", "figure_spec": {"template": "模板名", "params": {}}}]
@@ -387,7 +389,7 @@ export function quizUserPrompt(p: { kps: string[]; qtypes: string[]; count: numb
   const [lo, hi] = QUIZ_LEVELS[p.level]
   return `请出 ${p.count} 道高中物理题：
 - 知识点：${p.kps.join('、')}
-- 题型：${p.qtypes.join('、')}（各题型数量自行均衡分配）
+- 题型：${p.qtypes.join('、')}（按题型分组输出：先输出全部选择题，再填空题、实验题，最后计算题；组内按难度从低到高）
 - 难度档：${p.level}（difficulty 取 ${lo}~${hi} 的整数）
 - 年级：${p.grade || '高一'}
 请按约定 JSON 数组结构输出 ${p.count} 道题。`

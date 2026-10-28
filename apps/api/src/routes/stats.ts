@@ -1,6 +1,7 @@
 // 统计与经营：每周/每月课时数与收入曲线、学生留存/续费率（P2）
 import { FastifyInstance } from 'fastify'
 import { db } from '../db'
+import { localDateStr } from '@workbench/shared'
 
 // 周桶：以周一为起点，label 形如 09-01
 function weekStart(dateStr: string): string {
@@ -8,7 +9,7 @@ function weekStart(dateStr: string): string {
   if (isNaN(d.getTime())) return ''
   const day = (d.getDay() + 6) % 7 // 周一=0
   d.setDate(d.getDate() - day)
-  return d.toISOString().slice(0, 10)
+  return localDateStr(d)
 }
 
 export async function statsRoutes(app: FastifyInstance) {
@@ -19,13 +20,13 @@ export async function statsRoutes(app: FastifyInstance) {
     const nMonths = Math.min(24, Math.max(3, Number(q.months) || 6))
 
     // ---- 周桶：以今天所在周的周一对齐，向前推 nWeeks 周 ----
-    const thisMonday = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00')
+    const thisMonday = new Date(localDateStr() + 'T00:00:00')
     thisMonday.setDate(thisMonday.getDate() - ((thisMonday.getDay() + 6) % 7))
     const weekKeys: string[] = []
     for (let i = nWeeks - 1; i >= 0; i--) {
       const d = new Date(thisMonday)
       d.setDate(d.getDate() - i * 7)
-      weekKeys.push(d.toISOString().slice(0, 10))
+      weekKeys.push(localDateStr(d))
     }
     const weekIdx = new Map(weekKeys.map((k, i) => [k, i]))
     const weekly = weekKeys.map((k) => ({ week: k, label: k.slice(5).replace('-', '/'), hours: 0, income: 0 }))

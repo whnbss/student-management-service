@@ -7,6 +7,7 @@ import { post } from '@/lib/api'
 import { uploadImage } from '@/lib/image'
 import { useAuthStore, useToastStore } from '@/stores/auth'
 import type { Student, AiAnalysisResult } from '@workbench/shared'
+import { todayLocal } from '@workbench/shared'
 
 export type AnalyzeStep = 'pick' | 'uploading' | 'analyzing' | 'review' | 'saving'
 
@@ -126,7 +127,7 @@ export const useAnalyzeStore = create<AnalyzeState>()(
             draft.items.map((it) => `第${it.no}题${it.verdict}`).join('、') +
             `。${draft.overall_comment}`
           const r = await post<{ id: number; mistakes_created: number }>(`/api/students/${studentId}/logs`, {
-            date: new Date().toISOString().slice(0, 10),
+            date: todayLocal(),
             type: logType,
             content,
             next_class_key: nextKey,

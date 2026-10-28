@@ -21,6 +21,9 @@ const PRINT_CSS = `
   .anssheet{page-break-before:always;margin-top:12px}
   .anssheet h2{font-size:16px;text-align:center;margin:0 0 10px}
   .tier{display:inline-block;background:#eef2ff;color:#4f46e5;border-radius:4px;padding:0 6px;font-size:11px}
+  .blank{position:relative;height:150px;border:1px dashed #bbb;border-radius:6px;margin-top:10px}
+  .blank>span{position:absolute;top:4px;left:8px;color:#aaa;font-size:11px}
+  .blank2{height:120px;border:1px dashed #bbb;border-radius:6px;margin-top:10px}
   @media print{.noprint{display:none}}
 `
 
@@ -59,6 +62,8 @@ export const QTYPE_ORDER = ['选择', '填空', '实验', '计算'] as const
 export const SECTION_NO = ['一', '二', '三', '四', '五', '六'] as const
 // 各题型默认分值（可在组卷预览里改）
 export const DEFAULT_SCORES: Record<string, number> = { 选择: 5, 填空: 6, 实验: 10, 计算: 12 }
+// 智能出题草稿「组成试卷」场景的默认分值（课时练习卷，与整卷考试不同）
+export const QUIZ_SCORES: Record<string, number> = { 选择: 3, 填空: 4, 实验: 8, 计算: 12 }
 
 export interface PaperQuestion {
   id: number
@@ -135,4 +140,44 @@ export function buildExamHtml(p: {
     body += ansHtml
   }
   return { header, body }
+}
+
+// ---------- 错题重做练习单：到期错题合成一张「考试卷」（题干+配图+空白作答区，不含正确解法与错因） ----------
+
+export interface RedoSheetItem {
+  stem: string
+  image?: string // 原题图片（uploads 相对路径或绝对 URL）
+  student_name?: string
+  kp?: string // 知识点（顿号串）
+}
+
+// 构建重做单 HTML（header+body，与 buildExamHtml 同构，复用 printHtml 打印）
+export function buildRedoSheetHtml(p: { title: string; items: RedoSheetItem[] }): { header: string; body: string } {
+  const header = `<h1>${p.title}</h1>
+    <div class="namefill">班级：＿＿＿＿＿＿　姓名：＿＿＿＿＿＿　日期：＿＿＿＿＿＿</div>
+    <div class="info">错题重做练习单 · 共 ${p.items.length} 题 · 独立完成后拍照交给老师智能批改</div>`
+  let body = ''
+  p.items.forEach((m, i) => {
+    const img = m.image
+      ? `<div class="fig"><img src="${m.image.startsWith('http') ? m.image : window.location.origin + m.image}" style="max-width:100%"></div>`
+      : ''
+    body += `<div class="q">
+      <div class="no">${i + 1}. ${[m.student_name, m.kp].filter(Boolean).join(' · ')}</div>
+      <div class="stem">${texToMathml(m.stem)}</div>
+      ${img}
+      <div class="blank"><span>作答区</span></div>
+      <div class="blank2"></div>
+    </div>`
+  })
+  return { header, body }
+}
+
+// 重做单打印入口：错题数据（Mistake 或今日页 due_redos 均可）→ 打印窗口
+export function printRedoSheet(
+  items: Array<{ stem: string; image?: string; student_name?: string; knowledge_points?: string }>,
+  title = '错题重做练习单'
+): boolean {
+  if (!items.length) return false
+  const { header, body } = buildRedoSheetHtml({ title, items })
+  return printHtml(title, header + body)
 }

@@ -9,6 +9,7 @@ import QuestionFigure from '@/components/QuestionFigure'
 import { printHtml, questionPrintHtml } from '@/lib/print'
 import { specToSvg } from '@/lib/figure'
 import type { Student, Mistake, QuizDraft, TieredResult, ParentReport } from '@workbench/shared'
+import { todayLocal, daysAgo } from '@workbench/shared'
 
 const TIERS = ['基础', '巩固', '拔尖'] as const
 const TIER_COLOR: Record<string, string> = {
@@ -179,9 +180,9 @@ export function TieredPracticeModal({ student, mistakes, onClose }: { student: S
 /** 家长阶段报告：选时段 → AI 三段式（Glow/Grow/Plan）→ 教师终审 → 打印 PDF / 复制催缴话术 */
 export function ParentReportModal({ student, onClose }: { student: Student; onClose: () => void }) {
   const show = useToastStore((s) => s.show)
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayLocal()
   const [preset, setPreset] = useState<'2w' | '1m' | 'custom'>('1m')
-  const [from, setFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
+  const [from, setFrom] = useState(daysAgo(30))
   const [to, setTo] = useState(today)
   const [generating, setGenerating] = useState(false)
   const [report, setReport] = useState<ParentReport | null>(null)
@@ -194,8 +195,8 @@ export function ParentReportModal({ student, onClose }: { student: Student; onCl
 
   const applyPreset = (p: '2w' | '1m' | 'custom') => {
     setPreset(p)
-    if (p === '2w') setFrom(new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10))
-    if (p === '1m') setFrom(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
+    if (p === '2w') setFrom(daysAgo(14))
+    if (p === '1m') setFrom(daysAgo(30))
   }
 
   const generate = async () => {

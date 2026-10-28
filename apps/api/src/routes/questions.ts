@@ -3,11 +3,27 @@
 import type { FastifyInstance } from 'fastify'
 import { db, nowISO, remainingHours } from '../db'
 import { pickProvider, generateQuiz, generateTiered, generateParentReport, validateQuizDrafts, reviewQuizDrafts } from '../ai'
-import { sanitizeAiText } from '@workbench/shared'
+import { sanitizeAiText, daysAgo } from '@workbench/shared'
 import type { QuizLevel } from '@workbench/shared'
 
 function kpOf(raw: string): string[] {
   try { return JSON.parse(raw || '[]') as string[] } catch { return [] }
+}
+
+// 题型固定顺序（与组卷大题顺序一致）：选择 → 填空 → 实验 → 计算
+const QTYPE_SEQ = ['选择', '填空', '实验', '计算'] as const
+
+// 把总题数按所选题型分配：题型按固定顺序排，前面的题型优先多 1 题；非标准题型兜底排最后
+function allocateCounts(count: number, qtypes: string[]): Array<{ qtype: string; n: number }> {
+  const ordered = QTYPE_SEQ.filter((t) => qtypes.includes(t))
+  const extra = qtypes.filter((t) => !(QTYPE_SEQ as readonly string[]).includes(t))
+  const all = [...ordered, ...extra]
+  if (!all.length) return []
+  const base = Math.floor(count / all.length)
+  let rem = count % all.length
+  return all
+    .map((qtype) => ({ qtype, n: base + (rem-- > 0 ? 1 : 0) }))
+    .filter((x) => x.n > 0)
 }
 
 // figure 列校验：必须是 {"kind":"svg"|"img","data":"..."} 形态的 JSON（svg 内联、img 为 uploads 相对路径），非法返回空串
@@ -162,6 +178,7 @@ export default async function questionRoutes(app: FastifyInstance) {
   })
 
   // ---------- AI 出题器：生成草稿 + 自动二审（不入库，前端确认后走 bulk） ----------
+  // 出题按题型分批：按「选择→填空→实验→计算」固定顺序逐题型单独生成，保证输出顺序与试卷大题一致（双保险之一，前端另有稳定排序兜底）
   app.post('/api/quiz/generate', async (req, reply) => {
     const b = (req.body || {}) as { kps?: unknown; qtypes?: unknown; count?: unknown; level?: unknown; grade?: unknown }
     const kps = Array.isArray(b.kps) ? b.kps.map(String).map((s) => s.trim()).filter(Boolean) : []
@@ -172,7 +189,21 @@ export default async function questionRoutes(app: FastifyInstance) {
     const provider = pickProvider('text')
     if (!provider) { reply.code(400).send({ error: '尚未配置 AI 供应商 API Key，请到「我的 → AI 配置」填写' }); return }
     try {
-      const { result, usage } = await generateQuiz(provider, { kps, qtypes, count, level, grade: String(b.grade || '') })
+      // 总题数按题型分配（前面的题型优先多 1 题），逐批生成并拼接
+      const batches = allocateCounts(count, qtypes)
+      const result: Awaited<ReturnType<typeof generateQuiz>>['result'] = []
+      let prompt_tokens = 0
+      let completion_tokens = 0
+      let cost = 0
+      for (const { qtype, n } of batches) {
+        const { result: qs, usage } = await generateQuiz(provider, { kps, qtypes: [qtype], count: n, level, grade: String(b.grade || '') })
+        // 强制落本批题型（防止模型返回的 qtype 与批次不符）
+        result.push(...qs.map((q) => ({ ...q, qtype })))
+        prompt_tokens += usage.prompt_tokens || 0
+        completion_tokens += usage.completion_tokens || 0
+        cost += usage.cost || 0
+      }
+      const usage = { prompt_tokens, completion_tokens, cost }
       // 自动二审：逐题挑错（数值自洽/情境几何/超纲/解析含试错/缺图）。二审失败不阻塞出题，降级为无审查结果
       let review = null
       let review_usage = null
@@ -238,7 +269,7 @@ export default async function questionRoutes(app: FastifyInstance) {
     if (!provider) { reply.code(400).send({ error: '尚未配置 AI 供应商 API Key，请到「我的 → AI 配置」填写' }); return }
     // 时段：默认最近一个月
     const to = String(b.to || nowISO().slice(0, 10))
-    const from = String(b.from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
+    const from = String(b.from || daysAgo(30))
     const logs = db
       .prepare('SELECT date, type, content, next_class_key FROM study_logs WHERE student_id = ? AND date BETWEEN ? AND ? ORDER BY date DESC')
       .all(sid, from, to) as any[]

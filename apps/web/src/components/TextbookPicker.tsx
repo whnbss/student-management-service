@@ -4,6 +4,7 @@
 import { useState } from 'react'
 import { BookOpen, ChevronDown, X } from 'lucide-react'
 import { TEXTBOOK } from '@workbench/shared'
+import TextbookCover from './TextbookCover'
 
 export default function TextbookPicker({
   mode = 'multi',
@@ -55,14 +56,12 @@ export default function TextbookPicker({
         {/* 六册封面卡 Tab */}
         <div className="grid grid-cols-3 gap-2">
           {TEXTBOOK.map((v) => (
-            <button
+            <TextbookCover
               key={v.id}
+              vol={v}
+              active={volId === v.id}
               onClick={() => { setVolId(v.id); setOpenCh(v.chapters[0]?.name ?? null) }}
-              className={`rounded-xl px-2 py-2.5 text-left bg-gradient-to-br ${v.color} text-white shadow-sm transition-transform ${volId === v.id ? 'ring-2 ring-offset-2 ring-primary-500 dark:ring-offset-slate-900 scale-[1.02]' : 'opacity-80 hover:opacity-100'}`}
-            >
-              <div className="text-xs font-bold leading-tight">{v.name}</div>
-              <div className="text-[10px] opacity-80 mt-0.5">{v.hint}</div>
-            </button>
+            />
           ))}
         </div>
 

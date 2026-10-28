@@ -1,7 +1,7 @@
 // 学生详情：看板 / 学情日志 / 课时缴费 / 课表 四个子 Tab
 // 桌面端两栏：左（当前 Tab 内容）/ 右（学情看板 + 快捷入口）
 import { useCallback, useEffect, useState } from 'react'
-import {BarChart3, BookOpen, CalendarClock, Camera, Download, Mail, PenLine, Pin, SquarePen, Wallet} from 'lucide-react'
+import {BarChart3, BookOpen, CalendarClock, Camera, Download, Mail, PenLine, Pin, Printer, SquarePen, Wallet} from 'lucide-react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { get, post, del } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
@@ -9,10 +9,16 @@ import TextbookPicker from '@/components/TextbookPicker'
 import { NextKeyText } from '@/components/Kp'
 import { aggregateKp, KpMasteryBars, KP_LEGEND, MistakeTrend, ErrorTypeBars } from '@/components/Charts'
 import { TieredPracticeModal, ParentReportModal } from '@/components/Practice'
+import { printRedoSheet } from '@/lib/print'
+import { todayLocal } from '@workbench/shared'
 import type { Student, HourPackage, Payment, StudyLog, Schedule, Mistake, Settlement } from '@workbench/shared'
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 const LOG_TYPES = ['上课', '作业', '考试', '其他']
+
+function kpOf(m: Mistake): string[] {
+  try { return JSON.parse(m.knowledge_points || '[]') as string[] } catch { return [] }
+}
 
 type SubTab = 'board' | 'logs' | 'hours' | 'schedule'
 
@@ -30,15 +36,15 @@ export default function StudentDetail() {
   const [mistakes, setMistakes] = useState<Mistake[]>([])
   const [loading, setLoading] = useState(true)
   // 一课一结算：结算记录（按月过滤）与导账单
-  const [settleMonth, setSettleMonth] = useState(new Date().toISOString().slice(0, 7))
+  const [settleMonth, setSettleMonth] = useState(todayLocal().slice(0, 7))
   const [settlements, setSettlements] = useState<Settlement[]>([])
   const [settleTotal, setSettleTotal] = useState(0)
 
   // 学情日志表单
-  const [logForm, setLogForm] = useState({ date: new Date().toISOString().slice(0, 10), type: '上课', content: '', next_class_key: '' })
+  const [logForm, setLogForm] = useState({ date: todayLocal(), type: '上课', content: '', next_class_key: '' })
   const [logSaving, setLogSaving] = useState(false)
   // 课时包表单
-  const [pkgForm, setPkgForm] = useState({ hours: 10, amount: 0, purchase_date: new Date().toISOString().slice(0, 10), note: '' })
+  const [pkgForm, setPkgForm] = useState({ hours: 10, amount: 0, purchase_date: todayLocal(), note: '' })
   const [pkgSaving, setPkgSaving] = useState(false)
   // 课表表单
   const [schForm, setSchForm] = useState({ weekday: 1, start_time: '19:00', end_time: '21:00', note: '' })
@@ -87,17 +93,32 @@ export default function StudentDetail() {
     loadSettlements()
   }, [loadSettlements])
 
-  // 导出月度账单 CSV（Excel 可直接打开）
+  // 导出月度账单 CSV（Excel 可直接打开；单元格引号包裹防逗号破列）
   const exportBill = () => {
+    const cell = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`
     const rows = [['日期', '金额(元)', '备注'], ...[...settlements].reverse().map((s) => [s.date, String(s.amount), s.note || '按次结算'])]
     rows.push([`${settleMonth} 合计`, settleTotal.toFixed(2), ''])
-    const csv = '﻿' + rows.map((r) => r.join(',')).join('\n')
+    const csv = '﻿' + rows.map((r) => r.map(cell).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     a.download = `${student?.name || '学生'}-${settleMonth}-课时账单.csv`
     a.click()
     URL.revokeObjectURL(a.href)
+  }
+
+  // 错题重做练习单：把该生到期（redo_due ≤ 今天）的错题合成一张考试卷（遮答案、空白作答区）
+  const dueMistakes = mistakes.filter((m) => m.mastery_status !== '已掌握' && m.redo_due && m.redo_due <= todayLocal())
+  const printRedo = () => {
+    if (!student) return
+    if (!dueMistakes.length) { show('该生当前没有到期重做的错题'); return }
+    const items = dueMistakes.map((m) => ({
+      stem: m.stem,
+      image: m.image || undefined,
+      student_name: m.student_name,
+      knowledge_points: kpOf(m).join('、'),
+    }))
+    if (!printRedoSheet(items, `${student.name} · 错题重做练习单`)) show('浏览器拦截了弹出窗口')
   }
 
   const saveLog = async () => {
@@ -192,10 +213,13 @@ export default function StudentDetail() {
           </button>
         </div>
         {student.note && <p className="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">备注：{student.note}</p>}
-        {/* P1 内容生产入口：分层练习 + 家长阶段报告 */}
+        {/* P1 内容生产入口：分层练习 + 家长阶段报告 + 错题重做练习单 */}
         <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
           <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setShowTiered(true)}><BarChart3 className="w-4 h-4 inline-block align-[-2px]" /> 生成分层练习</button>
           <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setShowReport(true)}><Mail className="w-4 h-4 inline-block align-[-2px]" /> 生成阶段报告</button>
+          <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={printRedo} title="把该生到期错题合成一张练习单（遮答案、留空白作答区）">
+            <Printer className="w-4 h-4 inline-block align-[-2px]" /> 打印重做单{dueMistakes.length > 0 && `（${dueMistakes.length} 题）`}
+          </button>
         </div>
       </div>
 
@@ -449,6 +473,7 @@ export default function StudentDetail() {
               <button className="btn-outline !px-3 !py-1.5 text-xs w-full" onClick={() => setShowReport(true)}><Mail className="w-4 h-4 inline-block align-[-2px]" /> 生成阶段报告</button>
               <button className="btn-outline !px-3 !py-1.5 text-xs w-full" onClick={() => setTab('logs')}><PenLine className="w-4 h-4 inline-block align-[-2px]" /> 记学情流水</button>
               <button className="btn-outline !px-3 !py-1.5 text-xs w-full" onClick={() => setTab('hours')}><Wallet className="w-4 h-4 inline-block align-[-2px]" /> 课时缴费</button>
+              <button className="btn-outline !px-3 !py-1.5 text-xs w-full" onClick={printRedo}><Printer className="w-4 h-4 inline-block align-[-2px]" /> 打印重做单</button>
             </div>
           </aside>
         )}

@@ -20,7 +20,9 @@ async function req(method, path, body) {
   return { status: res.status, data }
 }
 
-const date = new Date().toISOString().slice(0, 10)
+// 本地日期（与后端统一为系统本地时区口径，避免 UTC 在东八区凌晨取到前一天）
+const _now = new Date()
+const date = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`
 
 // 1. 缺用户名 → 400（新版登录必须账号+密码；不触碰限速计数，故放最前）
 let r = await req('POST', '/api/auth/login', { password: 'admin123' })

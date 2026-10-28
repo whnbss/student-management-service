@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { BookOpen, ChevronDown } from 'lucide-react'
 import { TEXTBOOK } from '@workbench/shared'
+import TextbookCover from './TextbookCover'
 
 export default function TextbookBrowse({ onPickSection }: { onPickSection?: (section: string) => void }) {
   const [open, setOpen] = useState(false)
@@ -26,14 +27,9 @@ export default function TextbookBrowse({ onPickSection }: { onPickSection?: (sec
           {/* 六册封面（横向滚动） */}
           <div className="flex gap-2 overflow-x-auto pb-1">
             {TEXTBOOK.map((v) => (
-              <button
-                key={v.id}
-                onClick={() => { setVolId(v.id); setOpenCh(null) }}
-                className={`shrink-0 rounded-xl px-3 py-2 text-left bg-gradient-to-br ${v.color} text-white shadow-sm transition-transform ${volId === v.id ? 'ring-2 ring-offset-2 ring-primary-500 dark:ring-offset-slate-900' : 'opacity-80 hover:opacity-100'}`}
-              >
-                <div className="text-xs font-bold">{v.name}</div>
-                <div className="text-[10px] opacity-80">{v.chapters.length} 章</div>
-              </button>
+              <div key={v.id} className="shrink-0 w-40">
+                <TextbookCover vol={v} active={volId === v.id} onClick={() => { setVolId(v.id); setOpenCh(null) }} />
+              </div>
             ))}
           </div>
 

@@ -11,7 +11,7 @@ import { KpChips } from '@/components/Kp'
 import { aggregateKp, KpMasteryBars, KP_LEGEND } from '@/components/Charts'
 import { matchScene } from '@/labs/registry'
 import type { Mistake, Student, Question } from '@workbench/shared'
-import { ERROR_TYPES } from '@workbench/shared'
+import { ERROR_TYPES, todayLocal } from '@workbench/shared'
 
 const MASTERY = ['未掌握', '已重做一次', '已掌握'] as const
 const STATUS_COLOR: Record<string, string> = {
@@ -33,7 +33,7 @@ export default function Mistakes() {
   const [busyVariant, setBusyVariant] = useState<number | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [showTbPicker, setShowTbPicker] = useState(false) // 「从教材选择」筛选知识点
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayLocal()
 
   // 手动添加表单
   const [form, setForm] = useState({

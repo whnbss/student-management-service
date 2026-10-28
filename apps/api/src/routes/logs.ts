@@ -1,7 +1,7 @@
 // 学情日志：时间线 CRUD（M2 扩展：图片 + AI 分析结果落库 + 错题抽取）
 import type { FastifyInstance } from 'fastify'
 import { db, nowISO } from '../db'
-import { REDO_INTERVALS } from '@workbench/shared'
+import { REDO_INTERVALS, addDays, todayLocal } from '@workbench/shared'
 
 // 从确认后的 AI 分析结果抽取错题入库（含艾宾浩斯重做计划：1/3/7/15 天）
 // onlyNos：教师勾选确认入库的题号；不传则默认全部错/部分对题目入库
@@ -12,8 +12,8 @@ export function extractMistakes(studentId: number, logId: number, analysis: any,
       (it.verdict === '错' || it.verdict === '部分对') &&
       (!Array.isArray(onlyNos) || onlyNos.length === 0 || onlyNos.includes(Number(it.no)))
   )
-  const today = nowISO().slice(0, 10)
-  const due = new Date(Date.now() + REDO_INTERVALS[0] * 86400000).toISOString().slice(0, 10)
+  const today = todayLocal()
+  const due = addDays(today, REDO_INTERVALS[0])
   const ins = db.prepare(`INSERT INTO mistakes(
     student_id, log_id, stem, correct_solution, wrong_solution, error_type,
     knowledge_points, chapter, difficulty, mastery_status, redo_due, redo_stage, source, created_at

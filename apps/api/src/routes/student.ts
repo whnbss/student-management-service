@@ -3,11 +3,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { db, nowISO, remainingHours, billingModeOf } from '../db'
 import { hashPassword, verifyPassword } from '../crypto'
-import { REDO_INTERVALS } from '@workbench/shared'
-
-function addDays(date: string, days: number): string {
-  return new Date(new Date(date).getTime() + days * 86400000).toISOString().slice(0, 10)
-}
+import { REDO_INTERVALS, addDays, localDateStr } from '@workbench/shared'
 
 // 取当前学生账号（含校验：student token、账号存在且启用）
 function myAccount(req: FastifyRequest, reply: FastifyReply): any {
@@ -96,7 +92,7 @@ export default async function studentRoutes(app: FastifyInstance) {
     db.prepare('UPDATE mistakes SET redo_stage = ?, mastery_status = ?, redo_due = ? WHERE id = ?').run(
       stage,
       mastered ? '已掌握' : '已重做一次',
-      mastered ? null : addDays(nowISO().slice(0, 10), REDO_INTERVALS[stage]),
+      mastered ? null : addDays(localDateStr(), REDO_INTERVALS[stage]),
       id
     )
     // 同步通知教师（今日页通知铃）
@@ -108,7 +104,7 @@ export default async function studentRoutes(app: FastifyInstance) {
       m.id,
       nowISO()
     )
-    return { ok: true, mastery_status: mastered ? '已掌握' : '已重做一次', redo_due: mastered ? null : addDays(nowISO().slice(0, 10), REDO_INTERVALS[stage]) }
+    return { ok: true, mastery_status: mastered ? '已掌握' : '已重做一次', redo_due: mastered ? null : addDays(localDateStr(), REDO_INTERVALS[stage]) }
   })
 
   // 我的课时：剩余课时 + 课时包 + 最近签到 +（一课一结算时）结算记录与本月合计
@@ -118,7 +114,7 @@ export default async function studentRoutes(app: FastifyInstance) {
     const mode = billingModeOf(acc.student_id)
     const packages = db.prepare('SELECT * FROM hour_packages WHERE student_id = ? ORDER BY purchase_date DESC, id DESC').all(acc.student_id)
     const attendance = db.prepare('SELECT * FROM attendance WHERE student_id = ? ORDER BY date DESC, id DESC LIMIT 30').all(acc.student_id)
-    const month = nowISO().slice(0, 7)
+    const month = localDateStr().slice(0, 7)
     const settlements = mode === 'per_lesson'
       ? db.prepare("SELECT * FROM settlements WHERE student_id = ? AND date LIKE ? ORDER BY date DESC, id DESC LIMIT 50").all(acc.student_id, `${month}-%`)
       : []

@@ -2,11 +2,7 @@
 import type { FastifyInstance } from 'fastify'
 import { db, nowISO } from '../db'
 import { pickProvider, generateVariants } from '../ai'
-import { REDO_INTERVALS } from '@workbench/shared'
-
-function addDays(date: string, days: number): string {
-  return new Date(new Date(date).getTime() + days * 86400000).toISOString().slice(0, 10)
-}
+import { REDO_INTERVALS, addDays, todayLocal } from '@workbench/shared'
 
 export default async function mistakeRoutes(app: FastifyInstance) {
   // 列表：按学生/状态/知识点/关键词筛选；到期重做在前端置顶
@@ -30,7 +26,7 @@ export default async function mistakeRoutes(app: FastifyInstance) {
     const b = (req.body || {}) as any
     if (!b.student_id) { reply.code(400).send({ error: '缺少学生' }); return }
     if (!b.stem || !String(b.stem).trim()) { reply.code(400).send({ error: '题干必填' }); return }
-    const today = nowISO().slice(0, 10)
+    const today = todayLocal()
     const r = db.prepare(`INSERT INTO mistakes(
       student_id, image, stem, correct_solution, wrong_solution, error_type,
       knowledge_points, chapter, difficulty, mastery_status, redo_due, redo_stage, source, created_at
@@ -65,7 +61,7 @@ export default async function mistakeRoutes(app: FastifyInstance) {
       const stage = Math.min(cur.redo_stage + 1, REDO_INTERVALS.length)
       const mastered = stage >= REDO_INTERVALS.length
       sets.push('redo_stage = ?', 'mastery_status = ?', 'redo_due = ?')
-      args.push(stage, mastered ? '已掌握' : '已重做一次', mastered ? null : addDays(nowISO().slice(0, 10), REDO_INTERVALS[stage]))
+      args.push(stage, mastered ? '已掌握' : '已重做一次', mastered ? null : addDays(todayLocal(), REDO_INTERVALS[stage]))
     } else if (b.mastery_status !== undefined) {
       // 直接手动设置状态（如手动标已掌握）
       sets.push('mastery_status = ?', 'redo_due = ?')

@@ -1,6 +1,7 @@
 // 轻量图表：纯 div/SVG 实现（不引第三方图表库），用于学情看板
 import { useMemo } from 'react'
 import type { Mistake } from '@workbench/shared'
+import { todayLocal } from '@workbench/shared'
 
 export interface KpAgg {
   kp: string
@@ -84,7 +85,7 @@ export function KpMasteryBars({ aggs, maxRows = 8, onClickKp, activeKp }: {
 export function MistakeTrend({ mistakes, days = 30 }: { mistakes: Mistake[]; days?: number }) {
   const { counts, max, total } = useMemo(() => {
     const counts = new Array(days).fill(0) as number[]
-    const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00')
+    const today = new Date(todayLocal() + 'T00:00:00')
     for (const m of mistakes) {
       const d = (m.created_at || '').slice(0, 10)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue

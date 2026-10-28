@@ -1,12 +1,13 @@
 // 今日工作台：今日课表签到、剩余课时预警、下次课重点
 // 桌面端两栏：左（课表+到期重做）/ 右（课时预警+下次课重点+快捷入口）
 import { useCallback, useEffect, useState } from 'react'
-import {Camera, CircleX, FlaskConical, Pin, Settings as SettingsIcon, TriangleAlert, Users} from 'lucide-react'
+import {Camera, CircleX, FlaskConical, Pin, Printer, Settings as SettingsIcon, TriangleAlert, Users} from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { get, post } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
 import { NextKeyText } from '@/components/Kp'
-import type { TodayInfo } from '@workbench/shared'
+import { printRedoSheet } from '@/lib/print'
+import type { Mistake, TodayInfo } from '@workbench/shared'
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
@@ -43,6 +44,27 @@ export default function Today() {
       load()
     } catch (e: any) {
       show(e.message || '操作失败')
+    }
+  }
+
+  // 打印重做单：把今日全部到期错题合成一张「考试卷」（题干+配图+空白作答区，不含解法与错因）
+  const printRedo = async () => {
+    const due = info?.due_redos || []
+    if (!due.length) return
+    try {
+      const all = await get<Mistake[]>('/api/mistakes')
+      const items = due
+        .map((d) => all.find((m) => m.id === d.id))
+        .filter(Boolean)
+        .map((m: any) => {
+          let kps: string[] = []
+          try { kps = JSON.parse(m.knowledge_points || '[]') } catch { /* 忽略 */ }
+          return { stem: m.stem, image: m.image || undefined, student_name: m.student_name, knowledge_points: kps.join('、') }
+        })
+      if (!items.length) { show('未取到到期错题详情'); return }
+      if (!printRedoSheet(items, '到期错题重做练习单')) show('浏览器拦截了弹出窗口')
+    } catch (e: any) {
+      show(e.message || '取错题详情失败')
     }
   }
 
@@ -131,7 +153,13 @@ export default function Today() {
             {/* 到期错题重做 */}
             {info.due_redos && info.due_redos.length > 0 && (
               <section>
-                <h2 className="text-sm font-semibold text-red-500 mb-2 px-1"><Pin className="w-4 h-4 inline-block align-[-2px]" /> 到期错题重做（{info.due_redos.length}）</h2>
+                <div className="flex items-center mb-2 px-1">
+                  <h2 className="text-sm font-semibold text-red-500"><Pin className="w-4 h-4 inline-block align-[-2px]" /> 到期错题重做（{info.due_redos.length}）</h2>
+                  <span className="flex-1" />
+                  <button className="btn-outline !px-2.5 !py-1 text-[11px]" onClick={printRedo} title="把到期错题合成一张练习单打印（遮答案，留空白作答区）">
+                    <Printer className="w-3.5 h-3.5 inline-block align-[-2px]" /> 打印重做单
+                  </button>
+                </div>
                 <div className="space-y-2">
                   {info.due_redos.map((m: any) => (
                     <Link key={m.id} to="/mistakes" className="card p-3.5 flex items-center gap-3 block">

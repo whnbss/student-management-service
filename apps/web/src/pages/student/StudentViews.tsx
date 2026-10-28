@@ -8,6 +8,7 @@ import Katex from '@/components/Katex'
 import { KpChips } from '@/components/Kp'
 import type { Mistake } from '@workbench/shared'
 import type { StudentMe } from '@workbench/shared'
+import { todayLocal } from '@workbench/shared'
 
 interface Ctx { me: StudentMe | null; reloadMe: () => void }
 
@@ -25,14 +26,14 @@ export function StudentMistakes() {
   // 展开的错题 id 集合：「今日待重做」默认展开，避免学生不知道先点题干
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const [busy, setBusy] = useState<number | null>(null)
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayLocal()
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const arr = await get<Mistake[]>('/api/student/mistakes')
       setList(arr)
-      const d = new Date().toISOString().slice(0, 10)
+      const d = todayLocal()
       const dueIds = arr.filter((m) => m.redo_due && m.redo_due <= d && m.mastery_status !== '已掌握').map((m) => m.id)
       setExpanded((prev) => new Set([...prev, ...dueIds]))
     } catch (e: any) {

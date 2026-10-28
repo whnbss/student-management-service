@@ -11,11 +11,13 @@ import Katex from '@/components/Katex'
 import QuestionFigure from '@/components/QuestionFigure'
 import TextbookBrowse from '@/components/TextbookBrowse'
 import TextbookPicker from '@/components/TextbookPicker'
-import { printHtml, buildExamHtml, groupByQtype, DEFAULT_SCORES } from '@/lib/print'
+import { printHtml, buildExamHtml, groupByQtype, DEFAULT_SCORES, QUIZ_SCORES, QTYPE_ORDER } from '@/lib/print'
+import type { PaperQuestion } from '@/lib/print'
 import { specToSvg } from '@/lib/figure'
 import { aggregateKp } from '@/components/Charts'
 import { SCENES } from '@/labs/registry'
 import type { Question, Mistake, QuizDraft, QuizReview } from '@workbench/shared'
+import { todayLocal } from '@workbench/shared'
 
 const QTYPES = ['选择', '填空', '实验', '计算']
 const GRADES = ['高一', '高二', '高三']
@@ -29,6 +31,8 @@ const DIFF_COLORS: Record<number, string> = {
   4: 'bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-300',
   5: 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300',
 }
+
+
 
 export default function Bank() {
   const show = useToastStore((s) => s.show)
@@ -53,7 +57,7 @@ export default function Bank() {
   const [paperTitle, setPaperTitle] = useState('高中物理练习卷')
   const [duration, setDuration] = useState(60)
   const [scoreByType, setScoreByType] = useState<Record<string, number>>({ ...DEFAULT_SCORES })
-  const [secOrder, setSecOrder] = useState<Array<{ qtype: string; items: number[] }>>([]) // 预览中可调换的顺序
+  const [secOrder, setSecOrder] = useState<Array<{ qtype: string; items: PaperQuestion[] }>>([]) // 预览中可调换的顺序（直接存题目对象）
 
   // AI 出题器
   const [showGen, setShowGen] = useState(false)
@@ -180,12 +184,23 @@ export default function Bank() {
     setGenerating(true)
     try {
       const r = await post<{ questions: QuizDraft[]; review: (QuizReview | null)[] | null }>('/api/quiz/generate', { ...genForm, kps, qtypes: genForm.qtypes })
-      setDrafts(r.questions)
-      setReviews(r.review && r.review.length === r.questions.length ? r.review : r.questions.map(() => null))
-      setDraftPick(new Set(r.questions.map((_, i) => i)))
+      // 稳定排序：按固定题型顺序渲染（后端已按题型分批生成，这里再兜底排一次；二审结果随题同步重排）
+      const order = r.questions.map((_, i) => i)
+      const sorted = order
+        .map((i) => ({ i, d: r.questions[i] }))
+        .sort((a, b) => {
+          const ai = (QTYPE_ORDER as readonly string[]).indexOf(a.d.qtype)
+          const bi = (QTYPE_ORDER as readonly string[]).indexOf(b.d.qtype)
+          return (ai < 0 ? QTYPE_ORDER.length : ai) - (bi < 0 ? QTYPE_ORDER.length : bi) || a.i - b.i
+        })
+      const qs = sorted.map((x) => x.d)
+      const rv = sorted.map((x) => (r.review && r.review.length === r.questions.length ? r.review[x.i] : null))
+      setDrafts(qs)
+      setReviews(rv)
+      setDraftPick(new Set(qs.map((_, i) => i)))
       setDraftSrc(new Set())
-      const failCount = (r.review || []).filter((x) => x && !x.pass).length
-      show(failCount > 0 ? `已生成 ${r.questions.length} 道草稿，其中 ${failCount} 道二审发现问题（已标黄），请逐题确认` : `已生成 ${r.questions.length} 道题草稿，请逐题确认后存入题库`)
+      const failCount = rv.filter((x) => x && !x.pass).length
+      show(failCount > 0 ? `已生成 ${qs.length} 道草稿，其中 ${failCount} 道二审发现问题（已标黄），请逐题确认` : `已生成 ${qs.length} 道题草稿，请逐题确认后存入题库`)
     } catch (e: any) {
       show(e.message || '生成失败')
     } finally {
@@ -246,13 +261,36 @@ export default function Bank() {
   }
 
   // ---------- 组卷 ----------
-  const qMap = useMemo(() => new Map(list.map((x) => [x.id, x])), [list])
+  // secOrder 直接存题目对象：题库题与出题草稿都能进组卷流程（草稿 id 用负数，仅作 key）
   const pickedQuestions = useMemo(() => list.filter((x) => picked.has(x.id)), [list, picked])
+  const toPaperQuestion = (q: Question | QuizDraft): PaperQuestion => ({
+    id: 'id' in q ? q.id : -1,
+    stem: q.stem,
+    answer: q.answer,
+    solution: q.solution,
+    pitfall: q.pitfall,
+    qtype: q.qtype,
+    difficulty: q.difficulty,
+    figure: (q as Question).figure || ((q as QuizDraft).figure_spec ? JSON.stringify({ kind: 'svg', data: specToSvg((q as QuizDraft).figure_spec!) }) : ''),
+  })
 
-  // 打开预览：按题型大题分组（组内难度升序）初始化顺序
+  // 打开预览：按题型大题分组（组内难度升序）初始化顺序；分值/时长恢复通用默认
   const openPaper = () => {
     if (!pickedQuestions.length) { show('请先勾选题目'); return }
-    setSecOrder(groupByQtype(pickedQuestions).map((s) => ({ qtype: s.qtype, items: s.items.map((x) => x.id) })))
+    setScoreByType({ ...DEFAULT_SCORES })
+    setSecOrder(groupByQtype(pickedQuestions.map(toPaperQuestion)))
+    setShowPaper(true)
+  }
+
+  // 快速组卷（出题草稿 → 组成试卷）：勾选的草稿一键带入，出题场景默认分值（选择 3/填空 4/实验 8/计算 12）、标题=知识点+日期
+  const composeFromDrafts = () => {
+    const chosen = drafts.filter((_, i) => draftPick.has(i))
+    if (!chosen.length) { show('请先勾选要组卷的题目'); return }
+    setScoreByType({ ...QUIZ_SCORES })
+    setDuration(45)
+    const kps = [...new Set(chosen.flatMap((d) => d.knowledge_points))].slice(0, 2).join('、')
+    setPaperTitle(`${kps || '物理'} 练习卷 ${todayLocal().slice(5).replace('-', '/')}`)
+    setSecOrder(groupByQtype(chosen.map(toPaperQuestion)))
     setShowPaper(true)
   }
 
@@ -260,7 +298,7 @@ export default function Bank() {
   const moveItem = (qtype: string, id: number, dir: -1 | 1) => {
     setSecOrder((secs) => secs.map((s) => {
       if (s.qtype !== qtype) return s
-      const i = s.items.indexOf(id)
+      const i = s.items.findIndex((x) => x.id === id)
       const j = i + dir
       if (i < 0 || j < 0 || j >= s.items.length) return s
       const items = [...s.items]
@@ -270,24 +308,18 @@ export default function Bank() {
   }
 
   // 平铺（含连续题号）
-  const flatOrdered = useMemo(() => {
-    const out: Question[] = []
-    for (const s of secOrder) for (const id of s.items) { const qq = qMap.get(id); if (qq) out.push(qq) }
-    return out
-  }, [secOrder, qMap])
+  const flatOrdered = useMemo(() => secOrder.flatMap((s) => s.items), [secOrder])
 
-  const scoreOf = (qq: Question) => Math.max(1, scoreByType[qq.qtype] ?? DEFAULT_SCORES[qq.qtype] ?? 5)
+  const scoreOf = (qq: PaperQuestion) => Math.max(1, scoreByType[qq.qtype] ?? DEFAULT_SCORES[qq.qtype] ?? 5)
 
   const printPaper = (withAnswer: boolean) => {
     if (!flatOrdered.length) { show('请先勾选题目'); return }
-    const sections = secOrder.map((s) => ({ qtype: s.qtype, items: s.items.map((id) => qMap.get(id)).filter(Boolean) as Question[] }))
-    const scoreFn = (qq: { qtype: string }) => Math.max(1, scoreByType[qq.qtype] ?? DEFAULT_SCORES[qq.qtype] ?? 5)
     const { header, body } = buildExamHtml({
       title: paperTitle,
       duration,
       questions: flatOrdered,
-      sections,
-      scoreOf: scoreFn,
+      sections: secOrder,
+      scoreOf,
       withAnswer,
     })
     if (!printHtml(paperTitle + (withAnswer ? '（含答案）' : '（学生版）'), header + body)) show('浏览器拦截了弹出窗口')
@@ -509,9 +541,14 @@ export default function Bank() {
             <button className="text-xs text-slate-400 hover:text-red-500" onClick={() => { setDrafts([]); setReviews([]); setDraftPick(new Set()); setDraftSrc(new Set()) }}>丢弃</button>
           </div>
           {drafts.map((d, i) => draftCard(d, i))}
-          <button className="btn-primary w-full" disabled={saving || draftPick.size === 0} onClick={saveDrafts}>
-            存入题库（{draftPick.size} 题）
-          </button>
+          <div className="flex gap-2">
+            <button className="btn-primary flex-1" disabled={saving || draftPick.size === 0} onClick={saveDrafts}>
+              存入题库（{draftPick.size} 题）
+            </button>
+            <button className="btn-outline flex-1 text-primary-600" disabled={draftPick.size === 0} onClick={composeFromDrafts} title="把勾选的草稿直接带入组卷器（按题型分组、默认分值）">
+              <FileText className="w-4 h-4 inline-block align-[-2px]" /> 组成试卷
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -546,27 +583,23 @@ export default function Bank() {
         </div>
         <div className="space-y-2 max-h-80 overflow-y-auto">
           {secOrder.map((sec, si) => {
-            const scoreSum = sec.items.reduce((s, id) => { const qq = qMap.get(id); return qq ? s + scoreOf(qq) : s }, 0)
+            const scoreSum = sec.items.reduce((s, qq) => s + scoreOf(qq), 0)
             return (
               <div key={sec.qtype} className="space-y-1">
                 <div className="text-xs font-semibold text-slate-500">
                   {'一二三四五六'[si] || si + 1}、{sec.qtype}题（共 {sec.items.length} 题，{scoreSum} 分）· 组内按难度升序
                 </div>
-                {sec.items.map((id, ii) => {
-                  const item = qMap.get(id)
-                  if (!item) return null
-                  return (
-                    <div key={id} className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 text-sm">
-                      <div className="text-xs text-slate-400 mb-1 flex items-center gap-2">
-                        <span>{item.qtype} · 难度 {item.difficulty} · {scoreOf(item)} 分</span>
-                        <span className="flex-1" />
-                        <button className="px-1.5 rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30" disabled={ii === 0} onClick={() => moveItem(sec.qtype, id, -1)} title="上移">↑</button>
-                        <button className="px-1.5 rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30" disabled={ii === sec.items.length - 1} onClick={() => moveItem(sec.qtype, id, 1)} title="下移">↓</button>
-                      </div>
-                      <Katex text={item.stem} />
+                {sec.items.map((item, ii) => (
+                  <div key={item.id} className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 text-sm">
+                    <div className="text-xs text-slate-400 mb-1 flex items-center gap-2">
+                      <span>{item.qtype} · 难度 {item.difficulty} · {scoreOf(item)} 分</span>
+                      <span className="flex-1" />
+                      <button className="px-1.5 rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30" disabled={ii === 0} onClick={() => moveItem(sec.qtype, item.id, -1)} title="上移">↑</button>
+                      <button className="px-1.5 rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30" disabled={ii === sec.items.length - 1} onClick={() => moveItem(sec.qtype, item.id, 1)} title="下移">↓</button>
                     </div>
-                  )
-                })}
+                    <Katex text={item.stem} />
+                  </div>
+                ))}
               </div>
             )
           })}

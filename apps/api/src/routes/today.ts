@@ -1,11 +1,12 @@
 // 今日工作台：今日课表、剩余课时预警、下次课重点
 import type { FastifyInstance } from 'fastify'
 import { db, remainingHours, billingModeOf } from '../db'
+import { localDateStr } from '@workbench/shared'
 
 export default async function todayRoutes(app: FastifyInstance) {
   app.get('/api/today', async () => {
     const now = new Date()
-    const date = now.toISOString().slice(0, 10)
+    const date = localDateStr(now) // 本地日期（UTC 口径在东八区凌晨 0~8 点会取到前一天）
     const weekday = now.getDay() // 0=周日
 
     // 今日有课的学生（到课/请假/缺勤状态一并返回）
