@@ -17,9 +17,9 @@ const db = new Database(path.join(ROOT, 'data', 'app.db'))
 function kpOf(raw: string): string[] {
   try { return JSON.parse(raw || '[]') as string[] } catch { return [] }
 }
-// 比较用归一（与 shared 的 kpNorm 同口径：去空白、统一破折号）
+// 比较用归一（与 shared 的 kpNorm 同口径：去空白、统一破折号、去括号/冒号变体）
 function kpNorm(s: string): string {
-  return String(s || '').replace(/\s+/g, '').replace(/[—–-]/g, '—')
+  return String(s || '').replace(/\s+/g, '').replace(/[—–-]/g, '—').replace(/[（）()：:]/g, '')
 }
 
 const rows = db.prepare('SELECT id, stem, answer, solution, pitfall, knowledge_points FROM questions ORDER BY id').all() as any[]

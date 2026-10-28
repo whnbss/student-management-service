@@ -543,9 +543,10 @@ export function checkSolutionArithmetic(solution: unknown): ArithIssue[] {
 // 教材全部节名（扁平列表，220 节）
 export const TEXTBOOK_SECTIONS: string[] = TEXTBOOK.flatMap((v) => v.chapters.flatMap((c) => c.sections))
 
-// 比较用归一：去空白、统一破折号（半角 - / 全角 — / 连字符 – 视为同一字符）
+// 比较用归一：去空白、统一破折号（半角 - / 全角 — / 连字符 – 视为同一字符）、
+// 去括号与冒号变体（「导体棒切割磁感线（E=BLv）」与「导体棒切割磁感线 E=BLv」视为同一标签，验收#8 P3-①）
 function kpNorm(s: string): string {
-  return String(s || '').replace(/\s+/g, '').replace(/[—–-]/g, '—')
+  return String(s || '').replace(/\s+/g, '').replace(/[—–-]/g, '—').replace(/[（）()：:]/g, '')
 }
 
 // 单个标签 → 对应教材节名：归一后完全相等直接命中；否则仅当「唯一候选」且
