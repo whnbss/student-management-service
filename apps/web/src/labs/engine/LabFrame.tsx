@@ -2,6 +2,8 @@
 // 性能铁律：动画帧内不 setState 渲染场景；实时数据面板节流 ~10Hz；拖拽用 Pointer Events
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LabData, LabScene, LabState, RenderOpts, SceneParams } from './types'
+import { encodeLabShare } from './share'
+import type { LabShare } from './share'
 import { SvgCtx } from './ctx'
 import { FIXED_DT, useAnimationLoop } from './useAnimationLoop'
 import { clamp, syncLabPalette } from './vec'
@@ -39,7 +41,7 @@ function drawGrid(ctx: SvgCtx, show: boolean) {
   }
 }
 
-export default function LabFrame({ scene, initialPreset }: { scene: LabScene; initialPreset?: string }) {
+export default function LabFrame({ scene, initialPreset, initialShare }: { scene: LabScene; initialPreset?: string; initialShare?: LabShare | null }) {
   const stageRef = useRef<SVGSVGElement>(null)
   const graphRef = useRef<SVGSVGElement>(null)
   const ctxRef = useRef<SvgCtx | null>(null)
@@ -273,15 +275,43 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
     localStorage.setItem(PRESET_KEY(scene.id), JSON.stringify(next))
   }
 
-  // 「关键预设」直达：从列表页带 ?preset=名称 进入时自动应用
+  // 「关键预设」直达：从列表页带 ?preset=名称 进入时自动应用（分享链接优先级更高，二者同时存在时不重复应用）
   const initialPresetApplied = useRef(false)
   useEffect(() => {
-    if (initialPresetApplied.current || !initialPreset) return
+    if (initialPresetApplied.current || !initialPreset || initialShare) return
     initialPresetApplied.current = true
     const hit = [...scene.presets, ...customPresets].find((p) => p.name === initialPreset)
     if (hit) applyPreset(hit.params, hit.state)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPreset])
+
+  // 「分享状态」直达：带 ?s=编码 进入时还原分享的参数与画面状态（备课→课堂衔接）
+  const initialShareApplied = useRef(false)
+  useEffect(() => {
+    if (initialShareApplied.current || !initialShare) return
+    initialShareApplied.current = true
+    paramsRef.current = { ...initialParams(scene), ...initialShare.p }
+    setParams(paramsRef.current)
+    setPlaying(false)
+    resetState(paramsRef.current, initialShare.s)
+    ctxRef.current?.gclear()
+    doRender(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialShare])
+
+  // 生成当前状态分享链接：复制到剪贴板；非安全上下文（局域网 HTTP）剪贴板不可用时弹窗手动复制
+  const shareStateLink = () => {
+    const enc = encodeLabShare(paramsRef.current, stateRef.current)
+    if (!enc) {
+      window.alert('当前状态无法生成分享链接')
+      return
+    }
+    const url = `${location.origin}${location.pathname}?s=${enc}`
+    navigator.clipboard?.writeText(url).then(
+      () => window.alert('状态链接已复制，发给另一台设备打开即可还原当前参数与画面'),
+      () => window.prompt('自动复制不可用，请长按/全选下面的链接手动复制：', url)
+    )
+  }
 
   // 全屏模式 Esc 退出
   useEffect(() => {
@@ -336,6 +366,7 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
       <button className={`btn-outline !px-3 !py-1.5 text-xs ${opts.showPoints ? '!border-primary-400 !text-primary-600' : ''}`} onClick={() => setOpts({ ...opts, showPoints: !opts.showPoints })}>受力点</button>
       <button className={`btn-outline !px-3 !py-1.5 text-xs ${showGrid ? '!border-primary-400 !text-primary-600' : ''}`} onClick={() => setShowGrid(!showGrid)}>网格</button>
       {scene.challenge && <button className="btn-outline !px-3 !py-1.5 text-xs !border-amber-400 !text-amber-600" onClick={openChallenge}>🎯 挑战</button>}
+      <button className="btn-outline !px-3 !py-1.5 text-xs" title="把当前参数与画面状态做成链接，课堂上打开即还原（备课→课堂衔接）" onClick={shareStateLink}>🔗 分享状态</button>
       {!fullscreen && <button className="btn-outline !px-3 !py-1.5 text-xs ml-auto" onClick={() => setFullscreen(true)}>⛶ 全屏课件</button>}
       {fullscreen && <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setFullscreen(false)}>✕ 退出全屏（Esc）</button>}
     </div>
@@ -508,6 +539,7 @@ export default function LabFrame({ scene, initialPreset }: { scene: LabScene; in
           <h2 className="text-xl font-bold">{scene.title}</h2>
           <span className="text-sm text-slate-400">{scene.chapter}</span>
           <span className="flex-1" />
+          <button className="btn-outline !px-3 !py-1.5 text-xs" title="把当前参数与画面状态做成链接（备课→课堂衔接）" onClick={shareStateLink}>🔗 分享状态</button>
           <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setFullscreen(false)}>✕ 退出全屏（Esc）</button>
           <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setDrawerOpen(!drawerOpen)}>⚙ 参数</button>
         </div>

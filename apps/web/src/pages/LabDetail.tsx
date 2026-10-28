@@ -1,8 +1,9 @@
-// 课件详情页：LabFrame 壳 + 公式卡 + 教学要点折叠卡 + 错题联动提示 + 上一课/下一课（课堂流）
-import { useEffect } from 'react'
+// 课件详情页：LabFrame 壳 + 公式卡 + 教学要点折叠卡 + 错题联动提示 + 状态分享还原 + 上一课/下一课（课堂流）
+import { useEffect, useMemo } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { SCENES, findScene } from '@/labs/registry'
 import LabFrame from '@/labs/engine/LabFrame'
+import { decodeLabShare } from '@/labs/engine/share'
 import Katex from '@/components/Katex'
 
 export default function LabDetail() {
@@ -11,6 +12,8 @@ export default function LabDetail() {
   const [sp] = useSearchParams()
   const fromMistake = sp.get('from') === 'mistake'
   const preset = sp.get('preset') ?? undefined
+  // 「分享状态」链接：?s=编码 还原参数与画面状态（备课→课堂衔接）
+  const share = useMemo(() => decodeLabShare(sp.get('s')), [sp])
 
   // 「最近使用」记录：列表页置顶展示
   useEffect(() => {
@@ -53,7 +56,13 @@ export default function LabDetail() {
         </div>
       )}
 
-      <LabFrame key={scene.id} scene={scene} initialPreset={preset} />
+      {share && (
+        <div className="card p-3 text-xs text-primary-600 bg-primary-50 dark:bg-primary-900/20 border-primary-200 dark:border-primary-800">
+          已还原分享的课件状态（参数与画面进度）。在课件工具条点「🔗 分享状态」可随时重新生成链接。
+        </div>
+      )}
+
+      <LabFrame key={scene.id} scene={scene} initialPreset={preset} initialShare={share} />
 
       {scene.keyPoints && scene.keyPoints.length > 0 && (
         <details className="card p-4 group">
