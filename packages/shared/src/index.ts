@@ -484,6 +484,61 @@ export function sanitizeLatexChinese(s: unknown): string {
   return t
 }
 
+// ---------- 数值机器复核（验收 #7 长期修法）：解析中「纯数字两步算式 = 结果」独立复验 ----------
+// 背景：#244（0.5/0.2 误写 1）、#273（2+1 误写 2.5）——模型心算错、二审 AI 也心算，全靠人眼兜不住。
+// 做法：抽取 $...$ / $$...$$ 数学段，去掉单位宏与 \frac 后，按「=」分段；仅当某段整体恰为
+// 「两个纯数字的四则运算」且结果段是纯数字时才复验（±2% 或 0.05 容差吸收四舍五入）。
+// 多步链（如 0.5×0.5×4=1）与含变量/幂的式子一律跳过——宁漏判不误杀，机器只兜最简单的算术错。
+export interface ArithIssue {
+  /** 原始算式片段（含上下文，便于定位） */
+  expr: string
+  /** 机器复验的正确值 */
+  expect: number
+  /** 解析里写的值 */
+  got: number
+}
+export function checkSolutionArithmetic(solution: unknown): ArithIssue[] {
+  const s = String(solution ?? '')
+  const issues: ArithIssue[] = []
+  // 抽取数学段（$$..$$ 与 $..$；\( \) 形式也支持）
+  const segs: string[] = []
+  s.replace(/\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$|\\\(([\s\S]+?)\\\)/g, (_m, a, b, c) => {
+    segs.push(String(a || b || c || ''))
+    return _m
+  })
+  const NUM = String.raw`-?\d+(?:\.\d+)?`
+  for (const raw of segs) {
+    // 归一：\times/\cdot → ×，\div → ÷，简单数字 \frac{a}{b} → (a)/(b)，剥掉单位宏与空白
+    let t = raw.replace(/\\(times|cdot)/g, '×').replace(/\\div/g, '÷')
+    t = t.replace(/\\(?:d|t)?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, (_m, a, b) => {
+      const isNum = (x: string) => new RegExp(String.raw`^\s*${NUM}\s*$`).test(x)
+      return isNum(a) && isNum(b) ? `(${a.trim()})/(${b.trim()})` : _m
+    })
+    t = t.replace(/\\(mathrm|text)\{[^{}]*\}/g, '').replace(/\\[,;:! ]|\\quad|\\qquad|[{}]/g, '').replace(/\s+/g, '')
+    if (!/\d/.test(t)) continue
+    // 按 = 分段，逐相邻对复验
+    const parts = t.split('=')
+    for (let i = 0; i < parts.length - 1; i++) {
+      const lhs = parts[i]
+      const rhs = parts[i + 1]
+      const m = lhs.match(new RegExp(String.raw`^\(?(${NUM})\)?([+×*/÷-])(\(?${NUM}\)?)$`))
+      if (!m) continue
+      const gotM = rhs.match(new RegExp(String.raw`^(${NUM})$`))
+      if (!gotM) continue
+      const x = Number(m[1])
+      const op = m[2]
+      const y = Number(m[3].replace(/[()]/g, ''))
+      const got = Number(gotM[1])
+      const expect = op === '+' ? x + y : op === '-' ? x - y : op === '×' || op === '*' ? x * y : x / y
+      if (!Number.isFinite(expect)) continue
+      if (Math.abs(expect - got) > Math.max(0.05, Math.abs(expect) * 0.02)) {
+        issues.push({ expr: lhs, expect: Number(expect.toFixed(4)), got })
+      }
+    }
+  }
+  return issues
+}
+
 // ---------- P1-7：知识点标签与教材节名对齐 ----------
 // 教材全部节名（扁平列表，220 节）
 export const TEXTBOOK_SECTIONS: string[] = TEXTBOOK.flatMap((v) => v.chapters.flatMap((c) => c.sections))

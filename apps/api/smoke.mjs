@@ -251,7 +251,7 @@ log('恢复默认后active已清空', r.data?.active_id === '' || r.data?.active
 // ---------- P1：题库 / AI 出题器 / 分层练习 / 家长报告 ----------
 
 // 31a. 题目手动添加
-r = await req('POST', '/api/questions', { stem: '质量 $m=2kg$ 的物体受 $F=4N$ 恒力，求加速度', answer: '$a=2m/s^2$', solution: '由牛顿第二定律 $a=F/m=2$', pitfall: '注意单位', knowledge_points: ['牛顿第二定律'], difficulty: 2, qtype: '计算', grade: '高一' })
+r = await req('POST', '/api/questions', { stem: '质量 $m=2kg$ 的物体受 $F=4N$ 恒力SMOKEQ，求加速度', answer: '$a=2m/s^2$', solution: '由牛顿第二定律 $a=F/m=2$', pitfall: '注意单位', knowledge_points: ['牛顿第二定律'], difficulty: 2, qtype: '计算', grade: '高一' })
 const qid1 = r.data?.id
 log('题目手动添加', r.status === 200 && !!qid1, `id=${qid1}`)
 
@@ -283,8 +283,8 @@ r = await req('GET', '/api/questions?favorite=1')
 log('题目收藏与筛选', r.status === 200 && r.data.some((x) => x.id === qid1), `n=${r.data?.length}`)
 
 // 31f. 编辑题目 + 非法难度收敛
-r = await req('PUT', `/api/questions/${qid1}`, { stem: '质量 $m=2kg$ 的物体受 $F=6N$ 恒力，求加速度', difficulty: 99 })
-r = await req('GET', `/api/questions?q=${encodeURIComponent('恒力')}`)
+r = await req('PUT', `/api/questions/${qid1}`, { stem: '质量 $m=2kg$ 的物体受 $F=6N$ 恒力SMOKEQ，求加速度', difficulty: 99 })
+r = await req('GET', `/api/questions?q=SMOKEQ`)
 log('题目编辑（难度收敛5）', r.status === 200 && r.data[0]?.difficulty === 5 && r.data[0]?.stem.includes('6N'), `diff=${r.data[0]?.difficulty}`)
 
 // 31g. AI 出题器：缺知识点拒绝
@@ -342,7 +342,7 @@ log('报告学生不存在', r.status === 404)
 
 // 31k. 删除题目
 r = await req('DELETE', `/api/questions/${qid1}`)
-r = await req('GET', `/api/questions?q=${encodeURIComponent('恒力')}`)
+r = await req('GET', `/api/questions?q=SMOKEQ`)
 log('题目删除', r.status === 200 && r.data.length === 0)
 for (const id of bulkIds) await req('DELETE', `/api/questions/${id}`)
 await req('DELETE', `/api/questions/${qidSan}`)

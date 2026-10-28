@@ -3,7 +3,7 @@
 import type { FastifyInstance } from 'fastify'
 import { db, nowISO, remainingHours } from '../db'
 import { pickProvider, generateQuiz, generateTiered, generateParentReport, validateQuizDrafts, reviewQuizDrafts } from '../ai'
-import { sanitizeAiText, sanitizeLatexChinese, mergeSectionKps, daysAgo } from '@workbench/shared'
+import { sanitizeAiText, sanitizeLatexChinese, mergeSectionKps, daysAgo, checkSolutionArithmetic } from '@workbench/shared'
 import type { QuizLevel } from '@workbench/shared'
 
 function kpOf(raw: string): string[] {
@@ -147,7 +147,11 @@ export default async function questionRoutes(app: FastifyInstance) {
       )
       ids.push(Number(r.lastInsertRowid))
     }
-    return { ok: true, ids }
+    // 数值复核只作非阻塞警告（教师已人工终审勾选，入库不拦，仅提示哪些题解析里疑似有算术 slip）
+    const arithmetic_warnings = drafts
+      .map((d, i) => ({ index: i, id: ids[i], issues: checkSolutionArithmetic(d.solution || '') }))
+      .filter((x) => x.issues.length)
+    return { ok: true, ids, arithmetic_warnings }
   })
 
   // ---------- 编辑 / 收藏 ----------
@@ -219,6 +223,24 @@ export default async function questionRoutes(app: FastifyInstance) {
         review_usage = r2.usage
       } catch (e: any) {
         console.error('[quiz] 二审失败（已降级为不审查）:', e.message)
+      }
+      // 机器数值复核（验收 #7 长期修法）：解析中「纯数字两步算式 = 结果」由代码独立复验，
+      // 不依赖模型心算（#244 / #273 这类 0.5/0.2=1、2+1=2.5 的算术 slip 二审 AI 也查不出来）。
+      // 复核未过的题直接判二审不通过（模型给出的 pass 被覆盖），教师终审时也能看到未过原因
+      const machineReview: Array<{ pass: boolean; issues: string[]; fixed: null } | null> = result.map((q) => {
+        const arith = checkSolutionArithmetic(q.solution || '')
+        return arith.length
+          ? { pass: false, issues: arith.map((i) => `数值复核未过：${i.expr} 应等于 ${i.expect}，解析写的是 ${i.got}`), fixed: null }
+          : null
+      })
+      const machineBad = machineReview.filter(Boolean).length
+      if (machineBad) console.log(`[quiz] 机器数值复核拦截 ${machineBad} 题`)
+      if (review && Array.isArray(review)) {
+        machineReview.forEach((m, idx) => {
+          if (m && review![idx]?.pass !== false) review[idx] = m
+        })
+      } else {
+        review = machineReview.map((m) => m || { pass: true, issues: [], fixed: null })
       }
       return { ok: true, questions: result, usage, review, review_usage }
     } catch (e: any) {
