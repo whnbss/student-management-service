@@ -6,6 +6,7 @@
 
 - ✅ **M1（已完成）**：项目骨架 + 登录鉴权 + 学生管理 + 学情日志（手动版）+ 课时包/缴费 + 每周课表与签到扣课时 + 今日工作台
 - ✅ **M2（已完成）**：拍照/相册上传（前端压缩）+ AI 视觉分析流水线（结构化 JSON + 逐项确认编辑）+ 错题本（艾宾浩斯重做计划）+ 举一反三变式题 + AI 供应商配置与用量统计
+- ✅ **Phase 4 公网开放（已完成）**：生产模式单端口托管（3210 端口同时提供页面与 API）+ SPA 深链接回退 + 反代真实 IP 限速 + 每周自动备份 + `scripts/start-prod.bat` 一键启动 + Cloudflare Tunnel/Tailscale 公网方案（见下文「公网部署」）
 - 🧪 **物理实验室（第一批已交付）**：可拖拽交互课件引擎 + 5 个力学课件（斜面平衡 / 悬挂三力 / 力的合成与分解 / 牛二小车 / 超重失重），入口在桌面端侧栏「课件」或题库页顶部卡片，详见下文
 - ⬜ M3：讲义库 + 知识库 + 题库 + 练习生成/组卷
 - ⬜ M4：报告/分享 + 统计 + 备份 + UI 打磨
@@ -38,6 +39,17 @@ npm run dev:web   # 前端 http://localhost:5173
 ```
 netsh advfirewall firewall add rule name="TeachingWorkbench" dir=in action=allow protocol=TCP localport=3210
 ```
+
+### 生产模式（单端口，推荐日常使用）
+
+双击 `scripts\start-prod.bat`：自动构建前端 → 只启动一个服务（3210 端口同时提供网页与 API），电脑和手机都访问 `http://<电脑IP>:3210`，不再需要 5173。支持 `/student`、`/labs/xxx` 等深链接直接刷新。
+
+```bash
+scripts\start-prod.bat            # 构建前端 + 启动单端口服务
+scripts\start-prod.bat --tunnel   # 同时拉起 cloudflared 临时公网隧道（见「公网部署」）
+```
+
+重复执行是安全的：检测到 3210 已在监听会自动跳过启动。
 
 ## 登录
 
@@ -100,13 +112,62 @@ AI 分析报 `fetch failed` 或「无法连接 AI 服务器」，通常是电脑
 
 - 入口：学生详情页「生成阶段报告」→ 选时段 → AI 生成 Glow/Grow/Plan 三段式草稿，全部可编辑后终审；
 - 可导出 PDF，或点「生成分享链接」得到一个随机 token 的只读 H5 页面（可选 24 小时/3 天/7 天/30 天有效），复制发给家长，到期自动失效；
-- 分享链接只能在同一局域网内打开（数据不上云）；家长打开后可自行「保存 PDF」。
+- 分享链接携带随机 token，未配置公网时只能在同一局域网内打开（数据不上云）；按「公网部署」配置 Cloudflare Tunnel 或 Tailscale 后，家长可通过公网域名或组网地址打开；
+- 家长打开后可自行「保存 PDF」。
+
+## 公网部署（Phase 4）
+
+局域网外（家长/外出时）访问的三种方案，按需选择：
+
+### 方案 A：Cloudflare Tunnel（推荐：免费、无需公网 IP、无需动路由器）
+
+```bash
+# 1. 安装 cloudflared
+winget install --id Cloudflare.cloudflared
+
+# 2. 先试水（无需账号）：拿到一个临时随机域名，电脑关机即失效
+cloudflared tunnel --url http://localhost:3210
+
+# 3. 固定域名（需要有一个托管在 Cloudflare 的域名）
+cloudflared tunnel login                                # 浏览器授权，选择域名
+cloudflared tunnel create teaching-workbench            # 创建隧道，记下输出中的隧道 UUID
+cloudflared tunnel route dns teaching-workbench phys.example.com   # 把子域名指向隧道
+
+# 4. 在 %USERPROFILE%\.cloudflared\config.yml 写入：
+#    tunnel: <隧道UUID>
+#    credentials-file: C:\Users\<你>\.cloudflared\<隧道UUID>.json
+#    ingress:
+#      - hostname: phys.example.com
+#        service: http://localhost:3210
+#      - service: http_status:404
+
+# 5. 安装为系统服务（开机自启，重启电脑后公网仍然可用）
+cloudflared service install
+```
+
+也可用 `scripts\start-prod.bat --tunnel` 一键「构建 + 启动 + 临时隧道」。
+
+### 方案 B：Tailscale（私有组网，最小暴露面）
+
+1. 电脑与手机分别安装 [Tailscale](https://tailscale.com/) 并登录同一账号；
+2. 手机浏览器访问电脑的 Tailscale 地址（形如 `http://100.x.y.z:3210`）；
+3. 学生/家长装客户端登录后即可访问，无需公网入口，天然只对授权设备开放。
+
+### 公网安全三件事
+
+1. **改强密码**：默认 `admin123` 必须在「我的」页改掉；学生初始密码为其手机号、首次登录强制改密；
+2. **域名不外传**：只发给需要的人；如需更严格，可在 Cloudflare Zero Trust（免费版）加 Cloudflare Access 按邮箱限制访问者；
+3. **定期备份**：见下文「数据与备份」，`data/backups/` 每周自动生成，建议定期拷一份到移动硬盘/网盘。
+
+登录限速已适配公网：优先按 Cloudflare 的 `CF-Connecting-IP`、其次 `X-Forwarded-For` 取真实访客 IP，不会因为所有访客共用隧道/代理 IP 而「一人锁全站」。
 
 ## 数据与备份
 
-- 数据库：`data/app.db`（SQLite）
-- 图片：`data/uploads/{学生ID}/{日期}/`
-- 备份/恢复功能 M4 交付，当前可直接复制整个 `data/` 目录进行手动备份。
+- 数据库：`data/app.db`（SQLite）；图片：`data/uploads/{学生ID}/{日期}/`
+- **每周自动备份**：服务运行期间每 6 小时检查一次，距上次备份满 7 天自动备份到 `data/backups/backup-<时间戳>.zip`（内含数据库一致性快照 `app-*.db` + `uploads/` 全量；uploads 超过 500MB 时仅备份数据库），自动轮转保留最近 8 份。`data/` 整体已在 .gitignore 内，备份绝不会进入 git
+- 手动备份：停止服务后直接复制整个 `data/` 目录
+- 恢复：解压备份 zip，把其中的 `app-*.db` 重命名为 `app.db`、`uploads/` 覆盖到 `data/`，重启服务即可
+- 「我的」页手动备份按钮与 WebDAV 自动备份规划中（M4）
 
 ## 技术栈
 

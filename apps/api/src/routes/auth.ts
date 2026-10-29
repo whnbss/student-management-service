@@ -2,10 +2,12 @@
 import type { FastifyInstance } from 'fastify'
 import { db, nowISO, remainingHours, billingModeOf } from '../db'
 import { issueToken, verifyPassword, rateLimitCheck, rateLimitFail, rateLimitSuccess } from '../crypto'
+import { realIp } from '../realip'
 
 export default async function authRoutes(app: FastifyInstance) {
   app.post('/api/auth/login', async (req, reply) => {
-    const ip = req.ip || 'unknown'
+    // 反代/隧道场景按请求头取真实客户端 IP，避免全员共享代理 IP 时「一人锁全站」
+    const ip = realIp(req)
     const limit = rateLimitCheck(ip)
     if (!limit.ok) {
       reply.code(429).send({ error: `尝试次数过多，账号已锁定，请约 ${limit.retry_minutes} 分钟后再试` })

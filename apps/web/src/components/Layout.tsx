@@ -37,7 +37,7 @@ export default function Layout() {
       <CommandPalette />
       {/* 宽屏侧栏（课件详情页隐藏：投屏时舞台最大化，顶部有「← 全部课件」返回） */}
       <aside className={`hidden md:flex md:flex-col w-56 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 min-h-screen p-4 gap-1 ${isLabDetail ? 'md:hidden' : ''}`}>
-        <div className="text-lg font-bold text-primary-700 dark:text-primary-300 px-3 mb-4 flex items-center gap-2">
+        <div className="text-lg font-bold text-primary-700 dark:text-primary-300 px-3 mb-4 flex items-center gap-2 whitespace-nowrap">
           <span className="flex-1">教学管理工作台</span>
           <NotificationBell />
         </div>

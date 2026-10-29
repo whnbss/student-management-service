@@ -6,7 +6,7 @@ import crypto from 'node:crypto'
 import { sanitizeAiText } from '@workbench/shared'
 
 // data 目录固定在项目根（apps/api 向上两级）
-const DATA_DIR = path.resolve(import.meta.dirname, '../../..', 'data')
+export const DATA_DIR = path.resolve(import.meta.dirname, '../../..', 'data')
 export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads')
 export const DB_PATH = path.join(DATA_DIR, 'app.db')
 

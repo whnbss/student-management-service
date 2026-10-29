@@ -19,3 +19,8 @@ workbench-migrate.zip
 logs-api.txt
 logs-batch*.txt
 tmp/
+
+# 评论缓存临时件（含学生姓名等隐私，绝不入库；临时件统一放 .agent_context/tmp/）
+c_all*.json
+# 备份产物（data/ 已覆盖，此处显式声明）
+data/backups/
