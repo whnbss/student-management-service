@@ -569,6 +569,18 @@ log('耗尽签到自动停用', r.status === 200 && r.data?.account_suspended ==
 r = await req('POST', '/api/auth/login', { username: '结算测试生', password: 'stud654321' })
 log('停用后登录被拒', r.status === 403)
 
+// 35g2. P3-41：停用/课时耗尽账号的 password/me 放行（首登改密不被「课时已用完」卡死），其余接口仍拦截
+token = stuToken3
+r = await req('GET', '/api/student/me')
+log('P3-41 停用账号 me 放行', r.status === 200 && r.data?.account_status === 'suspended', `status=${r.status} account_status=${r.data?.account_status}`)
+r = await req('PUT', '/api/student/password', { old_password: 'stud654321', new_password: 'stud654321x' })
+log('P3-41 停用账号可改密', r.status === 200, `status=${r.status} err=${r.data?.error || ''}`)
+r = await req('PUT', '/api/student/password', { old_password: 'stud654321x', new_password: 'stud654321' })
+log('P3-41 改回原密码', r.status === 200)
+r = await req('GET', '/api/student/mistakes')
+log('P3-41 其他接口仍拦截', r.status === 403, `status=${r.status}`)
+token = savedTeacherToken
+
 // 35h. 再续费 → 再恢复；package 模式余额 ≤3 进入预警
 r = await req('POST', `/api/students/${sid3}/packages`, { hours: 1, amount: 300, purchase_date: date })
 log('再次续费恢复', r.status === 200 && r.data?.account_restored === true && r.data?.remaining_hours === 1)

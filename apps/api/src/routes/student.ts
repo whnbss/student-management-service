@@ -6,20 +6,24 @@ import { hashPassword, verifyPassword } from '../crypto'
 import { REDO_INTERVALS, addDays, localDateStr } from '@workbench/shared'
 
 // 取当前学生账号（含校验：student token、账号存在且启用）
-function myAccount(req: FastifyRequest, reply: FastifyReply): any {
+// allowBlocked：me/password 放行「停用/课时耗尽」限制（与 must_change_pwd 同口径）——
+// 否则「教师开账号 → 学生首登改密 → 发现没课时」会卡死在改密环节（验收 #21 P3-41）
+function myAccount(req: FastifyRequest, reply: FastifyReply, allowBlocked = false): any {
   const acc = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.user!.uid) as any
   if (!acc || acc.role !== 'student') {
     reply.code(403).send({ error: '无权限' })
     return null
   }
-  if (acc.status !== 'active') {
-    reply.code(403).send({ error: '该账号已被停用，请联系老师' })
-    return null
-  }
-  // 充值课时模式余额耗尽：拒绝访问（双保险，登录处已拦一道；per_lesson 不受影响）
-  if (billingModeOf(acc.student_id) === 'package' && remainingHours(acc.student_id) <= 0) {
-    reply.code(403).send({ error: '课时已用完，请联系老师续费' })
-    return null
+  if (!allowBlocked) {
+    if (acc.status !== 'active') {
+      reply.code(403).send({ error: '该账号已被停用，请联系老师' })
+      return null
+    }
+    // 充值课时模式余额耗尽：拒绝访问（双保险，登录处已拦一道；per_lesson 不受影响）
+    if (billingModeOf(acc.student_id) === 'package' && remainingHours(acc.student_id) <= 0) {
+      reply.code(403).send({ error: '课时已用完，请联系老师续费' })
+      return null
+    }
   }
   return acc
 }
@@ -36,9 +40,9 @@ function requireReady(req: FastifyRequest, reply: FastifyReply): any {
 }
 
 export default async function studentRoutes(app: FastifyInstance) {
-  // 我的信息
+  // 我的信息（放行停用/课时耗尽：学生可看到自己的账号状态与剩余课时）
   app.get('/api/student/me', async (req, reply) => {
-    const acc = myAccount(req, reply)
+    const acc = myAccount(req, reply, true)
     if (!acc) return
     const st = db.prepare('SELECT * FROM students WHERE id = ?').get(acc.student_id) as any
     if (!st) { reply.code(404).send({ error: '学生档案不存在' }); return }
@@ -57,9 +61,9 @@ export default async function studentRoutes(app: FastifyInstance) {
     }
   })
 
-  // 修改自己的密码（首次登录强制改密走这里）
+  // 修改自己的密码（首次登录强制改密走这里；停用/课时耗尽也放行，避免首次改密被卡死）
   app.put('/api/student/password', async (req, reply) => {
-    const acc = myAccount(req, reply)
+    const acc = myAccount(req, reply, true)
     if (!acc) return
     const { old_password, new_password } = (req.body || {}) as { old_password?: string; new_password?: string }
     if (!old_password || !verifyPassword(old_password, acc.pwd_hash, acc.pwd_salt)) {
