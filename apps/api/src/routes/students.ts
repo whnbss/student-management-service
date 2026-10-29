@@ -131,9 +131,47 @@ export default async function studentRoutes(app: FastifyInstance) {
   })
 
   app.delete('/api/students/:id/packages/:pid', async (req) => {
-    const { pid } = req.params as { pid: string }
+    const { id, pid } = req.params as { id: string; pid: string }
     db.prepare('DELETE FROM hour_packages WHERE id = ?').run(pid)
+    return { ok: true, remaining_hours: remainingHours(Number(id)) }
+  })
+
+  app.delete('/api/students/:id/payments/:pid', async (req) => {
+    const { pid } = req.params as { pid: string }
+    db.prepare('DELETE FROM payments WHERE id = ?').run(pid)
     return { ok: true }
+  })
+
+  // ---- 数据重建：按类型清空该生业务数据（错题/学情日志/课时缴费），用于「删掉重录」----
+  // billing 会把 课时包+缴费流水+按次结算+签到记录 一起清：剩余课时 = 课时包合计 − 到课签到数，
+  // 只清单边会算出负数/错数，所以必须成组清。登录账号不受影响，重建数据后可继续使用。
+  app.post('/api/students/:id/purge', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    if (!db.prepare('SELECT id FROM students WHERE id = ?').get(id)) { reply.code(404).send({ error: '学生不存在' }); return }
+    const b = (req.body || {}) as { mistakes?: boolean; logs?: boolean; billing?: boolean }
+    const out: Record<string, number> = {}
+    if (b.mistakes) {
+      // 该生错题引发的重做通知、由错题生成的变式题一并清理
+      const mkIds = (db.prepare('SELECT id FROM mistakes WHERE student_id = ?').all(id) as any[]).map((m) => m.id)
+      for (const mid of mkIds) {
+        db.prepare('DELETE FROM notifications WHERE ref_id = ?').run(mid)
+        db.prepare('DELETE FROM questions WHERE mistake_id = ?').run(mid)
+      }
+      out.mistakes = db.prepare('DELETE FROM mistakes WHERE student_id = ?').run(id).changes
+    }
+    if (b.logs) {
+      out.logs = db.prepare('DELETE FROM study_logs WHERE student_id = ?').run(id).changes
+    }
+    if (b.billing) {
+      out.packages = db.prepare('DELETE FROM hour_packages WHERE student_id = ?').run(id).changes
+      out.payments = db.prepare('DELETE FROM payments WHERE student_id = ?').run(id).changes
+      db.prepare('DELETE FROM settlements WHERE student_id = ?').run(id)
+      db.prepare('DELETE FROM attendance WHERE student_id = ?').run(id)
+      // 余额清零：同步账号状态（余额 0 时停用学生端登录，续费后自动恢复）
+      suspendStudentAccountIfDepleted(Number(id))
+      out.remaining_hours = remainingHours(Number(id))
+    }
+    return { ok: true, ...out }
   })
 
   // ---- 缴费流水 ----

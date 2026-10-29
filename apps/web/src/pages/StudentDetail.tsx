@@ -166,6 +166,33 @@ export default function StudentDetail() {
     load()
   }
 
+  // 数据重建：按类型清空该生业务数据（危险操作，二次确认后调用 /purge）
+  const purge = async (kind: 'mistakes' | 'logs' | 'billing', tip: string) => {
+    if (!confirm(`${tip}，删除后不可恢复，确定继续？`)) return
+    try {
+      await post(`/api/students/${id}/purge`, { [kind]: true })
+      show('已清空')
+      load()
+      loadSettlements()
+    } catch (e: any) {
+      show(e.message || '操作失败')
+    }
+  }
+
+  // 删除学生并重建：外键级联清空其全部数据（学情/错题/课时/课表/签到/登录账号），随后回学生列表新建
+  const removeStudent = async () => {
+    if (!student) return
+    if (!confirm(`确定删除学生「${student.name}」？其学情日志、错题、课时缴费、课表、签到与学生登录账号将全部删除，不可恢复`)) return
+    if (window.prompt(`请输入学生姓名「${student.name}」以确认删除：`) !== student.name) { show('姓名不匹配，已取消'); return }
+    try {
+      await del(`/api/students/${id}`)
+      show('学生已删除，可重新新建同名学生')
+      navigate('/students')
+    } catch (e: any) {
+      show(e.message || '删除失败')
+    }
+  }
+
   const typeColor = (t: string) => ({
     上课: 'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300',
     作业: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
@@ -394,7 +421,20 @@ export default function StudentDetail() {
                       <span className="text-slate-400 text-xs ml-2 num">{p.purchase_date}</span>
                       {p.note && <span className="text-slate-400 text-xs ml-2">{p.note}</span>}
                     </div>
-                    <span className="num">¥{p.amount.toFixed(2)}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="num">¥{p.amount.toFixed(2)}</span>
+                      <button
+                        className="text-xs text-slate-400 hover:text-red-500"
+                        onClick={async () => {
+                          if (!confirm('确定删除这个课时包？剩余课时会随之减少（已上的课不受影响），删除后不可恢复')) return
+                          await del(`/api/students/${id}/packages/${p.id}`)
+                          show('课时包已删除')
+                          load()
+                        }}
+                      >
+                        删除
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -413,7 +453,20 @@ export default function StudentDetail() {
                       <span className="num text-green-600 dark:text-green-400 font-medium">+¥{p.amount.toFixed(2)}</span>
                       {p.method && <span className="text-slate-400 text-xs ml-2">{p.method}</span>}
                     </div>
-                    <span className="num text-xs text-slate-400">{p.paid_at}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="num text-xs text-slate-400">{p.paid_at}</span>
+                      <button
+                        className="text-xs text-slate-400 hover:text-red-500"
+                        onClick={async () => {
+                          if (!confirm('确定删除这条缴费流水？仅删除记账记录，课时包不受影响')) return
+                          await del(`/api/students/${id}/payments/${p.id}`)
+                          show('缴费流水已删除')
+                          load()
+                        }}
+                      >
+                        删除
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -478,6 +531,18 @@ export default function StudentDetail() {
           </aside>
         )}
       </div>
+
+      {/* 数据管理（危险操作）：清空重录 / 删除学生重建 */}
+      <details className="card p-4">
+        <summary className="text-sm font-semibold text-slate-500 cursor-pointer select-none">数据管理（清空重录 / 删除学生）</summary>
+        <p className="text-xs text-slate-400 mt-2">误录或想推倒重来时使用；每项都有二次确认，删除后不可恢复。建议先到「我的 → 数据备份」导出一份备份。</p>
+        <div className="flex flex-wrap gap-2 mt-3">
+          <button className="btn-outline !px-3 !py-1.5 text-xs !text-red-500 !border-red-200 dark:!border-red-900" disabled={mistakes.length === 0} onClick={() => purge('mistakes', `将清空该生全部错题（${mistakes.length} 道，含其变式题与重做提醒）`)}>清空错题（{mistakes.length}）</button>
+          <button className="btn-outline !px-3 !py-1.5 text-xs !text-red-500 !border-red-200 dark:!border-red-900" disabled={logs.length === 0} onClick={() => purge('logs', `将清空该生全部学情日志（${logs.length} 条，含图片记录）`)}>清空学情日志（{logs.length}）</button>
+          <button className="btn-outline !px-3 !py-1.5 text-xs !text-red-500 !border-red-200 dark:!border-red-900" disabled={packages.length === 0 && payments.length === 0} onClick={() => purge('billing', '将清空该生课时包、缴费流水、按次结算与签到记录（剩余课时归零，学生端登录将暂停）')}>清空课时与缴费</button>
+          <button className="btn-outline !px-3 !py-1.5 text-xs !text-red-600 !border-red-300 font-medium" onClick={removeStudent}>删除该学生（全部数据）</button>
+        </div>
+      </details>
     </div>
   )
 }

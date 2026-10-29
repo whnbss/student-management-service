@@ -575,6 +575,43 @@ log('package余额≤3进预警', r.status === 200 && (r.data?.low_hours || []).
 r = await req('DELETE', `/api/students/${sid3}`)
 log('清理按次结算学生', r.status === 200)
 
+// 36. 数据重建：课时包/缴费流水单条删除 + purge 分类型清空（用独立学生，避免污染主测试学生）
+r = await req('POST', '/api/students', { name: '重建测试生', grade: '高一' })
+const sidPurge = r.data?.id
+r = await req('POST', `/api/students/${sidPurge}/packages`, { hours: 10, amount: 2000, purchase_date: date })
+log('purge准备-录课时包', r.status === 200 && r.data?.remaining_hours === 10)
+const pkgIdPurge = (await req('GET', `/api/students/${sidPurge}/packages`)).data?.[0]?.id
+r = await req('POST', '/api/attendance', { student_id: sidPurge, date: `${date}T21`, status: '到课' })
+log('purge准备-签到扣课时', r.status === 200 && r.data?.remaining_hours === 9)
+r = await req('POST', `/api/students/${sidPurge}/logs`, { date, type: '上课', content: 'purge测试日志' })
+const logIdPurge = (await req('GET', `/api/students/${sidPurge}/logs`)).data?.[0]?.id
+r = await req('POST', '/api/mistakes', { student_id: sidPurge, stem: 'purge测试错题', knowledge_points: ['测试点'] })
+const mkIdPurge = r.data?.id
+// 36a. 单条删除课时包：剩余课时随之减少（10-1签到-10包 → 负数？不，删包后 = 0-1，此处验证返回 remaining）
+r = await req('DELETE', `/api/students/${sidPurge}/packages/${pkgIdPurge}`)
+const remainAfterPkgDel = r.data?.remaining_hours
+log('删除课时包', r.status === 200 && typeof remainAfterPkgDel === 'number', `remaining=${remainAfterPkgDel}`)
+r = await req('GET', `/api/students/${sidPurge}/payments`)
+const payIdPurge = r.data?.[0]?.id
+r = await req('DELETE', `/api/students/${sidPurge}/payments/${payIdPurge}`)
+r = await req('GET', `/api/students/${sidPurge}/payments`)
+log('删除缴费流水', r.status === 200 && r.data.length === 0)
+// 36b. purge mistakes：清空该生错题
+r = await req('POST', `/api/students/${sidPurge}/purge`, { mistakes: true })
+log('purge清空错题', r.status === 200 && r.data?.mistakes === 1)
+r = await req('GET', `/api/mistakes?student_id=${sidPurge}`)
+log('purge后错题为空', r.data.length === 0)
+// 36c. purge logs：清空学情日志
+r = await req('POST', `/api/students/${sidPurge}/purge`, { logs: true })
+log('purge清空学情日志', r.status === 200 && r.data?.logs === 1)
+// 36d. purge billing：课时包+缴费+结算+签到成组清空（余额归零）
+r = await req('POST', `/api/students/${sidPurge}/purge`, { billing: true })
+log('purge清空课时缴费', r.status === 200 && r.data?.remaining_hours === 0)
+r = await req('GET', `/api/students/${sidPurge}`)
+log('purge后学生仍在可重建', r.status === 200 && r.data?.id === sidPurge)
+r = await req('DELETE', `/api/students/${sidPurge}`)
+log('清理重建测试学生', r.status === 200)
+
 // 31. 恢复测试前的 AI 配置 + 清理测试数据（不能 reset 成默认值，会清掉用户真实填写的 Key）
 await req('PUT', '/api/settings/ai', { providers: savedProviders || [], proxy: savedProxy, active_id: savedActiveId })
 r = await req('GET', '/api/settings/ai')

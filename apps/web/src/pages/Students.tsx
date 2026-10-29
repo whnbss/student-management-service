@@ -1,8 +1,8 @@
 // 学生列表：搜索/筛选 + 新建/编辑
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { SquarePen } from 'lucide-react'
-import { get, post, put } from '@/lib/api'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { SquarePen, Trash2 } from 'lucide-react'
+import { get, post, put, del } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
 import type { Student, Grade, StudentStatus, BillingMode } from '@workbench/shared'
 
@@ -20,6 +20,7 @@ const emptyForm = {
 }
 
 export default function Students() {
+  const navigate = useNavigate()
   const [list, setList] = useState<Student[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
@@ -87,6 +88,20 @@ export default function Students() {
     }
   }
 
+  // 删除学生（外键级联清空其学情/错题/课时/课表/账号），双重确认后执行并回列表
+  const removeStudent = async (s: Student) => {
+    if (!confirm(`确定删除学生「${s.name}」？其学情日志、错题、课时缴费、课表、签到与学生登录账号将全部删除，不可恢复`)) return
+    if (window.prompt(`请输入学生姓名「${s.name}」以确认删除：`) !== s.name) { show('姓名不匹配，已取消'); return }
+    try {
+      await del(`/api/students/${s.id}`)
+      show('学生已删除，可重新新建同名学生')
+      if (location.pathname !== '/students') navigate('/students')
+      load()
+    } catch (e: any) {
+      show(e.message || '删除失败')
+    }
+  }
+
   const filtered = list.filter(
     (s) =>
       (!query || s.name.includes(query) || s.school.includes(query) || s.phone.includes(query)) &&
@@ -150,6 +165,13 @@ export default function Students() {
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEdit(s) }}
               >
                 <SquarePen className="w-4 h-4" />
+              </button>
+              <button
+                className="shrink-0 text-slate-300 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400"
+                title="删除学生（全部数据）"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeStudent(s) }}
+              >
+                <Trash2 className="w-4 h-4" />
               </button>
               {s.billing_mode === 'per_lesson' ? (
                 <div className="text-right shrink-0">
