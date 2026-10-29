@@ -32,6 +32,24 @@ const noFig = rows.filter((r) => /如图|图所示/.test(String(r.stem || '')) &
 if (noFig.length) { hardFail++; console.log(`✗ 缺图：${noFig.length} 题题干称「如图」但 figure 为空 → ${noFig.map((r) => '#' + r.id).join(' ')}`) }
 else console.log('✓ 缺图：0 题（题干称「如图」的题均有配图）')
 
+// ---------- 2b. 配图场景匹配守卫（#24 教训：#698/#574 波动/热学题配了电场模板图） ----------
+// 题干称「如图」且配图含文字时，图内含中文的标签若没有任何一个字出现在题干中，判为场景不匹配
+// （图是从错误模板渲染的典型特征，如热学题图上出现「匀强场区」「+q」）。轴标签/纯字母数字标签不参与。
+const sceneBad: string[] = []
+for (const r of rows) {
+  if (!/如图|图所示/.test(String(r.stem || ''))) continue
+  let fig: any = null
+  try { fig = JSON.parse(String(r.figure || 'null')) } catch { continue }
+  if (!fig || fig.kind !== 'svg') continue
+  const texts = [...String(fig.data).matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]).join(' ')
+  const cnTokens = [...new Set([...texts.matchAll(/[一-龥]{2,}/g)].map((m) => m[0]))]
+  const stem = String(r.stem)
+  const miss = cnTokens.filter((t) => ![...t].some((ch) => stem.includes(ch)))
+  if (miss.length) sceneBad.push(`#${r.id}(${miss.join(',')})`)
+}
+if (sceneBad.length) { hardFail++; console.log(`✗ 配图场景：${sceneBad.length} 题图内中文标签与题干场景不匹配（疑为错误模板配图）→ ${sceneBad.join(' ')}`) }
+else console.log('✓ 配图场景：题干称「如图」的题图内中文标签均与题干匹配')
+
 // ---------- 3. 字面 \n（后非字母） ----------
 const litIds: string[] = []
 let litTotal = 0
