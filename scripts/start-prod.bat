@@ -39,16 +39,7 @@ timeout /t 3 /nobreak >nul
 :tunnel
 if /i not "%~1"=="--tunnel" goto done
 echo [3/3] 启动 Cloudflare Tunnel 临时公网隧道...
-where cloudflared >nul 2>nul
-if errorlevel 1 (
-  echo 未检测到 cloudflared。请先安装, 任选其一:
-  echo   winget install --id Cloudflare.cloudflared
-  echo   或到 https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ 下载
-  echo 安装后重新运行: scripts\start-prod.bat --tunnel
-  pause
-  exit /b 0
-)
-start "Cloudflare-Tunnel" /D "%ROOT%" cmd /k cloudflared tunnel --url http://localhost:3210
+start "Cloudflare-Tunnel" /D "%ROOT%" cmd /k node "%ROOT%scripts\tunnel.mjs" 3210
 timeout /t 8 /nobreak >nul
 echo 隧道窗口中会打印临时公网地址, 形如 https://xxxx.trycloudflare.com
 echo 把该地址发给家长或在自己手机打开即可访问, 电脑关机或窗口关闭后失效。
