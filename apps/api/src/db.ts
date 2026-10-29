@@ -5,8 +5,11 @@ import fs from 'node:fs'
 import crypto from 'node:crypto'
 import { sanitizeAiText } from '@workbench/shared'
 
-// data 目录固定在项目根（apps/api 向上两级）
-export const DATA_DIR = path.resolve(import.meta.dirname, '../../..', 'data')
+// data 目录默认在项目根（apps/api 向上两级）；可用 WORKBENCH_DATA_DIR 环境变量覆盖，
+// 供隔离实例（如冒烟测试的临时库）使用，避免测试触碰真实数据
+export const DATA_DIR = process.env.WORKBENCH_DATA_DIR
+  ? path.resolve(process.env.WORKBENCH_DATA_DIR)
+  : path.resolve(import.meta.dirname, '../../..', 'data')
 export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads')
 export const DB_PATH = path.join(DATA_DIR, 'app.db')
 

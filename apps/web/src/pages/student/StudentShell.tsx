@@ -1,7 +1,7 @@
 // 学生工作台壳：底部 4 Tab 导航 + 首次登录强制改密弹层 + 退出登录
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { CircleX, Clock, FileText, FlaskConical } from 'lucide-react'
+import { CircleX, Clock, FileText, FlaskConical, NotebookPen } from 'lucide-react'
 import { get, put } from '@/lib/api'
 import { useAuthStore, useToastStore } from '@/stores/auth'
 import type { StudentMe } from '@workbench/shared'
@@ -10,6 +10,7 @@ const TABS = [
   { to: '/student', end: true, label: '错题', icon: <CircleX className="w-5 h-5" /> },
   { to: '/student/hours', label: '课时', icon: <Clock className="w-5 h-5" /> },
   { to: '/student/reports', label: '报告', icon: <FileText className="w-5 h-5" /> },
+  { to: '/student/logs', label: '日志', icon: <NotebookPen className="w-5 h-5" /> },
   { to: '/student/labs', label: '课件', icon: <FlaskConical className="w-5 h-5" /> },
 ]
 

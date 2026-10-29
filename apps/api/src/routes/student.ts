@@ -129,6 +129,15 @@ export default async function studentRoutes(app: FastifyInstance) {
     return db.prepare('SELECT * FROM schedules WHERE student_id = ? ORDER BY weekday, start_time').all(acc.student_id)
   })
 
+  // 我的学情日志：学生只读，看到老师记录的每次课/作业流水（不含 ai_result 内部分析明细）
+  app.get('/api/student/logs', async (req, reply) => {
+    const acc = requireReady(req, reply)
+    if (!acc) return
+    return db.prepare(`
+      SELECT id, date, type, content, images, next_class_key, created_at
+      FROM study_logs WHERE student_id = ? ORDER BY date DESC, id DESC LIMIT 100`).all(acc.student_id)
+  })
+
   // 我的报告：教师生成的阶段报告（分享链接同源数据），学生端只读
   app.get('/api/student/reports', async (req, reply) => {
     const acc = requireReady(req, reply)

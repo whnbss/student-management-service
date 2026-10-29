@@ -1,5 +1,6 @@
 // API 冒烟测试脚本（node smoke.mjs，验证 M1 全链路）
-const BASE = 'http://localhost:3210'
+// 可用 SMOKE_BASE 指向隔离实例（临时数据目录），避免触碰真实库
+const BASE = process.env.SMOKE_BASE || 'http://localhost:3210'
 let token = ''
 let pass = 0
 let fail = 0
@@ -462,7 +463,28 @@ r = await req('GET', '/api/student/hours')
 log('学生课时接口', r.status === 200 && typeof r.data?.remaining_hours === 'number' && Array.isArray(r.data?.packages))
 r = await req('GET', '/api/student/reports')
 log('学生报告接口', r.status === 200 && Array.isArray(r.data))
+// 32i2. 学生端「学习日志」：教师记的学情日志学生可读，且不暴露 ai_result 内部分析
+r = await req('GET', '/api/student/logs')
+log('学生看学习日志', r.status === 200 && Array.isArray(r.data) && r.data.length >= 1 && (r.data[0].content || '').length > 0, `n=${r.data?.length}`)
+log('学生日志不含内部分析', r.data?.every((l) => !('ai_result' in l)))
 token = savedTeacherToken
+
+// 32i3. 教师改学生手机号 → 登录账号同步：accounts.phone 跟上、重置密码用新手机号、新手机号可直接登录
+r = await req('PUT', `/api/students/${sid}`, { phone: '13811112222' })
+log('教师改学生手机号', r.status === 200)
+r = await req('GET', '/api/accounts')
+const accSynced = (r.data?.accounts || []).find((a) => a.id === accId)
+log('改手机号后账号同步', accSynced?.phone === '13811112222', `phone=${accSynced?.phone}`)
+r = await req('POST', `/api/accounts/${accId}/reset-password`)
+log('重置密码用新手机号', r.status === 200 && r.data?.password === '13811112222', `pwd=${r.data?.password}`)
+r = await req('POST', '/api/auth/login', { username: '13811112222', password: '13811112222' })
+log('新手机号可作为账号登录', r.status === 200 && r.data?.role === 'student', `status=${r.status}`)
+token = savedTeacherToken
+r = await req('PUT', `/api/accounts/${accId}`, { password: 'stud123456' }) // 恢复原密码，保持 32j/32k 口径
+r = await req('PUT', `/api/students/${sid}`, { phone: '13800000000' }) // 改回原手机号
+r = await req('GET', '/api/accounts')
+const accBack = (r.data?.accounts || []).find((a) => a.id === accId)
+log('改回手机号账号同步', accBack?.phone === '13800000000', `phone=${accBack?.phone}`)
 
 // 32j. 停用账号 → 学生登录被拒；启用恢复
 r = await req('PUT', `/api/accounts/${accId}`, { status: 'suspended' })

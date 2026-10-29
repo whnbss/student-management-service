@@ -71,7 +71,21 @@ export default async function studentRoutes(app: FastifyInstance) {
     }
     if (!sets.length) { reply.code(400).send({ error: '无要更新的字段' }); return }
     args.push(id)
+    // 手机号变更前先记旧值：需要同步学生登录账号（账号的手机号是登录/重置密码的依据）
+    const oldPhone = (db.prepare('SELECT phone FROM students WHERE id = ?').get(id) as any)?.phone || ''
     db.prepare(`UPDATE students SET ${sets.join(', ')} WHERE id = ?`).run(...args)
+    // 教师改了学生手机号 → 同步登录账号：①accounts.phone 跟上（重置密码用它）；
+    // ②若账号用户名就是旧手机号（按手机号开通的场景），用户名一并换成新手机号，避免学生突然登不上
+    if (b.phone !== undefined && String(b.phone ?? '').trim() !== String(oldPhone).trim()) {
+      const acc = db.prepare("SELECT * FROM accounts WHERE student_id = ? AND role = 'student'").get(id) as any
+      if (acc) {
+        const newPhone = String(b.phone ?? '').trim()
+        db.prepare('UPDATE accounts SET phone = ? WHERE id = ?').run(newPhone, acc.id)
+        if (acc.username === String(oldPhone).trim() && newPhone) {
+          db.prepare('UPDATE accounts SET username = ? WHERE id = ?').run(newPhone, acc.id)
+        }
+      }
+    }
     // 显式切换结算模式时的账号状态同步：
     // 切回 package 且有余额 → 恢复被「课时耗尽」停用的账号；切回 package 且余额 0 → 立即停用（登录被拒）
     if (b.billing_mode !== undefined && billingModeOf(Number(id)) === 'package') {

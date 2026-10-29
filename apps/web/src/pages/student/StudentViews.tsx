@@ -236,7 +236,7 @@ export function StudentHours() {
       )}
       {perLesson && (
         <div className="rounded-xl px-3 py-2 text-xs bg-violet-50 dark:bg-violet-900/20 text-violet-600 dark:text-violet-300">
-          你的课时为「一课一结算」：每次上课后按单次课费记账，月底老师会与家长结算。
+          你的课时为「一课一结算」：每次上课后按单次课费记账。
         </div>
       )}
     </div>
@@ -312,4 +312,65 @@ export function StudentReports() {
 
 function kpOf(m: Mistake): string[] {
   try { return JSON.parse(m.knowledge_points || '[]') as string[] } catch { return [] }
+}
+
+// ---------------- 我的学情日志（老师记录的上课/作业流水，学生只读） ----------------
+interface StudentLog { id: number; date: string; type: string; content: string; images: string; next_class_key: string; created_at: string }
+
+const LOG_TYPE_COLOR: Record<string, string> = {
+  '上课': 'bg-primary-100 text-primary-600 dark:bg-primary-900/40 dark:text-primary-300',
+  '作业': 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-300',
+  '考试': 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300',
+  '其他': 'bg-slate-200 dark:bg-slate-800 text-slate-500',
+}
+
+export function StudentLogs() {
+  const show = useToastStore((s) => s.show)
+  const [rows, setRows] = useState<StudentLog[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    get<StudentLog[]>('/api/student/logs')
+      .then(setRows)
+      .catch((e) => show(e.message || '加载失败'))
+      .finally(() => setLoading(false))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const imgsOf = (s: string): string[] => { try { return JSON.parse(s || '[]') } catch { return [] } }
+
+  return (
+    <div className="space-y-4">
+      <h1 className="text-xl font-bold">学习日志</h1>
+      {loading ? (
+        <div className="card p-8 animate-pulse space-y-3">
+          <div className="h-16 bg-slate-200 dark:bg-slate-800 rounded-xl" />
+          <div className="h-16 bg-slate-200 dark:bg-slate-800 rounded-xl" />
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="card p-10 text-center text-sm text-slate-400">老师还没有记录学习日志</div>
+      ) : (
+        rows.map((r) => (
+          <div key={r.id} className="card p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold num">{r.date}</span>
+              <span className={`text-[11px] px-2 py-0.5 rounded-full ${LOG_TYPE_COLOR[r.type] || LOG_TYPE_COLOR['其他']}`}>{r.type}</span>
+            </div>
+            <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{r.content}</p>
+            {imgsOf(r.images).length > 0 && (
+              <div className="flex gap-2 flex-wrap">
+                {imgsOf(r.images).map((src, i) => (
+                  <img key={i} src={src} className="rounded-lg max-h-36 object-cover" loading="lazy" />
+                ))}
+              </div>
+            )}
+            {r.next_class_key && (
+              <div className="rounded-xl px-3 py-2 text-xs bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300">
+                下次课重点：{r.next_class_key}
+              </div>
+            )}
+          </div>
+        ))
+      )}
+    </div>
+  )
 }

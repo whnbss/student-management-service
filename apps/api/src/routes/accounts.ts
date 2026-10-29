@@ -112,7 +112,10 @@ export default async function accountRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string }
     const acc = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as any
     if (!acc) { reply.code(404).send({ error: '账号不存在' }); return }
-    const phone = (acc.phone || (acc.student_id ? (db.prepare('SELECT phone FROM students WHERE id = ?').get(acc.student_id) as any)?.phone : '') || '').trim()
+    // 学生档案（students.phone）是手机号的唯一权威来源：教师改过手机号后以此为准，
+    // 账号上冗余的 phone 可能是开通时的旧值，不能优先使用（否则重置出来的还是旧密码）
+    const stPhone = acc.student_id ? ((db.prepare('SELECT phone FROM students WHERE id = ?').get(acc.student_id) as any)?.phone || '') : ''
+    const phone = (stPhone || acc.phone || '').trim()
     if (!phone || phone.length < 6) { reply.code(400).send({ error: '该学生未填手机号（或不足 6 位），无法重置为手机号' }); return }
     const { hash, salt } = hashPassword(phone)
     db.prepare('UPDATE accounts SET pwd_hash = ?, pwd_salt = ?, must_change_pwd = 1 WHERE id = ?').run(hash, salt, id)

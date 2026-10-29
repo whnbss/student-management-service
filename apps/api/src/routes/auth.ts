@@ -18,7 +18,12 @@ export default async function authRoutes(app: FastifyInstance) {
       reply.code(400).send({ error: '请输入账号和密码' })
       return
     }
-    const acc = db.prepare('SELECT * FROM accounts WHERE username = ?').get(String(username).trim()) as any
+    const input = String(username).trim()
+    // 支持两种账号名：①用户名（默认学生姓名）②学生手机号——教师改手机号后学生用新手机号也能登录
+    let acc = db.prepare('SELECT * FROM accounts WHERE username = ?').get(input) as any
+    if (!acc) {
+      acc = db.prepare("SELECT * FROM accounts WHERE role = 'student' AND phone = ? ORDER BY id DESC").get(input) as any
+    }
     if (!acc || !verifyPassword(password, acc.pwd_hash, acc.pwd_salt)) {
       rateLimitFail(ip)
       reply.code(401).send({ error: '账号或密码错误' })

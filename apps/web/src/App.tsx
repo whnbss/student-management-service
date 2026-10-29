@@ -15,7 +15,7 @@ import Bank from '@/pages/Bank'
 import Stats from '@/pages/Stats'
 import ShareReport from '@/pages/ShareReport'
 import StudentShell from '@/pages/student/StudentShell'
-import { StudentMistakes, StudentHours, StudentReports } from '@/pages/student/StudentViews'
+import { StudentMistakes, StudentHours, StudentReports, StudentLogs } from '@/pages/student/StudentViews'
 import Placeholder from '@/pages/Placeholder'
 void Placeholder // 暂留：M3 题库/讲义占位时复用
 
@@ -77,7 +77,7 @@ const router = createBrowserRouter([
     ],
   },
   {
-    // 学生工作台：我的错题 / 我的课时 / 我的报告 / 我的课件
+    // 学生工作台：我的错题 / 我的课时 / 我的报告 / 学习日志 / 我的课件
     path: '/student',
     element: (
       <RequireStudent>
@@ -88,6 +88,7 @@ const router = createBrowserRouter([
       { index: true, element: <StudentMistakes /> },
       { path: 'hours', element: <StudentHours /> },
       { path: 'reports', element: <StudentReports /> },
+      { path: 'logs', element: <StudentLogs /> },
       { path: 'labs', element: <Labs /> },
     ],
   },

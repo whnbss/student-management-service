@@ -57,7 +57,6 @@ export default function Login() {
         <button className="btn-primary w-full mt-6 h-11" disabled={loading}>
           {loading ? '登录中…' : '登 录'}
         </button>
-        <p className="text-xs text-slate-400 text-center mt-4">教师首次使用默认账号 teacher / admin123；学生账号由老师开通（初始密码为手机号）</p>
       </form>
     </div>
   )

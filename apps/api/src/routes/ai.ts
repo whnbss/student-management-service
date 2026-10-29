@@ -121,21 +121,35 @@ export default async function aiRoutes(app: FastifyInstance) {
   })
 
   // 月度用量统计：按月汇总 + 明细
+  // 时区口径：ai_usage.created_at 存 UTC ISO（nowISO），这里统一换算成北京时间（UTC+8）——
+  // 月份过滤按北京月的起止换回 UTC 区间查询，明细行返回北京本地时间字符串，前端直接展示
+  const bjTime = (utcIso: string): string => {
+    try {
+      return new Date(utcIso).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }).replace(' ', 'T').slice(0, 16)
+    } catch { return utcIso }
+  }
   app.get('/api/settings/ai/usage', async (req) => {
-    const month = ((req.query as any)?.month as string) || new Date().toISOString().slice(0, 7)
-    const rows = db
+    const now = new Date()
+    const bjMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` // 北京时间当前月
+    const month = ((req.query as any)?.month as string) || bjMonth
+    // 北京月的起止时刻 → UTC ISO（与库内 created_at 同格式可直接比较）
+    const [y, m] = month.split('-').map(Number)
+    const startUtc = new Date(`${month}-01T00:00:00+08:00`).toISOString()
+    const nextM = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
+    const endUtc = new Date(`${nextM}-01T00:00:00+08:00`).toISOString()
+    const rows = (db
       .prepare(
         `SELECT id, provider_name, model, kind, prompt_tokens, completion_tokens, cost, created_at
-         FROM ai_usage WHERE created_at LIKE ? ORDER BY id DESC LIMIT 200`
+         FROM ai_usage WHERE created_at >= ? AND created_at < ? ORDER BY id DESC LIMIT 200`
       )
-      .all(`${month}%`)
+      .all(startUtc, endUtc) as any[]).map((r) => ({ ...r, created_at: bjTime(r.created_at) }))
     const summary = db
       .prepare(
         `SELECT model, COUNT(*) AS calls, SUM(prompt_tokens) AS prompt_tokens,
                 SUM(completion_tokens) AS completion_tokens, SUM(cost) AS cost
-         FROM ai_usage WHERE created_at LIKE ? GROUP BY model`
+         FROM ai_usage WHERE created_at >= ? AND created_at < ? GROUP BY model`
       )
-      .all(`${month}%`)
+      .all(startUtc, endUtc)
     return { month, summary, rows }
   })
 }
