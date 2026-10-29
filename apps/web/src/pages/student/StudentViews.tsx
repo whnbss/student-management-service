@@ -132,14 +132,13 @@ export function StudentMistakes() {
 }
 
 // ---------------- 我的课时 ----------------
+// 隐私：按次结算（一课一结算）学生端不展示任何费用（单价/金额/合计），只保留上课次数与签到记录
 interface HoursData {
   remaining_hours: number
   billing_mode: 'package' | 'per_lesson'
-  lesson_price?: number
   packages: any[]
   attendance: any[]
-  settlements?: any[]
-  month_total?: number
+  settlements?: { id: number; date: string }[]
 }
 
 export function StudentHours() {
@@ -160,11 +159,11 @@ export function StudentHours() {
       <h1 className="text-xl font-bold">我的课时</h1>
       {perLesson ? (
         <div className="card p-5 text-center">
-          <div className="text-xs text-slate-400">按次结算 · 单次 ¥{data?.lesson_price || 0}/课</div>
+          <div className="text-xs text-slate-400">{month} 本月已上课时</div>
           <div className="text-4xl font-bold num mt-1 text-primary-600 dark:text-primary-300">
-            {data ? `¥${(data.month_total || 0).toFixed(0)}` : '…'}
+            {data ? (data.settlements?.length ?? 0) : '…'}
           </div>
-          <p className="text-xs text-slate-400 mt-2 num">{month} 本月已上课时（{data?.settlements?.length || 0} 次）</p>
+          <p className="text-xs text-slate-400 mt-2">次 · 按次结算 · 一课一记</p>
         </div>
       ) : (
         <div className={`card p-5 text-center ${low ? 'border-red-300 dark:border-red-800' : ''}`}>
@@ -174,24 +173,6 @@ export function StudentHours() {
           </div>
           {low && data && (
             <p className="text-xs text-red-500 mt-2">课时即将用完，请联系老师续费</p>
-          )}
-        </div>
-      )}
-      {perLesson && (
-        <div className="card p-4">
-          <h2 className="font-semibold text-sm mb-2">本月结算记录（{data?.settlements?.length || 0} 次 · ¥{(data?.month_total || 0).toFixed(2)}）</h2>
-          {!data || !data.settlements?.length ? (
-            <p className="text-xs text-slate-400">本月暂无记录</p>
-          ) : (
-            <div className="space-y-1.5">
-              {data.settlements.map((s: any) => (
-                <div key={s.id} className="flex items-center justify-between text-sm num">
-                  <span className="text-slate-500">{s.date}</span>
-                  <span className="text-slate-400">1 次课</span>
-                  <span className="font-medium">¥{Number(s.amount).toFixed(2)}</span>
-                </div>
-              ))}
-            </div>
           )}
         </div>
       )}

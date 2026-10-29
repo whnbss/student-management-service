@@ -50,7 +50,8 @@ export default async function studentRoutes(app: FastifyInstance) {
       status: st.status,
       remaining_hours: remainingHours(st.id),
       billing_mode: billingModeOf(st.id),
-      lesson_price: Number(st.lesson_price) || 0,
+      // 隐私：学生端不下发单次课费单价（按次结算时固定为 0，前端也不展示）
+      lesson_price: billingModeOf(st.id) === 'per_lesson' ? 0 : Number(st.lesson_price) || 0,
       must_change_pwd: !!acc.must_change_pwd,
       account_status: acc.status,
     }
@@ -107,7 +108,8 @@ export default async function studentRoutes(app: FastifyInstance) {
     return { ok: true, mastery_status: mastered ? '已掌握' : '已重做一次', redo_due: mastered ? null : addDays(localDateStr(), REDO_INTERVALS[stage]) }
   })
 
-  // 我的课时：剩余课时 + 课时包 + 最近签到 +（一课一结算时）结算记录与本月合计
+  // 我的课时：剩余课时 + 课时包 + 最近签到 +（一课一结算时）本月上课次数
+  // 隐私要求：按次结算学生端不下发任何费用信息（单价/金额/合计），费用只在教师端可见
   app.get('/api/student/hours', async (req, reply) => {
     const acc = requireReady(req, reply)
     if (!acc) return
@@ -115,11 +117,12 @@ export default async function studentRoutes(app: FastifyInstance) {
     const packages = db.prepare('SELECT * FROM hour_packages WHERE student_id = ? ORDER BY purchase_date DESC, id DESC').all(acc.student_id)
     const attendance = db.prepare('SELECT * FROM attendance WHERE student_id = ? ORDER BY date DESC, id DESC LIMIT 30').all(acc.student_id)
     const month = localDateStr().slice(0, 7)
+    // per_lesson 只返回上课日期（供「本月已上课时 N 次」计数），金额一律不下发
     const settlements = mode === 'per_lesson'
-      ? db.prepare("SELECT * FROM settlements WHERE student_id = ? AND date LIKE ? ORDER BY date DESC, id DESC LIMIT 50").all(acc.student_id, `${month}-%`)
+      ? (db.prepare("SELECT * FROM settlements WHERE student_id = ? AND date LIKE ? ORDER BY date DESC, id DESC LIMIT 50").all(acc.student_id, `${month}-%`) as any[])
+          .map((s) => ({ id: s.id, date: s.date }))
       : []
-    const month_total = settlements.reduce((s: number, x: any) => s + (Number(x.amount) || 0), 0)
-    return { ok: true, remaining_hours: remainingHours(acc.student_id), billing_mode: mode, lesson_price: Number((db.prepare('SELECT lesson_price FROM students WHERE id = ?').get(acc.student_id) as any)?.lesson_price) || 0, packages, attendance, settlements, month_total }
+    return { ok: true, remaining_hours: remainingHours(acc.student_id), billing_mode: mode, packages, attendance, settlements }
   })
 
   // 我的课表

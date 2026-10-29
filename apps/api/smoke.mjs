@@ -542,9 +542,11 @@ token = stuToken3
 r = await req('PUT', '/api/student/password', { old_password: '13900000000', new_password: 'stud654321' })
 log('按次结算学生改密', r.status === 200)
 r = await req('GET', '/api/student/me')
-log('me 返回结算模式', r.status === 200 && r.data?.billing_mode === 'per_lesson' && r.data?.lesson_price === 200)
+log('me 返回结算模式(单价不下发)', r.status === 200 && r.data?.billing_mode === 'per_lesson' && r.data?.lesson_price === 0, `lesson_price=${r.data?.lesson_price}`)
 r = await req('GET', '/api/student/hours')
-log('学生端结算数据', r.status === 200 && r.data?.billing_mode === 'per_lesson' && r.data?.settlements?.length === 1 && r.data?.month_total === 200, `month_total=${r.data?.month_total}`)
+const stuHoursData = r.data || {}
+log('学生端结算模式仅上课次数', r.status === 200 && stuHoursData.billing_mode === 'per_lesson' && stuHoursData.settlements?.length === 1 && stuHoursData.settlements[0]?.date, `settlements=${stuHoursData.settlements?.length}`)
+log('学生端费用已隐藏', !('amount' in (stuHoursData.settlements?.[0] || {})) && stuHoursData.month_total === undefined && stuHoursData.lesson_price === undefined, `amount泄露=${'amount' in (stuHoursData.settlements?.[0] || {})}`)
 token = savedTeacherToken
 
 // 35e. 切回 package 模式 → 余额 0：账号立即自动停用，登录被拒「课时已用完」
