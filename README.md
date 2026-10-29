@@ -147,7 +147,7 @@ cloudflared service install
 
 也可用 `scripts\start-prod.bat --tunnel` 一键「构建 + 启动 + 临时隧道」。
 
-**公司内网/受限网络说明**：cloudflared 自身不支持 HTTP 代理，直连 Cloudflare edge（7844 端口）在公司内网会被防火墙拦截。`--tunnel` 现在走的是 `scripts/tunnel.mjs`，它会自动完成：走代理注册 trycloudflare 临时隧道 → 检测直连不通时启用「本地中继（127.0.0.1:7844 → 代理 CONNECT → Cloudflare edge）+ hosts 重定向」（写 hosts 需管理员权限，脚本会提示）→ 打印公网 URL。脚本退出（Ctrl+C）时会自动还原 hosts。`cloudflared.exe` 若未安装会经公司代理 SSO 自动下载到 `%USERPROFILE%\.local\bin\`。
+**公司内网/受限网络说明**：cloudflared 自身不支持 HTTP 代理，直连 Cloudflare edge（7844 端口）在公司内网会被防火墙拦截。`--tunnel` 现在走的是 `scripts/tunnel.mjs`，它会自动完成：走代理注册 trycloudflare 临时隧道 → 检测直连不通时启用「本地中继（127.0.0.1:7844 → 代理 CONNECT → Cloudflare edge）+ hosts 重定向」（写 hosts 需管理员权限，脚本会提示）→ 打印公网 URL。脚本退出（Ctrl+C）时会自动还原 hosts。若脚本异常退出（断电、强杀进程）来不及还原，请以管理员打开 `C:\Windows\System32\drivers\etc\hosts`，删除含 `# teaching-workbench cloudflared relay (auto)` 标记的行即可（无该标记即无残留）。`cloudflared.exe` 若未安装会经公司代理 SSO 自动下载到 `%USERPROFILE%\.local\bin\`。
 
 ### 方案 B：Tailscale（私有组网，最小暴露面）
 

@@ -75,6 +75,11 @@ app.setNotFoundHandler((req, reply) => {
     reply.code(404).send({ error: '接口不存在' })
     return
   }
+  // 前端静态资源（vite hash 文件名）不存在就是真 404，不能回退成 index.html 吞掉资源级 404（P3-32）
+  if (req.url.startsWith('/assets/')) {
+    reply.code(404).send({ error: 'Not Found' })
+    return
+  }
   if (req.method === 'GET' && !req.url.startsWith('/uploads') && fs.existsSync(DIST_INDEX)) {
     reply.header('content-type', 'text/html; charset=utf-8').send(fs.readFileSync(DIST_INDEX))
     return

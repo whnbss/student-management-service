@@ -99,7 +99,8 @@ function writeHosts(add) {
 // 本地 TCP 中继：127.0.0.1:7844 → 代理 CONNECT → edge（TLS ClientHello 可能超一个 MTU，必须缓冲到 CONNECT 应答后转发）
 function startRelay(edgeHost) {
   const noScheme = PROXY.replace(/^https?:\/\//, '')
-  const proxyHost = noScheme.split(':')[0] || 'proxyx.his.hihonor.com'
+  // PROXY 为空时退回公司默认代理（与下方 SSO 下载用的是同一个），避免残留的错误内网域名（P3-33）
+  const proxyHost = noScheme.split(':')[0] || 'proxy.singapore.itsec.hihonor.com'
   const proxyPort = Number(noScheme.split(':')[1]) || 8080
   const ALLOWED = new Set(EDGE_HOSTS)
   return net.createServer((client) => {
