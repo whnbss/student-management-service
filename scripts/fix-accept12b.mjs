@@ -54,14 +54,24 @@ const updates = [
   [276, q276],
 ]
 
-const upd = db.prepare('UPDATE questions SET stem=?, answer=?, solution=? WHERE id=?')
+// P1-11 长期修法（验收 #13）：统一 cur 回退防护——动态构建 SET 子句，
+// 仅更新 patch 提供的字段，未提供的字段保持库中现值；
+// 绝不再无条件三列全量 UPDATE（undefined 会被 better-sqlite3 绑定为 null，清空列）
+const get = db.prepare('SELECT id, stem, answer, solution FROM questions WHERE id = ?')
 
 for (const [id, patch] of updates) {
-  const cur = db.prepare('SELECT id, stem, answer, solution FROM questions WHERE id = ?').get(id)
+  const cur = get.get(id)
   if (!cur) { console.log(`题 ${id} 不存在，跳过`); continue }
-  if (DRY) { console.log(`[dry-run] 题 ${id}：题干首行 ${patch.stem.split('\n')[0].slice(0, 50)}`); continue }
-  upd.run(patch.stem, patch.answer, patch.solution, id)
-  console.log(`题 ${id} 已更新（stem/answer/solution）`)
+  const cols = Object.keys(patch)
+  const next = {}
+  for (const c of cols) {
+    const v = patch[c] ?? cur[c]
+    if (v === undefined || v === null) throw new Error(`题 ${id} 字段 ${c} 的 patch 与现值均为空，拒绝执行`)
+    next[c] = v
+  }
+  if (DRY) { console.log(`[dry-run] 题 ${id}：更新 ${cols.join('/')}；题干首行 ${String(next.stem).split('\n')[0].slice(0, 50)}`); continue }
+  db.prepare(`UPDATE questions SET ${cols.map((c) => `${c}=?`).join(', ')} WHERE id = ?`).run(...cols.map((c) => next[c]), id)
+  console.log(`题 ${id} 已更新（${cols.join('/')}）`)
 }
 
 db.close()
