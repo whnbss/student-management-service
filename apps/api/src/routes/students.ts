@@ -1,6 +1,7 @@
 // 学生管理：档案 CRUD + 课时包 + 缴费流水 + 课表 + 签到 + 课时结算（package/per_lesson）
 import type { FastifyInstance } from 'fastify'
 import { db, nowISO, remainingHours, billingModeOf, suspendStudentAccountIfDepleted, restoreStudentAccountIfRenewed } from '../db'
+import { runBackup } from '../backup'
 
 interface StudentBody {
   name?: string
@@ -130,8 +131,11 @@ export default async function studentRoutes(app: FastifyInstance) {
     return { ok: true, id: r.lastInsertRowid, remaining_hours: remainingHours(Number(id)), account_restored, billing_mode: billingModeOf(Number(id)) }
   })
 
-  app.delete('/api/students/:id/packages/:pid', async (req) => {
+  app.delete('/api/students/:id/packages/:pid', async (req, reply) => {
     const { id, pid } = req.params as { id: string; pid: string }
+    // 校验课时包确实属于该学生，防止误传 pid 删到别人名下的包
+    const pkg = db.prepare('SELECT id FROM hour_packages WHERE id = ? AND student_id = ?').get(pid, id)
+    if (!pkg) { reply.code(404).send({ error: '课时包不存在或不属于该学生' }); return }
     db.prepare('DELETE FROM hour_packages WHERE id = ?').run(pid)
     return { ok: true, remaining_hours: remainingHours(Number(id)) }
   })
@@ -149,7 +153,11 @@ export default async function studentRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string }
     if (!db.prepare('SELECT id FROM students WHERE id = ?').get(id)) { reply.code(404).send({ error: '学生不存在' }); return }
     const b = (req.body || {}) as { mistakes?: boolean; logs?: boolean; billing?: boolean }
-    const out: Record<string, number> = {}
+    // 删除不可恢复：执行前先做一次全量快照备份，给「删错」留后悔药（备份失败不阻塞删除，但记录日志）
+    const snap = await runBackup()
+    if (snap.ok) console.log(`[purge] 学生${id} 数据重建前快照: ${snap.file}`)
+    else console.error(`[purge] 学生${id} 重建前快照失败: ${snap.error}`)
+    const out: Record<string, number> = { backup_ok: snap.ok ? 1 : 0 } as any
     if (b.mistakes) {
       // 该生错题引发的重做通知、由错题生成的变式题一并清理
       const mkIds = (db.prepare('SELECT id FROM mistakes WHERE student_id = ?').all(id) as any[]).map((m) => m.id)

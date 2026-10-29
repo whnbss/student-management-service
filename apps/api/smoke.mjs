@@ -461,6 +461,8 @@ if (redoTarget2) {
 token = stuToken0
 r = await req('GET', '/api/student/hours')
 log('学生课时接口', r.status === 200 && typeof r.data?.remaining_hours === 'number' && Array.isArray(r.data?.packages))
+// P2-38：package 模式学生端课时包也不得携带金额字段（amount 等费用只在教师端可见）
+log('学生端课时包不含金额', (r.data?.packages || []).length >= 1 && (r.data?.packages || []).every((p) => !('amount' in p)), `n=${r.data?.packages?.length}`)
 r = await req('GET', '/api/student/reports')
 log('学生报告接口', r.status === 200 && Array.isArray(r.data))
 // 32i2. 学生端「学习日志」：教师记的学情日志学生可读，且不暴露 ai_result 内部分析
@@ -590,6 +592,12 @@ const logIdPurge = (await req('GET', `/api/students/${sidPurge}/logs`)).data?.[0
 r = await req('POST', '/api/mistakes', { student_id: sidPurge, stem: 'purge测试错题', knowledge_points: ['测试点'] })
 const mkIdPurge = r.data?.id
 // 36a. 单条删除课时包：剩余课时随之减少（10-1签到-10包 → 负数？不，删包后 = 0-1，此处验证返回 remaining）
+// P3①：pid 必须归属该学生——不存在的 pid、别的学生的 pid 都要 404
+r = await req('DELETE', `/api/students/${sidPurge}/packages/999999`)
+log('删除课时包-pid不存在404', r.status === 404, `status=${r.status}`)
+const sidPkgOther = (await req('GET', `/api/students/${sid}/packages`)).data?.[0]?.id
+r = await req('DELETE', `/api/students/${sidPurge}/packages/${sidPkgOther}`)
+log('删除课时包-跨学生404', r.status === 404, `status=${r.status}`)
 r = await req('DELETE', `/api/students/${sidPurge}/packages/${pkgIdPurge}`)
 const remainAfterPkgDel = r.data?.remaining_hours
 log('删除课时包', r.status === 200 && typeof remainAfterPkgDel === 'number', `remaining=${remainAfterPkgDel}`)
@@ -598,9 +606,10 @@ const payIdPurge = r.data?.[0]?.id
 r = await req('DELETE', `/api/students/${sidPurge}/payments/${payIdPurge}`)
 r = await req('GET', `/api/students/${sidPurge}/payments`)
 log('删除缴费流水', r.status === 200 && r.data.length === 0)
-// 36b. purge mistakes：清空该生错题
+// 36b. purge mistakes：清空该生错题（P2-39：purge 执行前强制快照备份，返回 backup_ok=1）
 r = await req('POST', `/api/students/${sidPurge}/purge`, { mistakes: true })
 log('purge清空错题', r.status === 200 && r.data?.mistakes === 1)
+log('purge前已快照备份', r.data?.backup_ok === 1, `backup_ok=${r.data?.backup_ok}`)
 r = await req('GET', `/api/mistakes?student_id=${sidPurge}`)
 log('purge后错题为空', r.data.length === 0)
 // 36c. purge logs：清空学情日志

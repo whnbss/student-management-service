@@ -114,7 +114,8 @@ export default async function studentRoutes(app: FastifyInstance) {
     const acc = requireReady(req, reply)
     if (!acc) return
     const mode = billingModeOf(acc.student_id)
-    const packages = db.prepare('SELECT * FROM hour_packages WHERE student_id = ? ORDER BY purchase_date DESC, id DESC').all(acc.student_id)
+    // 隐私要求：课时包只下发次数/日期/备注，金额（amount）等费用字段一律不下发（费用只在教师端可见）
+    const packages = db.prepare('SELECT id, hours, purchase_date, note FROM hour_packages WHERE student_id = ? ORDER BY purchase_date DESC, id DESC').all(acc.student_id)
     const attendance = db.prepare('SELECT * FROM attendance WHERE student_id = ? ORDER BY date DESC, id DESC LIMIT 30').all(acc.student_id)
     const month = localDateStr().slice(0, 7)
     // per_lesson 只返回上课日期（供「本月已上课时 N 次」计数），金额一律不下发

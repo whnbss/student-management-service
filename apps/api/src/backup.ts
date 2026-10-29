@@ -1,13 +1,14 @@
-// 每周自动备份：SQLite 一致性快照（VACUUM INTO，WAL 下安全）+ uploads（视体积）打 zip 到 data/backups/
+// 每日自动备份：SQLite 一致性快照（VACUUM INTO，WAL 下安全）+ uploads（视体积）打 zip 到 data/backups/
 // 保留最近 8 份自动轮转；zip 与 backups 目录均在 .gitignore 的 data/ 覆盖范围内，绝不入库
+// 另：学生数据重建（purge）等危险操作执行前会额外强制快照一次（见 routes/students.ts）
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { db, getSetting, setSetting, DATA_DIR, UPLOADS_DIR } from './db'
 
 const BACKUP_DIR = path.join(DATA_DIR, 'backups')
-const KEEP_COUNT = 8 // 最多保留的备份份数
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000 // 备份周期：7 天
+const KEEP_COUNT = 14 // 最多保留的备份份数（每日兜底 + purge 前强制快照共用轮转）
+const DAY_MS = 24 * 60 * 60 * 1000 // 备份周期：每日兜底一次
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000 // 每 6 小时检查一次是否到期
 const UPLOADS_SIZE_LIMIT = 500 * 1024 * 1024 // uploads 超过该体积时仅备份数据库
 const ZIP_PREFIX = 'backup-'
@@ -84,9 +85,9 @@ export function scheduleBackups() {
   const check = async () => {
     try {
       const last = Number(getSetting('last_backup_at') || 0)
-      if (Date.now() - last >= WEEK_MS) {
+      if (Date.now() - last >= DAY_MS) {
         const r = await runBackup()
-        if (r.ok) console.log(`[backup] 每周备份完成: ${r.file}${r.db_only ? '（uploads 超限，仅含数据库）' : ''}`)
+        if (r.ok) console.log(`[backup] 每日备份完成: ${r.file}${r.db_only ? '（uploads 超限，仅含数据库）' : ''}`)
         else console.error(`[backup] 备份失败: ${r.error}`)
       }
     } catch (e: any) {
