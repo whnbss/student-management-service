@@ -2,9 +2,9 @@
 // AI 生成结果一律先返回草稿，教师在前端逐题编辑确认后才通过 bulk 入库（ai_generated 标记）
 import type { FastifyInstance } from 'fastify'
 import { db, nowISO, remainingHours } from '../db'
-import { pickProvider, generateQuiz, generateTiered, generateParentReport, validateQuizDrafts, reviewQuizDrafts } from '../ai'
-import { sanitizeAiText, sanitizeLatexChinese, mergeSectionKps, daysAgo, checkSolutionArithmetic } from '@workbench/shared'
-import type { QuizLevel } from '@workbench/shared'
+import { pickProvider, generateQuiz, generateTiered, generateParentReport, validateQuizDrafts, reviewQuizDrafts, fixQuizDraft } from '../ai'
+import { sanitizeAiText, sanitizeLatexChinese, mergeSectionKps, daysAgo, checkSolutionArithmetic, checkAnswerTraceable, mentionsFigureStem } from '@workbench/shared'
+import type { QuizDraft, QuizLevel, QuizReview } from '@workbench/shared'
 
 function kpOf(raw: string): string[] {
   try { return JSON.parse(raw || '[]') as string[] } catch { return [] }
@@ -61,6 +61,77 @@ function findDuplicates(drafts: Array<{ stem: string; knowledge_points: string[]
     if (hit) out.push({ index: i, id: hit.id, stem: String(hit.stem).slice(0, 60) })
   }
   return out
+}
+
+// 终稿机器硬校验（不依赖 AI 的确定性校验，未过一律不允许出现在草稿列表）：
+// ① 解析内部数值复核（checkSolutionArithmetic）② 答案↔解析一致性 ③ 「如图」⇒ 必须有 figure_spec
+function finalMachineIssues(q: QuizDraft): string[] {
+  const issues: string[] = []
+  for (const i of checkSolutionArithmetic(q.solution || '')) {
+    issues.push(`数值复核未过：${i.expr} 应等于 ${i.expect}，解析写的是 ${i.got}`)
+  }
+  for (const s of checkAnswerTraceable(q.answer || '', q.solution || '', q.stem || '')) issues.push(s)
+  if (mentionsFigureStem(q.stem) && !q.figure_spec) issues.push('题干出现「如图」但没有配图（缺少 figure_spec）')
+  return issues
+}
+
+// 终稿闭环：对未过审的题目自动修复（最多 2 次）→ 仍失败整题重生成 1 次 → 仍失败弃置并计数。
+// 返回值里的 questions 全部是终稿（机器校验 0 问题），被弃置的题附原因，绝不把「未解决」状态抛给教师
+async function closeTheLoop(
+  provider: NonNullable<ReturnType<typeof pickProvider>>,
+  result: QuizDraft[],
+  aiReview: QuizReview[] | null,
+  ctx: { kps: string[]; level: QuizLevel; grade: string; hint?: string }
+): Promise<{ finals: QuizDraft[]; discarded: Array<{ reason: string }> }> {
+  const finals: QuizDraft[] = []
+  const discarded: Array<{ reason: string }> = []
+  for (let i = 0; i < result.length; i++) {
+    const q0 = result[i]
+    const aiIssues = aiReview && aiReview[i] && aiReview[i].pass === false ? aiReview[i].issues : []
+    let cur = q0
+    let issues = [...aiIssues, ...finalMachineIssues(q0)]
+    if (!issues.length) { finals.push(q0); continue }
+    // —— 修复流程：共 2 次（失败重试 1 次）——
+    let fixErr = ''
+    for (let attempt = 0; attempt < 2 && issues.length; attempt++) {
+      try {
+        const { result: fr } = await fixQuizDraft(provider, cur, issues)
+        // 修正稿锁回本批题型并重新注入节名（防模型改写知识点/题型）
+        const f2: QuizDraft = { ...fr.draft, qtype: cur.qtype, knowledge_points: mergeSectionKps(ctx.kps, fr.draft.knowledge_points) }
+        const fIssues = finalMachineIssues(f2)
+        if (!fIssues.length) {
+          finals.push({ ...f2, fix_note: fr.fix_note || '已按二审问题自动修正' })
+          issues = []
+          break
+        }
+        cur = f2
+        issues = fIssues
+      } catch (e: any) {
+        fixErr = e.message
+        console.error(`[quiz] 第 ${i + 1} 题修复第 ${attempt + 1} 次失败:`, e.message)
+      }
+    }
+    if (!issues.length) continue
+    // —— 重新生成该题 1 次 ——
+    const why = issues.join('；') + (fixErr ? `（修复调用失败：${fixErr}）` : '')
+    try {
+      const { result: rg } = await generateQuiz(provider, { kps: ctx.kps, qtypes: [cur.qtype], count: 1, level: ctx.level, grade: ctx.grade, hint: ctx.hint })
+      if (rg[0]) {
+        const q2: QuizDraft = { ...rg[0], qtype: cur.qtype, knowledge_points: mergeSectionKps(ctx.kps, rg[0].knowledge_points) }
+        const rIssues = finalMachineIssues(q2)
+        if (!rIssues.length) {
+          finals.push({ ...q2, fix_note: '修复未通过，已整题重新生成' })
+          continue
+        }
+        discarded.push({ reason: `第 ${i + 1} 题（重新生成后仍未过 ${rIssues.join('；')}）` })
+      } else {
+        discarded.push({ reason: `第 ${i + 1} 题（${why}）：重新生成未返回题目` })
+      }
+    } catch (e: any) {
+      discarded.push({ reason: `第 ${i + 1} 题（${why}）：重新生成失败（${e.message}）` })
+    }
+  }
+  return { finals, discarded }
 }
 
 export default async function questionRoutes(app: FastifyInstance) {
@@ -215,34 +286,25 @@ export default async function questionRoutes(app: FastifyInstance) {
       }
       const usage = { prompt_tokens, completion_tokens, cost }
       // 自动二审：逐题挑错（数值自洽/情境几何/超纲/解析含试错/缺图）。二审失败不阻塞出题，降级为无审查结果
-      let review = null
+      let aiReview: QuizReview[] | null = null
       let review_usage = null
       try {
         const r2 = await reviewQuizDrafts(provider, result)
-        review = r2.result
+        aiReview = r2.result
         review_usage = r2.usage
       } catch (e: any) {
-        console.error('[quiz] 二审失败（已降级为不审查）:', e.message)
+        console.error('[quiz] 二审失败（已降级为不审查，机器硬校验兜底）:', e.message)
       }
-      // 机器数值复核（验收 #12 根因修法：通用表达式求值）：解析中「纯数字算式 = 结果」由代码独立复验，
-      // 不依赖模型心算（#244 / #273 / #414 这类 0.5/0.2=1、2+1=2.5、0.4×2×0.5=0.8 的算术 slip 二审 AI 也查不出来）。
-      // 复核未过的题直接判二审不通过（模型给出的 pass 被覆盖），教师终审时也能看到未过原因
-      const machineReview: Array<{ pass: boolean; issues: string[]; fixed: null } | null> = result.map((q) => {
-        const arith = checkSolutionArithmetic(q.solution || '')
-        return arith.length
-          ? { pass: false, issues: arith.map((i) => `数值复核未过：${i.expr} 应等于 ${i.expect}，解析写的是 ${i.got}`), fixed: null }
-          : null
+      // 终稿闭环（用户验收口径）：草稿列表不允许出现「未解决」状态——
+      // 二审/机器校验未过的题自动修复（2 次）→ 重生成（1 次）→ 仍失败弃置并计数；
+      // 「如图」无图、答案与解析脱节都在机器硬校验里拦截
+      const { finals, discarded } = await closeTheLoop(provider, result, aiReview, {
+        kps, level, grade: String(b.grade || ''), hint: typeof b.hint === 'string' ? b.hint.slice(0, 500) : undefined,
       })
-      const machineBad = machineReview.filter(Boolean).length
-      if (machineBad) console.log(`[quiz] 机器数值复核拦截 ${machineBad} 题`)
-      if (review && Array.isArray(review)) {
-        machineReview.forEach((m, idx) => {
-          if (m && review![idx]?.pass !== false) review[idx] = m
-        })
-      } else {
-        review = machineReview.map((m) => m || { pass: true, issues: [], fixed: null })
-      }
-      return { ok: true, questions: result, usage, review, review_usage }
+      if (discarded.length) console.log(`[quiz] 终稿闭环弃置 ${discarded.length} 题:`, discarded.map((d) => d.reason).join(' | '))
+      // review 字段保留兼容（backfill 脚本按 review.pass 过滤）：终稿全部通过硬校验
+      const review: QuizReview[] = finals.map(() => ({ pass: true, issues: [], fixed: null }))
+      return { ok: true, questions: finals, usage, review, review_usage, discarded }
     } catch (e: any) {
       reply.code(502).send({ error: e.message || 'AI 出题失败' })
     }

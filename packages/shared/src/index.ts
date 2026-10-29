@@ -444,6 +444,8 @@ export interface QuizDraft {
   difficulty: number
   qtype: string
   figure_spec?: { template: string; params: Record<string, number | string> } | null
+  /** 二审闭环自动修复说明（仅终稿带，表示该题曾被自动修正过） */
+  fix_note?: string
 }
 
 // 二审（自动质检）：出题生成后的第二次 AI 调用结果，逐题 {pass, issues, fixed?}
@@ -666,6 +668,71 @@ export function checkSolutionArithmetic(solution: unknown): ArithIssue[] {
   return issues
 }
 
+// ---------- 答案↔解析一致性机器校验（二审闭环硬校验之一） ----------
+// 背景：二审 AI 偶发「解析算出 A、答案写 B」的自相矛盾终稿（用户实测 5/5 全中），仅靠
+// checkSolutionArithmetic 复核解析内部算式不够——它管不到「答案列的数值」与解析脱节。
+// 做法：答案含数字时，提取答案中的全部数值（科学计数/纯数字分数先展开成定点数），
+// 逐个在「解析 + 题干」里找对应：原文数值出现（2% 容差）或解析中某段纯数字算式求值≈该值。
+// 设计取向：宁漏判不误杀——匹配是宽松的（任意位置出现即算对应），只拦真正脱节的答案。
+// 选择题字母答案（无数字）跳过。
+
+/** 科学计数 / 纯数字分数 → 定点数展开（便于数值比对） */
+function expandNumericForms(t: string): string {
+  const expand = (m: string, e: string) => {
+    const v = Number(m) * Math.pow(10, Number(e))
+    if (!Number.isFinite(v)) return '0'
+    return v.toFixed(12).replace(/0+$/, '').replace(/\.$/, '')
+  }
+  return t
+    .replace(/(\d+(?:\.\d+)?)\s*[×x*]\s*10\s*\^\s*\{?\s*(-?\d+)\s*\}?/g, (_m, mm: string, ee: string) => expand(mm, ee))
+    .replace(/(\d+(?:\.\d+)?)\s*[eE](-?\d+)\b/g, (_m, mm: string, ee: string) => expand(mm, ee))
+    .replace(/\\(?:d|t)?frac\s*\{(\d+(?:\.\d+)?)\}\s*\{(\d+(?:\.\d+)?)\}/g, (_m, a: string, b: string) => (Number(b) ? String(Number(a) / Number(b)) : _m))
+}
+
+/**
+ * 答案与解析一致性校验：答案中每个数值必须在「解析/题干」中找到对应。
+ * 返回问题列表（空数组 = 一致）。
+ */
+export function checkAnswerTraceable(answer: unknown, solution: unknown, stem?: unknown): string[] {
+  const a = expandNumericForms(String(answer ?? ''))
+  if (!/\d/.test(a)) return [] // 字母答案 / 纯文字答案不检
+  const text = expandNumericForms(`${String(solution ?? '')}\n${String(stem ?? '')}`)
+  // 参照值集合：正文里的所有数字 token + 解析里纯数字算式段的求值结果
+  const refNums = (text.match(/-?\d+(?:\.\d+)?/g) || []).map(Number)
+  const segs: string[] = []
+  String(solution ?? '').replace(/\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$|\\\(([\s\S]+?)\\\)/g, (_m, x, y, z) => {
+    segs.push(String(x || y || z || ''))
+    return _m
+  })
+  for (const raw of segs) {
+    let t = raw.replace(/\\(times|cdot)/g, '×').replace(/\\div/g, '÷').replace(/−/g, '-').replace(/·/g, '×')
+    t = t.replace(/\\ne(q)?|\\approx/g, '≠')
+    t = t.replace(/\\(?:text|mathrm)\{([^{}]*)\}\s*\^\s*(\{[^{}]*\}|[-\d]+)/g, (_m, inner: string, sup: string) => `\\text{${inner}^${String(sup).replace(/[{}]/g, '')}}`)
+    t = stripBracedCmds(t, ['text', 'mathrm', 'mathit', 'mathbf', 'operatorname'])
+    t = fracToExpr(t)
+    t = sqrtToExpr(t)
+    t = t.replace(/\\[,;:! ]|~/g, '').replace(/\\[a-zA-Z]+/g, '').replace(/[{}\s\\,]|°|℃/g, '')
+    if (!/\d/.test(t)) continue
+    for (const chunk of t.split('≠')) {
+      const parts = chunk.split('=')
+      for (let i = 0; i < parts.length - 1; i++) {
+        const lhs = parts[i]
+        if (!isPureArith(lhs) || !/[+\-×÷*/^]/.test(lhs)) continue
+        const v = evalArith(lhs)
+        if (v !== null) refNums.push(v)
+      }
+    }
+  }
+  const issues: string[] = []
+  const ansNums = [...new Set((a.match(/-?\d+(?:\.\d+)?/g) || []).map(Number))]
+  for (const v of ansNums) {
+    const tol = Math.max(Math.abs(v) * 0.02, 0.011)
+    const hit = refNums.some((r) => Math.abs(r - v) <= tol)
+    if (!hit) issues.push(`答案中的数值 ${v} 在解析与题干中找不到对应（答案与解析脱节）`)
+  }
+  return issues
+}
+
 // ---------- P1-7：知识点标签与教材节名对齐 ----------
 // 教材全部节名（扁平列表，220 节）
 export const TEXTBOOK_SECTIONS: string[] = TEXTBOOK.flatMap((v) => v.chapters.flatMap((c) => c.sections))
@@ -734,4 +801,37 @@ ${drafts.map((q, i) => `【第 ${i + 1} 题】
 解析：${q.solution || '（无）'}
 figure_spec：${q.figure_spec ? JSON.stringify(q.figure_spec) : '（无）'}`).join('\n\n')}
 请逐题按约定 JSON 数组结构输出二审结果（${drafts.length} 个元素，顺序一一对应）。`
+}
+
+// 二审闭环修复：把未过审的题目草稿与问题清单喂回模型，输出完整修正稿（不再把问题抛给教师人工处理）
+export const FIX_SYSTEM_PROMPT = `你是一名高中物理命题修订专家。给你一道题目草稿（题干/答案/解析/配图规格）与审查发现的问题清单，请输出这道题的完整修正稿：
+1. 逐条修复问题：数值或答案与解析矛盾 → 以物理正确为准重算答案并重写解析；情境/几何矛盾 → 改写题干；题干出现「如图」但无配图 → 优先在 figure_spec 中补模板配图，补不出就改写题干用文字把几何条件描述完整（此时题干不得再出现「如图」）；
+2. 修正后整题必须自洽：答案与解析最终数值一致，解析中每个纯数字算式的结果正确，情境数据自洽；
+3. 保持原题考查的知识点与题型不变，难度可在 ±1 档内调整；
+4. 解析必须是最终正确版本，严禁出现试错、疑问、「重新分析」等过程文字；LaTeX 公式内中文（含上下标）必须用 \\text{} 包裹（如 $v_{\\text{甲}}$），严禁裸中文进数学模式；
+5. 在 fix_note 中用一句话说明改了什么；
+6. 严格输出 JSON 对象，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
+
+输出 JSON 结构：
+{"stem": "题干", "answer": "答案", "solution": "解析", "pitfall": "易错点提示", "knowledge_points": ["知识点"], "difficulty": 3, "qtype": "计算", "figure_spec": {"template": "模板名", "params": {}} 或省略, "fix_note": "一句话修正说明"}
+
+figure_spec 的 template 可选：incline、flatblock、pulley、hang、circuit、projectile、container2balls、spring、bridge、field_region、bowl、bowl2balls、incline_baffle、ring_ball、three_ropes、rod_hinge（params 数值一律国际单位制，角度用度）。`
+
+export function fixUserPrompt(q: QuizDraft, issues: string[]): string {
+  return `题目草稿：
+题干：${q.stem}
+答案：${q.answer || '（无）'}
+解析：${q.solution || '（无）'}
+易错点：${q.pitfall || '（无）'}
+figure_spec：${q.figure_spec ? JSON.stringify(q.figure_spec) : '（无）'}
+
+审查发现的问题：
+${issues.map((s, i) => `${i + 1}. ${s}`).join('\n') || '（无）'}
+
+请按约定输出这道题的完整修正稿（单个 JSON 对象）。`
+}
+
+// 题干「如图」判定（出题终稿硬校验：提到如图 ⇒ 必须有 figure_spec）
+export function mentionsFigureStem(stem: string): boolean {
+  return /如图|如下图|见图/.test(stem || '')
 }

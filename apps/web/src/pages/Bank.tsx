@@ -16,7 +16,7 @@ import type { PaperQuestion } from '@/lib/print'
 import { specToSvg } from '@/lib/figure'
 import { aggregateKp } from '@/components/Charts'
 import { SCENES } from '@/labs/registry'
-import type { Question, Mistake, QuizDraft, QuizReview } from '@workbench/shared'
+import type { Question, Mistake, QuizDraft } from '@workbench/shared'
 import { todayLocal } from '@workbench/shared'
 
 const QTYPES = ['选择', '填空', '实验', '计算']
@@ -64,7 +64,8 @@ export default function Bank() {
   const [genForm, setGenForm] = useState({ kps: '', count: 5, level: '高考' as (typeof LEVELS)[number], qtypes: ['计算'] as string[], grade: '高一' })
   const [generating, setGenerating] = useState(false)
   const [drafts, setDrafts] = useState<QuizDraft[]>([])
-  const [reviews, setReviews] = useState<(QuizReview | null)[]>([])
+  // 终稿闭环：后端已自动修复/重生成，这里只展示被弃置的题（附原因），不会有「未解决」状态的草稿
+  const [discarded, setDiscarded] = useState<Array<{ reason: string }>>([])
   const [draftPick, setDraftPick] = useState<Set<number>>(new Set())
   const [draftSrc, setDraftSrc] = useState<Set<number>>(new Set()) // 编辑源码模式（默认渲染预览）
   const [mistakeKps, setMistakeKps] = useState<string[]>([]) // 从错题本聚合的知识点，供一键带入
@@ -183,8 +184,9 @@ export default function Bank() {
     if (!kps.length) { show('请填写知识点（或从错题薄弱点带入）'); return }
     setGenerating(true)
     try {
-      const r = await post<{ questions: QuizDraft[]; review: (QuizReview | null)[] | null }>('/api/quiz/generate', { ...genForm, kps, qtypes: genForm.qtypes })
-      // 稳定排序：按固定题型顺序渲染（后端已按题型分批生成，这里再兜底排一次；二审结果随题同步重排）
+      // 后端终稿闭环：二审未过的题已自动修复/重生成，列表里只有终稿与弃置记录
+      const r = await post<{ questions: QuizDraft[]; discarded?: Array<{ reason: string }> }>('/api/quiz/generate', { ...genForm, kps, qtypes: genForm.qtypes })
+      // 稳定排序：按固定题型顺序渲染（后端已按题型分批生成，这里再兜底排一次）
       const order = r.questions.map((_, i) => i)
       const sorted = order
         .map((i) => ({ i, d: r.questions[i] }))
@@ -194,27 +196,28 @@ export default function Bank() {
           return (ai < 0 ? QTYPE_ORDER.length : ai) - (bi < 0 ? QTYPE_ORDER.length : bi) || a.i - b.i
         })
       const qs = sorted.map((x) => x.d)
-      const rv = sorted.map((x) => (r.review && r.review.length === r.questions.length ? r.review[x.i] : null))
+      const dis = r.discarded || []
       setDrafts(qs)
-      setReviews(rv)
+      setDiscarded(dis)
       setDraftPick(new Set(qs.map((_, i) => i)))
       setDraftSrc(new Set())
-      const failCount = rv.filter((x) => x && !x.pass).length
-      show(failCount > 0 ? `已生成 ${qs.length} 道草稿，其中 ${failCount} 道二审发现问题（已标黄），请逐题确认` : `已生成 ${qs.length} 道题草稿，请逐题确认后存入题库`)
+      const autoFixed = qs.filter((d) => d.fix_note).length
+      if (!qs.length) {
+        show(`本题全部未过终审已弃置（${dis.length} 题），可换个知识点或降低难度重试`)
+      } else {
+        show(
+          dis.length
+            ? `已出 ${qs.length} 道终稿（自动修正 ${autoFixed} 道），弃置 ${dis.length} 道（原因见列表上方）`
+            : autoFixed
+              ? `已出 ${qs.length} 道终稿，其中 ${autoFixed} 道经二审自动修正，请确认后存入题库`
+              : `已出 ${qs.length} 道终稿，全部通过二审与数值复核，请确认后存入题库`
+        )
+      }
     } catch (e: any) {
       show(e.message || '生成失败')
     } finally {
       setGenerating(false)
     }
-  }
-
-  // 采纳二审修正稿
-  const adoptFix = (i: number) => {
-    const rv = reviews[i]
-    if (!rv?.fixed) return
-    setDrafts((ds) => ds.map((x, j) => (j === i ? { ...rv.fixed!, figure_spec: rv.fixed!.figure_spec ?? x.figure_spec } : x)))
-    setReviews((rs) => rs.map((x, j) => (j === i ? { pass: true, issues: [], fixed: null } : x)))
-    show(`第 ${i + 1} 题已替换为修正稿，请复核`)
   }
 
   // 存入题库：figure_spec 先在前端渲染成 SVG 存入 figure；疑似重复时确认后 force 重试
@@ -248,7 +251,7 @@ export default function Bank() {
         return
       }
       setDrafts([])
-      setReviews([])
+      setDiscarded([])
       setDraftPick(new Set())
       setDraftSrc(new Set())
       setShowGen(false)
@@ -431,30 +434,23 @@ export default function Bank() {
     )
   }
 
-  // 草稿卡：默认渲染预览（Katex），可切「编辑源码」；二审问题标黄 + 可采纳修正稿
+  // 草稿卡：终稿直接展示答案与解析（无需展开验证），自动修正过的题带修正说明
   const draftCard = (d: QuizDraft, i: number) => {
-    const rv = reviews[i]
-    const bad = rv && !rv.pass
     const figSvg = d.figure_spec ? specToSvg(d.figure_spec) : ''
     const isSrc = draftSrc.has(i)
     return (
-      <div key={i} className={`rounded-xl p-3 space-y-1.5 ${draftPick.has(i) ? (bad ? 'bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-300' : 'bg-slate-50 dark:bg-slate-800/60') : 'bg-slate-100/50 dark:bg-slate-800/20 opacity-50'}`}>
+      <div key={i} className={`rounded-xl p-3 space-y-1.5 ${draftPick.has(i) ? 'bg-slate-50 dark:bg-slate-800/60' : 'bg-slate-100/50 dark:bg-slate-800/20 opacity-50'}`}>
         <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer flex-wrap">
           <input type="checkbox" checked={draftPick.has(i)} onChange={() => setDraftPick((p) => { const n = new Set(p); n.has(i) ? n.delete(i) : n.add(i); return n })} />
           第 {i + 1} 题 · {d.qtype} · {diffBadge(d.difficulty)}
+          {d.fix_note && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-300" title={d.fix_note}>已自动修正</span>
+          )}
           <span className="flex-1" />
           <button className="text-primary-600 hover:underline" onClick={() => setDraftSrc((p) => { const n = new Set(p); n.has(i) ? n.delete(i) : n.add(i); return n })}>
             {isSrc ? '渲染预览' : '编辑源码'}
           </button>
         </label>
-        {bad && (
-          <div className="text-[11px] text-amber-600 dark:text-amber-400 space-y-1">
-            {rv!.issues.map((iss, k) => <div key={k}><TriangleAlert className="w-4 h-4 inline-block align-[-2px]" /> {iss}</div>)}
-            {rv!.fixed && (
-              <button className="btn-outline !px-2 !py-1 text-[11px] text-amber-600" onClick={() => adoptFix(i)}>采纳智能修正稿</button>
-            )}
-          </div>
-        )}
         {isSrc ? (
           <>
             <textarea className="input text-xs" rows={3} value={d.stem} onChange={(e) => setDrafts((ds) => ds.map((x, j) => (j === i ? { ...x, stem: e.target.value } : x)))} />
@@ -465,12 +461,17 @@ export default function Bank() {
           <>
             <div className="text-sm"><Katex text={d.stem} /></div>
             {figSvg && <QuestionFigure figure={JSON.stringify({ kind: 'svg', data: figSvg })} />}
-            <details className="text-xs">
-              <summary className="text-primary-600 cursor-pointer">答案与解析</summary>
-              <p className="mt-1"><b>答案：</b><Katex text={d.answer} /></p>
-              <p className="mt-1"><b>解析：</b><Katex text={d.solution} /></p>
+            <div className="text-xs space-y-1 border-t border-slate-100 dark:border-slate-700 pt-1.5">
+              <p><b>答案：</b><Katex text={d.answer || '（无）'} /></p>
+              <p><b>解析：</b><Katex text={d.solution || '（无）'} /></p>
               {d.pitfall && <p className="text-amber-600 dark:text-amber-400"><b>易错点：</b><Katex text={d.pitfall} /></p>}
-            </details>
+              {d.fix_note && (
+                <details className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                  <summary className="cursor-pointer">修正原因</summary>
+                  <div className="mt-0.5">{d.fix_note}</div>
+                </details>
+              )}
+            </div>
           </>
         )}
         {mentionsFigure(d.stem, figSvg) && (
@@ -530,16 +531,24 @@ export default function Bank() {
           </label>
         ))}
       </div>
-      <button className="btn-primary w-full" disabled={generating} onClick={generate}>{generating ? '生成中…（生成 + 自动二审，约需 30~90 秒）' : '开始生成'}</button>
-      <p className="text-[11px] text-slate-400">生成结果为草稿（含自动二审），逐题确认后才会存入题库（带智能生成标记）</p>
+      <button className="btn-primary w-full" disabled={generating} onClick={generate}>{generating ? '生成中…（生成 + 二审 + 自动修复闭环，约需 1~3 分钟）' : '开始生成'}</button>
+      <p className="text-[11px] text-slate-400">结果为终稿（自动二审 + 数值复核 + 答案解析一致性校验，未过的题已自动修复或弃置），确认后存入题库（带智能生成标记）</p>
 
       {drafts.length > 0 && (
         <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
           <div className="flex items-center">
-            <h3 className="text-sm font-semibold">草稿确认（{draftPick.size}/{drafts.length}）</h3>
+            <h3 className="text-sm font-semibold">终稿确认（{draftPick.size}/{drafts.length}）</h3>
             <span className="flex-1" />
-            <button className="text-xs text-slate-400 hover:text-red-500" onClick={() => { setDrafts([]); setReviews([]); setDraftPick(new Set()); setDraftSrc(new Set()) }}>丢弃</button>
+            <button className="text-xs text-slate-400 hover:text-red-500" onClick={() => { setDrafts([]); setDiscarded([]); setDraftPick(new Set()); setDraftSrc(new Set()) }}>丢弃</button>
           </div>
+          {discarded.length > 0 && (
+            <details className="text-[11px] rounded-lg bg-rose-50 dark:bg-rose-900/20 px-2.5 py-1.5 text-rose-600 dark:text-rose-300">
+              <summary className="cursor-pointer"><TriangleAlert className="w-4 h-4 inline-block align-[-2px]" /> 已弃置 {discarded.length} 道未过终审的题（点开看原因）</summary>
+              <div className="mt-1 space-y-0.5">
+                {discarded.map((d, k) => <div key={k}>{d.reason}</div>)}
+              </div>
+            </details>
+          )}
           {drafts.map((d, i) => draftCard(d, i))}
           <div className="flex gap-2">
             <button className="btn-primary flex-1" disabled={saving || draftPick.size === 0} onClick={saveDrafts}>

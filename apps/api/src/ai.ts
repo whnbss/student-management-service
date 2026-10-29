@@ -9,6 +9,7 @@ import {
   VARIANT_SYSTEM_PROMPT, QUIZ_SYSTEM_PROMPT, quizUserPrompt,
   TIERED_SYSTEM_PROMPT, REPORT_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT, reviewUserPrompt,
+  FIX_SYSTEM_PROMPT, fixUserPrompt,
   sanitizeAiText, sanitizeLatexChinese, FIGURE_TEMPLATES,
 } from '@workbench/shared'
 import path from 'node:path'
@@ -435,6 +436,25 @@ export async function reviewQuizDrafts(
     { model: provider.text_model || provider.vision_model, system: REVIEW_SYSTEM_PROMPT, user: reviewUserPrompt(drafts), temperature: 0.1 },
     validate,
     'review'
+  )
+}
+
+// 二审闭环修复：把未过审的题目草稿与问题清单喂回模型，输出完整修正稿（自动修复用，教师只看到终稿）
+export async function fixQuizDraft(
+  provider: AiProvider,
+  q: QuizDraft,
+  issues: string[]
+): Promise<{ result: { draft: QuizDraft; fix_note: string }; usage: ReturnType<typeof recordUsage> }> {
+  const validate = (obj: any): { draft: QuizDraft; fix_note: string } => {
+    const arr = validateQuizDrafts([obj], 1)
+    if (!arr.length) throw new Error('修正稿题干无效')
+    return { draft: arr[0], fix_note: sanitizeAiText(String(obj?.fix_note || '')).trim().slice(0, 200) }
+  }
+  return chatJson(
+    provider,
+    { model: provider.text_model || provider.vision_model, system: FIX_SYSTEM_PROMPT, user: fixUserPrompt(q, issues), temperature: 0.3 },
+    validate,
+    'quiz-fix'
   )
 }
 
