@@ -1,6 +1,17 @@
 // API 冒烟测试脚本（node smoke.mjs，验证 M1 全链路）
-// 可用 SMOKE_BASE 指向隔离实例（临时数据目录），避免触碰真实库
-const BASE = process.env.SMOKE_BASE || 'http://localhost:3210'
+// ⛔ 硬防护（P0-57②）：本脚本会调用 /api/settings/ai/reset 等改写配置的接口，必须在隔离实例上运行——
+//    未设 SMOKE_BASE / WORKBENCH_DATA_DIR 时直接拒绝执行，防止误打生产库把用户真实 AI 配置 reset 掉
+//    （#31 事故复盘：无防护时 reset 在脚本中段执行、崩溃后走不到末尾的配置还原，用户 Key 被清）
+const SMOKE_BASE_ENV = process.env.SMOKE_BASE
+const SMOKE_DATA_DIR = process.env.WORKBENCH_DATA_DIR
+if (!SMOKE_BASE_ENV || !SMOKE_DATA_DIR) {
+  console.error('⛔ 拒绝运行：本脚本会调用 /api/settings/ai/reset 等改写配置的接口，必须在隔离实例上执行。')
+  console.error('   正确用法：')
+  console.error('   1) WORKBENCH_DATA_DIR=<临时数据目录> 端口 3299 启动隔离后端；')
+  console.error('   2) SMOKE_BASE=http://localhost:3299 WORKBENCH_DATA_DIR=<同一目录> node apps/api/smoke.mjs')
+  process.exit(1)
+}
+const BASE = SMOKE_BASE_ENV
 let token = ''
 let pass = 0
 let fail = 0
@@ -721,7 +732,10 @@ log('B5 教案列表接口', r.status === 200 && Array.isArray(r.data))
 {
   const Database = (await import('better-sqlite3')).default
   const path = await import('node:path')
-  const dataDir = process.env.WORKBENCH_DATA_DIR || path.join(process.cwd(), '..', '..', 'data')
+  const fs = await import('node:fs')
+  const dataDir = SMOKE_DATA_DIR
+  // 隔离库目录不存在时先建目录（better-sqlite3 不会自动建目录，缺失曾导致 #31 轮崩溃）
+  fs.mkdirSync(dataDir, { recursive: true })
   const db2 = new Database(path.join(dataDir, 'app.db'))
   const fakePlan = {
     cover: { title: '冒烟教案', subtitle: '测试', source: '单元测试', time: date, composition: '诊断 · 框架 · 变式' },

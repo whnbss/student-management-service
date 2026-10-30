@@ -32,6 +32,11 @@ const noFig = rows.filter((r) => /如图|图所示/.test(String(r.stem || '')) &
 if (noFig.length) { hardFail++; console.log(`✗ 缺图：${noFig.length} 题题干称「如图」但 figure 为空 → ${noFig.map((r) => '#' + r.id).join(' ')}`) }
 else console.log('✓ 缺图：0 题（题干称「如图」的题均有配图）')
 
+// ---------- 2b. figure NaN 守卫（#32 新增：坐标计算为 NaN 的 SVG 渲染即 console error，#763/#764/#834 教训） ----------
+const nanFig = rows.filter((r) => String(r.figure || '').includes('NaN'))
+if (nanFig.length) { hardFail++; console.log(`✗ figure NaN：${nanFig.length} 题配图含 NaN 坐标（渲染即报错）→ ${nanFig.map((r) => '#' + r.id).join(' ')}`) }
+else console.log('✓ figure NaN：0 题（全部配图坐标有效）')
+
 // ---------- 2a-2. B1 配图铁律进度（非硬校验：概念题豁免，仅报告涉计算/情境题的配图覆盖率） ----------
 {
   const need = rows.filter((r) => requiresFigure(String(r.stem || ''), String(r.qtype || '')))
