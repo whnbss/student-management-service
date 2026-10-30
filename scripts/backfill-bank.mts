@@ -50,7 +50,9 @@ async function restoreProviders() {
 
 // 难度档 → level（接口三档）与落库难度收敛规则
 const TIER_LEVEL: Record<string, '基础' | '高考' | '竞赛'> = { 基础: '基础', 中档: '高考', 压轴: '竞赛' }
-function settleDifficulty(tier: string, modelD: number): number {
+// d4 档（验收 #26 P3-47）：「综合但不压轴」的中档偏上档，落库难度强制 4，level 用竞赛档让模型按 D4 命题
+function settleDifficulty(tier: string, modelD: number, d4?: boolean): number {
+  if (d4) return 4
   if (tier === '中档') return 3
   if (tier === '压轴') return 5
   return Math.min(2, Math.max(1, modelD || 2)) // 基础：模型给 1~2 内就保留，越界收敛到 2
@@ -170,8 +172,8 @@ function covered(kps: string[], section: string): boolean {
   return kps.some((k) => section.includes(k) || k.includes(section))
 }
 
-// 计划文件结构：{ topics: [{ vol, chapter, grade, groups: [{ qtype, tier, n, kps, note? }] }] }
-type PlanGroup = { qtype: string; tier: string; n: number; kps: string[]; note?: string }
+// 计划文件结构：{ topics: [{ vol, chapter, grade, groups: [{ qtype, tier, n, kps, note?, d4? }] }] }
+type PlanGroup = { qtype: string; tier: string; n: number; kps: string[]; note?: string; d4?: boolean }
 type PlanTopic = { vol: string; chapter: string; grade: string; groups: PlanGroup[] }
 
 // 把（题型×难度档）相同的组内槽位合并成出题调用
@@ -189,20 +191,20 @@ function groupSlots(slots: Array<{ qtype: string; tier: string }>): Array<{ qtyp
 }
 
 async function generateAndSave(opts: {
-  label: string; grade: string; kps: string[]; qtype: string; tier: string; n: number; note?: string
+  label: string; grade: string; kps: string[]; qtype: string; tier: string; n: number; note?: string; d4?: boolean
 }, out: { saved: number; skipped: string[]; failed: Array<{ label: string; err: string }> }): Promise<number> {
-  const { label, grade, kps, qtype, tier, n, note } = opts
-  const level = TIER_LEVEL[tier] || '高考'
-  console.log(`\n▶ ${label}（${grade} · ${qtype} · ${tier}/${level} · ${n} 题）…`)
+  const { label, grade, kps, qtype, tier, n, note, d4 } = opts
+  const level: '基础' | '高考' | '竞赛' = d4 ? '竞赛' : TIER_LEVEL[tier] || '高考'
+  console.log(`\n▶ ${label}（${grade} · ${qtype} · ${tier}${d4 ? '/D4' : ''}/${level} · ${n} 题）…`)
   try {
     const g = await req('POST', '/api/quiz/generate', { kps, count: n, level, qtypes: [qtype], grade, hint: note })
     if (g.status !== 200 || !g.data?.ok) { out.failed.push({ label, err: g.data?.error || `HTTP ${g.status}` }); return 0 }
     let drafts = (g.data.questions || []) as any[]
     const reviews = (g.data.review || []) as any[]
     if (note) console.log(`  附加要求：${note}`)
-    // 难度按档位收敛落库（中档→3、压轴→5、基础→1~2）；二审结果与草稿按原始下标配对后再过滤（防下标错位）
+    // 难度按档位收敛落库（中档→3、压轴→5、d4→4、基础→1~2）；二审结果与草稿按原始下标配对后再过滤（防下标错位）
     let pairs = drafts.map((d, j) => ({ d, review: reviews[j] })).map(({ d, review }) => ({
-      d: { ...d, qtype, difficulty: settleDifficulty(tier, d.difficulty) },
+      d: { ...d, qtype, difficulty: settleDifficulty(tier, d.difficulty, d4) },
       review,
     }))
     // 缺图守卫：题干出现「如图」但配图渲染为空（模板不存在/参数非法）→ 弃用，保证全库 0 缺图
@@ -270,6 +272,7 @@ async function main() {
           tier: g.tier,
           n: g.n,
           note: g.note,
+          d4: g.d4,
         })
       }
     }

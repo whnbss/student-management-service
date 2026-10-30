@@ -53,7 +53,7 @@ else console.log('✓ 配图场景：全部非空配图（不限题干是否称�
 // ---------- 2c. 模板强标记守卫（#25 新增：非电磁类知识点却带「匀强场区」「+q」电场模板图 → 硬失败） ----------
 // #609（万有引力天体）题干不含「如图」且图内「匀强场区」的「匀」撞上题干「匀速」逃过字面匹配，
 // 但图是电场模板残留。此处用「知识点是否含电磁类关键词」作门槛，比字面匹配更稳。
-const EM_KP = /电场|磁场|电磁|感应|楞次|安培|洛伦兹|发电机|电动机|电容器|电荷|带电/
+const EM_KP = /电场|磁场|电磁|感应|楞次|安培|洛伦兹|发电机|电动机|电容器|电荷|带电|电势|等势/
 const STRONG_TPL = /匀强场区|\+q/
 const tmplBad: string[] = []
 for (const r of rows) {
@@ -101,6 +101,14 @@ const VOL: Record<string, string> = { bxF1: '必修一', bxF2: '必修二', bxF3
 const sections: string[] = []
 TEXTBOOK.forEach((v) => v.chapters.forEach((ch) => ch.sections.forEach((s) => sections.push(s))))
 const secSet = new Set(sections.map(norm))
+// ---------- 5b. 节名规范守卫（验收 #26 P3-45/46：每题至少含 1 个教材规范节名，精确归一匹配） ----------
+const noSec: string[] = []
+for (const r of rows) {
+  const kps = kpOf(r.knowledge_points)
+  if (!kps.some((k) => secSet.has(norm(k)))) noSec.push(`#${r.id}`)
+}
+if (noSec.length) { hardFail++; console.log(`✗ 节名规范：${noSec.length} 题 knowledge_points 不含任何教材节名（精确筛选/充实度统计会漏题）→ ${noSec.join(' ')}`) }
+else console.log('✓ 节名规范：每题 knowledge_points 均含至少 1 个教材规范节名')
 const coveredExact = new Set<string>()
 for (const r of rows) for (const k of kpOf(r.knowledge_points)) if (secSet.has(norm(k))) coveredExact.add(norm(k))
 console.log(`覆盖（精确）：${coveredExact.size}/${sections.length}（${Math.round((coveredExact.size / sections.length) * 1000) / 10}%）`)
