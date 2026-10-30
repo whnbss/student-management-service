@@ -2,15 +2,40 @@
 // ⛔ 硬防护（P0-57②）：本脚本会调用 /api/settings/ai/reset 等改写配置的接口，必须在隔离实例上运行——
 //    未设 SMOKE_BASE / WORKBENCH_DATA_DIR 时直接拒绝执行，防止误打生产库把用户真实 AI 配置 reset 掉
 //    （#31 事故复盘：无防护时 reset 在脚本中段执行、崩溃后走不到末尾的配置还原，用户 Key 被清）
+import path from 'node:path'
 const SMOKE_BASE_ENV = process.env.SMOKE_BASE
 const SMOKE_DATA_DIR = process.env.WORKBENCH_DATA_DIR
 if (!SMOKE_BASE_ENV || !SMOKE_DATA_DIR) {
   console.error('⛔ 拒绝运行：本脚本会调用 /api/settings/ai/reset 等改写配置的接口，必须在隔离实例上执行。')
   console.error('   正确用法：')
-  console.error('   1) WORKBENCH_DATA_DIR=<临时数据目录> 端口 3299 启动隔离后端；')
-  console.error('   2) SMOKE_BASE=http://localhost:3299 WORKBENCH_DATA_DIR=<同一目录> node apps/api/smoke.mjs')
+  console.error('   1) WORKBENCH_DATA_DIR=<临时数据目录的绝对路径，⚠️ 必须绝对路径> 端口 3299 启动隔离后端；')
+  console.error('   2) SMOKE_BASE=http://localhost:3299 WORKBENCH_DATA_DIR=<同一绝对路径> node apps/api/smoke.mjs')
   process.exit(1)
 }
+
+// P2-58：相对路径防护——smoke（cwd=仓库根）与隔离后端（cwd=apps/api）会把同一相对串解析到不同目录，
+// 曾致 smoke 静默 mkdir「幽灵空库」后报 no such table。统一 resolve 成绝对路径，并自检该库文件
+// 确为 SMOKE_BASE 实例在用的库（有 students 业务表），否则拒跑。
+const SMOKE_DATA_ABS = path.resolve(SMOKE_DATA_DIR)
+if (!path.isAbsolute(SMOKE_DATA_DIR)) {
+  console.error(`⚠️  WORKBENCH_DATA_DIR 是相对路径，smoke 侧（cwd=${process.cwd()}）解析为：${SMOKE_DATA_ABS}`)
+  console.error('    隔离后端实例（cwd=apps/api）解析结果可能不同，⚠️ 请改用绝对路径后重试。')
+}
+const SMOKE_DB_PATH = path.join(SMOKE_DATA_ABS, 'app.db')
+let smokeDbTables = []
+try {
+  const Database0 = (await import('better-sqlite3')).default
+  const db0 = new Database0(SMOKE_DB_PATH, { readonly: true })
+  smokeDbTables = db0.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((x) => x.name)
+  db0.close()
+} catch { /* 文件不存在或被锁 */ }
+if (!smokeDbTables.includes('students')) {
+  console.error('⛔ 库路径自检失败：WORKBENCH_DATA_DIR 解析出的库不是 SMOKE_BASE 实例在用的业务库。')
+  console.error(`   smoke 侧库文件：${SMOKE_DB_PATH}（不存在或缺 students 表，疑似「幽灵空库」，参照验收 #33 P2-58）`)
+  console.error('   修复：先启动隔离后端（WORKBENCH_DATA_DIR 用绝对路径），再以同一绝对路径运行本脚本。')
+  process.exit(1)
+}
+console.error(`✅ 库路径自检通过：${SMOKE_DB_PATH}`)
 const BASE = SMOKE_BASE_ENV
 let token = ''
 let pass = 0
@@ -733,8 +758,9 @@ log('B5 教案列表接口', r.status === 200 && Array.isArray(r.data))
   const Database = (await import('better-sqlite3')).default
   const path = await import('node:path')
   const fs = await import('node:fs')
-  const dataDir = SMOKE_DATA_DIR
+  const dataDir = SMOKE_DATA_ABS
   // 隔离库目录不存在时先建目录（better-sqlite3 不会自动建目录，缺失曾导致 #31 轮崩溃）
+  // 注：启动时已自检 students 表在位，此处目录必已存在；保留 mkdir 兜底
   fs.mkdirSync(dataDir, { recursive: true })
   const db2 = new Database(path.join(dataDir, 'app.db'))
   const fakePlan = {
