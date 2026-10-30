@@ -815,7 +815,10 @@ export function checkSolutionArithmetic(solution: unknown): ArithIssue[] {
         const expect = evalArith(lhs)
         if (expect === null) continue
         const got = Number(gotM[0])
-        if (Math.abs(expect - got) > Math.max(0.05, Math.abs(expect) * 0.02)) {
+        // 容差：相对 2% 吸收有效数字舍入；绝对下限从 0.05 收紧到 0.005（验收 #36 P1-19：
+        // #855 写 0.005 实为 0.05，0.045 的偏差恰被旧 0.05 绝对容差吞掉。0.005 下限仍能吸收
+        // 两位小数舍入的正常情形，如 0.0499→0.05 偏差 0.0001、0.026→0.03 偏差 0.004）
+        if (Math.abs(expect - got) > Math.max(0.005, Math.abs(expect) * 0.02)) {
           issues.push({ expr: lhs, expect: Number(expect.toFixed(4)), got })
         }
       }

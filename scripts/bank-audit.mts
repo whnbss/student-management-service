@@ -136,6 +136,15 @@ for (const r of rows) {
 if (bareTotal) { hardFail++; console.log(`✗ math 外裸 LaTeX：${bareTotal} 处（定界符外命令字面显示）→ ${bareIds.join(' ')}`) }
 else console.log('✓ math 外裸 LaTeX：0 处')
 
+// ---------- 3d. 选择题选项守卫（验收 #36 P2-59：questions 表无 options 列，选项文本必须嵌于 stem） ----------
+// 口径：qtype 含「选」的题，stem 必须含 A./B. 类选项标记（[ABCD] 后跟 . 、 ．），否则用户端见题无选项无法作答 → 硬失败
+const noOpt: string[] = []
+for (const r of rows) {
+  if (/选/.test(String(r.qtype || '')) && !/[ABCD][.、．]/.test(String(r.stem || ''))) noOpt.push(`#${r.id}`)
+}
+if (noOpt.length) { hardFail++; console.log(`✗ 选择题选项：${noOpt.length} 题 qtype 为选择但 stem 无 A~D 选项文本（用户端无法作答）→ ${noOpt.join(' ')}`) }
+else console.log('✓ 选择题选项：全部选择题 stem 均含 A~D 选项文本')
+
 // ---------- 4. 数值复核（表达式求值，全库 solution 扫描） ----------
 const flagged: string[] = []
 for (const r of rows) {
