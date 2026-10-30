@@ -28,13 +28,16 @@ export default async function mistakeRoutes(app: FastifyInstance) {
     if (!b.stem || !String(b.stem).trim()) { reply.code(400).send({ error: '题干必填' }); return }
     const today = todayLocal()
     const r = db.prepare(`INSERT INTO mistakes(
-      student_id, image, stem, correct_solution, wrong_solution, error_type,
+      student_id, image, stem, options, figure, correct_solution, wrong_solution, error_type,
       knowledge_points, chapter, difficulty, mastery_status, redo_due, redo_stage, source, created_at
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      b.student_id, b.image || '', String(b.stem).trim(), b.correct_solution || '', b.wrong_solution || '',
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      b.student_id, b.image || '', String(b.stem).trim(),
+      JSON.stringify(Array.isArray(b.options) ? b.options.map(String) : []),
+      String(b.figure || ''),
+      b.correct_solution || '', b.wrong_solution || '',
       b.error_type || '', JSON.stringify(Array.isArray(b.knowledge_points) ? b.knowledge_points : []),
       b.chapter || '', Math.min(5, Math.max(1, Number(b.difficulty) || 3)),
-      '未掌握', addDays(today, REDO_INTERVALS[0]), 0, 'manual', nowISO()
+      '未掌握', addDays(today, REDO_INTERVALS[0]), 0, b.source || 'manual', nowISO()
     )
     return { ok: true, id: r.lastInsertRowid }
   })
@@ -44,11 +47,15 @@ export default async function mistakeRoutes(app: FastifyInstance) {
     const cur = db.prepare('SELECT * FROM mistakes WHERE id = ?').get(id) as any
     if (!cur) { reply.code(404).send({ error: '错题不存在' }); return }
     const b = (req.body || {}) as any
-    const fields = ['stem', 'correct_solution', 'wrong_solution', 'error_type', 'chapter', 'image'] as const
+    const fields = ['stem', 'correct_solution', 'wrong_solution', 'error_type', 'chapter', 'image', 'figure'] as const
     const sets: string[] = []
     const args: any[] = []
     for (const f of fields) {
       if (b[f] !== undefined) { sets.push(`${f} = ?`); args.push(String(b[f])) }
+    }
+    if (b.options !== undefined) {
+      sets.push('options = ?')
+      args.push(JSON.stringify(Array.isArray(b.options) ? b.options.map(String) : []))
     }
     if (b.knowledge_points !== undefined) {
       sets.push('knowledge_points = ?')

@@ -23,6 +23,22 @@ function studentWithHours(id: number) {
   return { ...s, remaining_hours: remainingHours(id) }
 }
 
+// B2：教师端课时费标签（学生列表展示）
+// - package 模式：最近一个课时包的单价（amount/hours），如「¥45/课时」
+// - per_lesson 模式：档案里的单次课费用，如「¥300/课」
+// - 无定价信息返回空串
+function feeLabelOf(s: { id: number; billing_mode?: string; lesson_price?: number }): string {
+  if (s.billing_mode === 'per_lesson') {
+    const p = Number(s.lesson_price) || 0
+    return p > 0 ? `¥${Number(p.toFixed(2))}/课` : ''
+  }
+  const pkg = db
+    .prepare('SELECT hours, amount FROM hour_packages WHERE student_id = ? AND hours > 0 AND amount > 0 ORDER BY purchase_date DESC, id DESC LIMIT 1')
+    .get(s.id) as { hours: number; amount: number } | undefined
+  if (!pkg) return ''
+  return `¥${Number((pkg.amount / pkg.hours).toFixed(2))}/课时`
+}
+
 export default async function studentRoutes(app: FastifyInstance) {
   // ---- 学生 CRUD ----
   app.get('/api/students', async (req) => {
@@ -37,7 +53,7 @@ export default async function studentRoutes(app: FastifyInstance) {
     if (status) { sql += ' AND status = ?'; args.push(status) }
     sql += ' ORDER BY created_at DESC'
     const list = db.prepare(sql).all(...args) as any[]
-    return list.map((s) => ({ ...s, remaining_hours: remainingHours(s.id) }))
+    return list.map((s) => ({ ...s, remaining_hours: remainingHours(s.id), fee_label: feeLabelOf(s) }))
   })
 
   app.post('/api/students', async (req, reply) => {

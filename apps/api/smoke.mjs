@@ -635,6 +635,118 @@ log('purge后学生仍在可重建', r.status === 200 && r.data?.id === sidPurge
 r = await req('DELETE', `/api/students/${sidPurge}`)
 log('清理重建测试学生', r.status === 200)
 
+
+// ==================== 功能批次 B 冒烟（B2 课时费展示 / B3 统计入账 / B4 原题还原 / B5 智能教案） ====================
+
+// B3-1. 按日入账明细：造一笔课时包缴费 + 一笔按次结算，当日总额 = 逐笔之和，类型齐全
+r = await req('POST', `/api/students/${sid}/packages`, { hours: 2, amount: 600, purchase_date: date, note: 'B3测试包' })
+log('B3 准备课时包缴费', r.status === 200)
+r = await req('PUT', `/api/students/${sid}`, { billing_mode: 'per_lesson', lesson_price: 300 })
+log('B3 切按次结算', r.status === 200)
+r = await req('POST', '/api/attendance', { student_id: sid, date, status: '到课' })
+log('B3 按次签到生成结算', r.status === 200 && r.data?.settlement_amount === 300, `amount=${r.data?.settlement_amount}`)
+r = await req('GET', `/api/stats/daily?date=${date}`)
+{
+  const b3Sum = (r.data?.items || []).reduce((s2, x) => s2 + x.amount, 0)
+  log('B3 按日入账总额=逐笔之和', r.status === 200 && Math.abs((r.data?.total ?? 0) - b3Sum) < 0.01 && (r.data?.items || []).some((x) => x.type === '课时包') && (r.data?.items || []).some((x) => x.type === '按次结算'), `total=${r.data?.total} 笔数=${r.data?.items?.length}`)
+}
+// B3-2. overview 收入口径 = payments + settlements（隔离库基线收入为 0，直接下限校验）
+r = await req('GET', '/api/stats/overview')
+{
+  const expectMin = 600 + 300
+  log('B3 累计收入含按次结算', r.status === 200 && (r.data?.totals?.total_income ?? 0) >= expectMin, `total_income=${r.data?.totals?.total_income}`)
+  log('B3 本月收入含两笔', (r.data?.monthly?.at(-1)?.income ?? 0) >= expectMin, `month=${r.data?.monthly?.at(-1)?.income}`)
+}
+r = await req('PUT', `/api/students/${sid}`, { billing_mode: 'package' })
+log('B3 还原充值模式', r.status === 200)
+
+// B2-1. 学生 token 课时包不含金额字段（package 模式）
+// 注意：学生账号已在 32m 被删除，这里重新开通并用改密后的密码登录
+token = savedTeacherToken
+await req('POST', '/api/accounts', { student_id: sid })
+r = await req('POST', '/api/auth/login', { username: '张小明', password: '13800000000' })
+const stuTokenB = r.data?.token
+log('B2 学生账号重新开通并登录', !!stuTokenB)
+token = stuTokenB
+r = await req('GET', '/api/student/hours')
+log('B2 学生端课时包无金额', (r.data?.packages || []).every((p2) => !('amount' in p2) && !('fee' in p2)))
+// B2-2. 学生端 me 不下发单价（package 模式 lesson_price 恒 0）
+r = await req('GET', '/api/student/me')
+log('B2 学生端 me 无单价', r.status === 200 && !(r.data?.lesson_price > 0), `lesson_price=${r.data?.lesson_price} status=${r.status} body=${JSON.stringify(r.data).slice(0, 120)}`)
+token = savedTeacherToken
+
+// B2-3. 教师端学生列表带课时费标签（fee_label）
+r = await req('GET', '/api/students')
+const b2stu = (r.data || []).find((s2) => s2.id === sid)
+log('B2 学生列表课时费标签', r.status === 200 && typeof b2stu?.fee_label === 'string', `fee_label=${b2stu?.fee_label}`)
+
+// B4. 原题还原：带 stem/options/figure_spec 的 ai_result 确认入库 →
+//   错题含原题全文 + 选项 + 题图（服务端渲染 SVG），且原题进题库（source=photo）
+const b4Result = {
+  paper_meta: { type: '试卷', grade: '高一', score_estimate: 60 },
+  items: [
+    {
+      no: 1, verdict: '错', error_step: '第二问', error_type: '计算失误', knowledge_points: ['匀变速直线运动的位移与时间的关系'], comment: '刹车问题误用位移公式',
+      stem: '汽车以 $v_0=20\\ \\text{m/s}$ 匀速行驶，刹车后加速度大小 $a=5\\ \\text{m/s}^2$，求刹车后 6 s 内位移。',
+      options: ['A. 30 m', 'B. 40 m', 'C. 60 m', 'D. 80 m'],
+      reference_answer: 'B。刹车时间 4 s，位移 40 m', figure_spec: { template: 'car_road', params: { kind: 'brake', v0: '20 m/s', label: '汽车' } }, figure_status: '已重绘',
+    },
+    { no: 2, verdict: '对', error_step: '', error_type: '', knowledge_points: ['牛顿第二定律'], comment: '正确', stem: '下列关于惯性的说法正确的是（　　）', options: [], reference_answer: 'A', figure_spec: null, figure_status: '' },
+  ],
+  weak_points: [], framework: [], next_class_questions: [], suggestions: [], overall_comment: '继续加油', unrecognized: [],
+}
+r = await req('POST', `/api/students/${sid}/logs`, { date, type: '作业', content: 'B4 原题还原冒烟', images: [], ai_result: b4Result, create_mistakes: true, mistake_nos: [1], photo_bank: true, photo_bank_nos: [1] })
+const b4LogId = r.data?.id
+log('B4 学情落库+原题入库计数', r.status === 200 && r.data?.mistakes_created === 1 && r.data?.bank_questions_created === 1, `mistakes=${r.data?.mistakes_created} bank=${r.data?.bank_questions_created}`)
+r = await req('GET', `/api/mistakes?student_id=${sid}`)
+const b4Mk = (r.data || []).find((m2) => m2.log_id === b4LogId)
+log('B4 错题 stem=原题全文', !!b4Mk && (b4Mk.stem || '').includes('刹车后 6 s 内位移'))
+{
+  let opts = []
+  try { opts = JSON.parse(b4Mk?.options || '[]') } catch { /* ignore */ }
+  log('B4 错题含选择题选项', opts.length === 4 && opts[0].startsWith('A.'), `n=${opts.length}`)
+  let figOK = false
+  try { figOK = JSON.parse(b4Mk?.figure || '{}')?.data?.startsWith('<svg') } catch { /* ignore */ }
+  log('B4 错题题图=SVG', figOK)
+}
+r = await req('GET', '/api/questions?q=' + encodeURIComponent('刹车后 6 s 内位移'))
+const b4Q = (r.data || []).find((q2) => q2.source === 'photo')
+log('B4 原题进题库(source=photo)', !!b4Q && (b4Q.stem || '').includes('A. 30 m'))
+if (b4Q?.id) await req('DELETE', `/api/questions/${b4Q.id}`)
+if (b4LogId) await req('DELETE', `/api/logs/${b4LogId}`)
+
+// B5. 智能教案：接口骨架 + CRUD（隔离库无真实 AI Key，生成链路不冒烟；plan 数据 DB 直插验证读取/删除）
+r = await req('GET', '/api/lesson-plans')
+log('B5 教案列表接口', r.status === 200 && Array.isArray(r.data))
+{
+  const Database = (await import('better-sqlite3')).default
+  const path = await import('node:path')
+  const dataDir = process.env.WORKBENCH_DATA_DIR || path.join(process.cwd(), '..', '..', 'data')
+  const db2 = new Database(path.join(dataDir, 'app.db'))
+  const fakePlan = {
+    cover: { title: '冒烟教案', subtitle: '测试', source: '单元测试', time: date, composition: '诊断 · 框架 · 变式' },
+    overview: { text: '总览', choice_table: [{ no: '1', context: '情境', answer: 'B', correct: 'C', gap: '概念' }], nonchoice_table: [], mainlines: ['主线一'], strengths: '计算稳' },
+    frameworks: [{ title: '框架一', targets: '针对第1题', priority: '★', content: ['结论'], self_check: ['自查'] }],
+    variants: [{ ref: '对应第1题', topic: '测试', stem: '题干', solution: '解析', insight: '点睛' }],
+    homework: { text: '收尾', items: ['① 原题重做'] },
+  }
+  db2.prepare('INSERT INTO lesson_plans(student_id, exam_name, images, analysis_json, plan_json, created_at) VALUES(?,?,?,?,?,?)')
+    .run(sid, '冒烟试卷', '[]', JSON.stringify({ items: [{ no: '1' }] }), JSON.stringify(fakePlan), new Date().toISOString())
+  const lpId = db2.prepare('SELECT id FROM lesson_plans ORDER BY id DESC LIMIT 1').get()?.id
+  db2.close()
+  r = await req('GET', '/api/lesson-plans')
+  log('B5 列表含新教案', r.status === 200 && (r.data || []).some((x) => x.id === lpId), `id=${lpId}`)
+  r = await req('GET', `/api/lesson-plans/${lpId}`)
+  log('B5 详情含完整 plan 结构', r.status === 200 && r.data?.plan?.plan?.cover?.title === '冒烟教案' && r.data?.plan?.plan?.overview?.choice_table?.length === 1)
+  r = await req('DELETE', `/api/lesson-plans/${lpId}`)
+  log('B5 删除教案', r.status === 200 && r.data?.ok)
+  r = await req('GET', `/api/lesson-plans/${lpId}`)
+  log('B5 删除后 404', r.status === 404)
+}
+// B5 生成接口：缺图片 → 400（不真调 AI）
+r = await req('POST', '/api/lesson-plans', { student_id: sid, exam_name: '冒烟', images: [] })
+log('B5 无图片 400', r.status === 400)
+
 // 31. 恢复测试前的 AI 配置 + 清理测试数据（不能 reset 成默认值，会清掉用户真实填写的 Key）
 await req('PUT', '/api/settings/ai', { providers: savedProviders || [], proxy: savedProxy, active_id: savedActiveId })
 r = await req('GET', '/api/settings/ai')

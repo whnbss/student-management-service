@@ -420,6 +420,8 @@ export default function StudentDetail() {
                       <span className="num font-medium">{p.hours} 课时</span>
                       <span className="text-slate-400 text-xs ml-2 num">{p.purchase_date}</span>
                       {p.note && <span className="text-slate-400 text-xs ml-2">{p.note}</span>}
+                      {/* B2：教师端可见每包单价（金额/次数） */}
+                      {p.hours > 0 && p.amount > 0 && <span className="text-slate-400 text-xs ml-2 num">¥{(p.amount / p.hours).toFixed(2)}/课时</span>}
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="num">¥{p.amount.toFixed(2)}</span>

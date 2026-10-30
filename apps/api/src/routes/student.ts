@@ -54,8 +54,8 @@ export default async function studentRoutes(app: FastifyInstance) {
       status: st.status,
       remaining_hours: remainingHours(st.id),
       billing_mode: billingModeOf(st.id),
-      // 隐私：学生端不下发单次课费单价（按次结算时固定为 0，前端也不展示）
-      lesson_price: billingModeOf(st.id) === 'per_lesson' ? 0 : Number(st.lesson_price) || 0,
+      // 隐私（B2）：学生端一切金额不下发——单价恒为 0，费用只在教师端可见
+      lesson_price: 0,
       must_change_pwd: !!acc.must_change_pwd,
       account_status: acc.status,
     }

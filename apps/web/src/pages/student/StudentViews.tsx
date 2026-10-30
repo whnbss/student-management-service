@@ -5,6 +5,7 @@ import { ChevronDown, CircleCheck } from 'lucide-react'
 import { get, post } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
 import Katex from '@/components/Katex'
+import QuestionFigure from '@/components/QuestionFigure'
 import { KpChips } from '@/components/Kp'
 import type { Mistake } from '@workbench/shared'
 import type { StudentMe } from '@workbench/shared'
@@ -78,6 +79,12 @@ export function StudentMistakes() {
       </div>
       <div className="text-sm cursor-pointer" onClick={() => toggle(m.id)}>
         <Katex text={m.stem} />
+        {optionsOf(m).length > 0 && (
+          <div className="text-xs text-slate-600 dark:text-slate-300 space-y-0.5 mt-1">
+            {optionsOf(m).map((o, i) => <p key={i}><Katex text={o} /></p>)}
+          </div>
+        )}
+        <QuestionFigure figure={m.figure} />
         {m.image && <img src={m.image} className="mt-2 rounded-lg max-h-40 object-cover" loading="lazy" />}
       </div>
       <div className="mt-2"><KpChips kps={kpOf(m)} /></div>
@@ -187,7 +194,6 @@ export function StudentHours() {
                 <div key={p.id} className="flex items-center justify-between text-sm num">
                   <span className="text-slate-500">{p.purchase_date}</span>
                   <span>+{p.hours} 课时</span>
-                  <span className="text-slate-400">¥{p.amount}</span>
                 </div>
               ))}
             </div>
@@ -290,6 +296,8 @@ export function StudentReports() {
     </div>
   )
 }
+
+function optionsOf(m: Mistake): string[] { try { const a = JSON.parse((m as any).options || '[]'); return Array.isArray(a) ? a.map(String) : [] } catch { return [] } }
 
 function kpOf(m: Mistake): string[] {
   try { return JSON.parse(m.knowledge_points || '[]') as string[] } catch { return [] }

@@ -182,6 +182,7 @@ export default function Students() {
                 <div className={`text-right shrink-0 num ${s.remaining_hours <= 3 ? 'text-red-500' : 'text-slate-500'}`}>
                   <div className="text-lg font-semibold leading-none">{s.remaining_hours}</div>
                   <div className="text-[10px]">剩余课时{s.remaining_hours <= 3 && ' ⚠️'}</div>
+                  {(s as any).fee_label && <div className="text-[10px] text-slate-400 mt-0.5">{(s as any).fee_label}</div>}
                 </div>
               )}
             </Link>

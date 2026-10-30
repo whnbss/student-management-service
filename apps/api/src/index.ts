@@ -21,6 +21,7 @@ import shareRoutes from './routes/share'
 import accountRoutes from './routes/accounts'
 import studentPortalRoutes from './routes/student'
 import notificationRoutes from './routes/notifications'
+import lessonPlanRoutes from './routes/lessonPlans'
 import { statsRoutes } from './routes/stats'
 
 // trustProxy：反代/隧道（Cloudflare Tunnel 等）场景下让 Fastify 按 X-Forwarded-For 解析真实客户端信息
@@ -43,6 +44,7 @@ await app.register(shareRoutes)
 await app.register(accountRoutes)
 await app.register(studentPortalRoutes)
 await app.register(notificationRoutes)
+await app.register(lessonPlanRoutes)
 await app.register(statsRoutes)
 
 // 统一错误处理：返回 { error } 而非堆栈

@@ -3,13 +3,14 @@
 // - 输出严格 JSON 校验，失败自动重试 2 次（共 3 次尝试），绝不入库脏数据
 // - 每次调用记录 token 用量与费用估算（ai_usage 表）
 import { db, getSetting, nowISO } from './db'
-import type { AiProvider, AiAnalysisResult, Grade, QuizDraft, QuizLevel, ParentReport, QuizReview, FigureSpec } from '@workbench/shared'
+import type { AiProvider, AiAnalysisResult, Grade, QuizDraft, QuizLevel, ParentReport, QuizReview, FigureSpec, LessonDiagnosis, LessonPlan } from '@workbench/shared'
 import {
   ANALYZE_SYSTEM_PROMPT, analyzeUserPrompt,
   VARIANT_SYSTEM_PROMPT, QUIZ_SYSTEM_PROMPT, quizUserPrompt,
   TIERED_SYSTEM_PROMPT, REPORT_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT, reviewUserPrompt,
   FIX_SYSTEM_PROMPT, fixUserPrompt,
+  LESSON_DIAGNOSE_SYSTEM_PROMPT, LESSON_PLAN_SYSTEM_PROMPT,
   sanitizeAiText, sanitizeLatexChinese, FIGURE_TEMPLATES,
 } from '@workbench/shared'
 import path from 'node:path'
@@ -303,6 +304,12 @@ function validateAnalysis(obj: any): AiAnalysisResult {
           error_type: ERROR_TYPES.includes(it?.error_type) ? it.error_type : '',
           knowledge_points: Array.isArray(it?.knowledge_points) ? it.knowledge_points.map(String) : [],
           comment: String(it?.comment || ''),
+          // ---- B4 原题还原：逐字题干 / 选项 / 参考答案 / 配图重绘规格（识别不清严禁编造） ----
+          stem: sanitizeLatexChinese(sanitizeAiText(it?.stem)).trim(),
+          options: Array.isArray(it?.options) ? it.options.map((o: any) => sanitizeLatexChinese(sanitizeAiText(o)).trim()).filter(Boolean) : [],
+          reference_answer: sanitizeLatexChinese(sanitizeAiText(it?.reference_answer)).trim(),
+          figure_spec: sanitizeFigureSpec(it?.figure_spec),
+          figure_status: it?.figure_status === '图待补' ? '图待补' : it?.figure_status === '已重绘' ? '已重绘' : '',
         }))
       : [],
     weak_points: Array.isArray(obj.weak_points)
@@ -572,5 +579,129 @@ export async function generateVariants(
     { model: provider.text_model, system: VARIANT_SYSTEM_PROMPT, user, temperature: 0.7 },
     validateVariants,
     'variants'
+  )
+}
+
+// ---------- 业务（B5）：智能教案 —— 试卷照片逐题诊断 → 结构化错题讲义 ----------
+const txtArr = (v: any): string[] => (Array.isArray(v) ? v.map((x) => sanitizeAiText(String(x))).filter(Boolean) : [])
+
+function validateDiagnosis(obj: any): LessonDiagnosis {
+  if (!obj || typeof obj !== 'object') throw new Error('诊断结果不是对象')
+  const items = Array.isArray(obj.items) ? obj.items : []
+  if (!items.length) throw new Error('诊断结果没有题目')
+  return {
+    paper_name: sanitizeAiText(obj.paper_name || '').trim(),
+    paper_note: sanitizeAiText(obj.paper_note || '').trim(),
+    items: items.map((it: any, i: number) => ({
+      no: sanitizeAiText(String(it?.no ?? i + 1)).trim(),
+      qtype: it?.qtype === '选择' ? '选择' : '非选择',
+      stem: sanitizeLatexChinese(sanitizeAiText(it?.stem || '')).trim(),
+      options: txtArr(it?.options),
+      context: sanitizeAiText(it?.context || '').trim(),
+      kp: sanitizeAiText(it?.kp || '').trim(),
+      student_answer: sanitizeAiText(it?.student_answer || '').trim(),
+      correct_answer: sanitizeLatexChinese(sanitizeAiText(it?.correct_answer || '')).trim(),
+      solution: sanitizeLatexChinese(sanitizeAiText(it?.solution || '')).trim(),
+      gap: sanitizeAiText(it?.gap || '').trim(),
+    })),
+    note: sanitizeAiText(obj.note || '').trim(),
+  }
+}
+
+function validateLessonPlan(obj: any): LessonPlan {
+  if (!obj || typeof obj !== 'object') throw new Error('教案结果不是对象')
+  const cover = obj.cover || {}
+  const ov = obj.overview || {}
+  const table = (arr: any) =>
+    (Array.isArray(arr) ? arr : []).map((r: any) => ({
+      no: sanitizeAiText(r?.no || ''),
+      context: sanitizeAiText(r?.context || ''),
+      kp: sanitizeAiText(r?.kp || ''),
+      answer: sanitizeLatexChinese(sanitizeAiText(r?.answer || '')),
+      correct: sanitizeLatexChinese(sanitizeAiText(r?.correct || '')),
+      gap: sanitizeAiText(r?.gap || ''),
+    })).filter((r: any) => r.no)
+  const frameworks = (Array.isArray(obj.frameworks) ? obj.frameworks : []).map((f: any) => ({
+    title: sanitizeAiText(f?.title || '').trim(),
+    targets: sanitizeAiText(f?.targets || '').trim(),
+    priority: sanitizeAiText(f?.priority || '').trim(),
+    content: txtArr(f?.content),
+    self_check: txtArr(f?.self_check),
+  })).filter((f: any) => f.title && f.content.length)
+  const variants = (Array.isArray(obj.variants) ? obj.variants : []).map((v: any) => ({
+    ref: sanitizeAiText(v?.ref || '').trim(),
+    topic: sanitizeAiText(v?.topic || '').trim(),
+    stem: sanitizeLatexChinese(sanitizeAiText(v?.stem || '')).trim(),
+    solution: sanitizeLatexChinese(sanitizeAiText(v?.solution || '')).trim(),
+    insight: sanitizeAiText(v?.insight || '').trim(),
+  })).filter((v: any) => v.stem)
+  const hw = obj.homework || {}
+  const plan: LessonPlan = {
+    cover: {
+      title: sanitizeAiText(cover.title || '').trim() || '物理错题讲义',
+      subtitle: sanitizeAiText(cover.subtitle || '').trim(),
+      source: sanitizeAiText(cover.source || '').trim(),
+      time: sanitizeAiText(cover.time || '').trim(),
+      composition: sanitizeAiText(cover.composition || '').trim(),
+    },
+    overview: {
+      text: sanitizeAiText(ov.text || '').trim(),
+      choice_table: table(ov.choice_table),
+      nonchoice_table: table(ov.nonchoice_table),
+      mainlines: txtArr(ov.mainlines),
+      strengths: sanitizeAiText(ov.strengths || '').trim(),
+    },
+    frameworks,
+    variants,
+    homework: { text: sanitizeAiText(hw?.text || '').trim(), items: txtArr(hw?.items) },
+  }
+  // 结构底线：诊断表与变式题是讲义的灵魂，缺失即失败（触发重试）
+  if (!plan.overview.choice_table.length && !plan.overview.nonchoice_table.length) throw new Error('教案缺少失分诊断表')
+  if (plan.variants.length < 3) throw new Error('教案变形训练题不足 3 道')
+  return plan
+}
+
+// 第一步：视觉模型逐题诊断试卷照片
+export async function diagnosePaper(
+  provider: AiProvider,
+  images: string[],
+  meta: { grade: string; examName: string }
+): Promise<{ result: LessonDiagnosis; usage: ReturnType<typeof recordUsage> }> {
+  if (!images.length) throw new Error('没有可诊断的图片')
+  return chatJson(
+    provider,
+    {
+      model: provider.vision_model || provider.text_model,
+      system: LESSON_DIAGNOSE_SYSTEM_PROMPT,
+      user: `学生年级：${meta.grade || '未知'}。试卷名称：${meta.examName || '（未命名，按卷面识别）'}。\n请逐题诊断这批试卷照片并按约定 JSON 结构输出。`,
+      images,
+      temperature: 0.1,
+    },
+    validateDiagnosis,
+    'lesson-diagnose'
+  )
+}
+
+// 第二步：文本模型生成完整教案（结构模仿示例错题讲义 docx）
+export async function generateLessonPlan(
+  provider: AiProvider,
+  p: { diagnosis: LessonDiagnosis; grade: string; today: string }
+): Promise<{ result: LessonPlan; usage: ReturnType<typeof recordUsage> }> {
+  const d = p.diagnosis
+  const lines = d.items.map((it) =>
+    `【第${it.no}题·${it.qtype}】考查点：${it.kp || '（未标注）'}；学生作答：${it.student_answer || '（卷面未见）'}；正解：${it.correct_answer || '（待定）'}；关键步骤：${(it.solution || '').slice(0, 300)}；漏洞分析：${(it.gap || '').slice(0, 200)}\n原题：${(it.stem || '').slice(0, 400)}${it.options.length ? '\n选项：' + it.options.join(' | ') : ''}`
+  ).join('\n\n')
+  const user = `学生年级：${p.grade || '未知'}
+试卷：${d.paper_name || '（未命名）'}${d.paper_note ? `（${d.paper_note}）` : ''}
+今天日期：${p.today}
+逐题诊断结果：
+${lines}
+${d.note ? `识别说明：${d.note}` : ''}
+请按约定 JSON 结构输出完整教案（cover/overview/frameworks/variants/homework 五部分齐全）。`
+  return chatJson(
+    provider,
+    { model: provider.text_model || provider.vision_model, system: LESSON_PLAN_SYSTEM_PROMPT, user, temperature: 0.4 },
+    validateLessonPlan,
+    'lesson-plan'
   )
 }

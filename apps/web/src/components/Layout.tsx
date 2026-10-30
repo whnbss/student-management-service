@@ -1,6 +1,6 @@
 // 布局：移动端底部 5 Tab + 右下悬浮按钮（直达拍批流程）；宽屏左侧固定导航 + 命令面板
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { CalendarDays, Users, BookOpen, CircleX, Settings as SettingsIcon, FlaskConical, ChartLine, Camera, Search } from 'lucide-react'
+import { CalendarDays, Users, BookOpen, CircleX, Settings as SettingsIcon, FlaskConical, ChartLine, Camera, Search, NotebookPen } from 'lucide-react'
 import { useToastStore } from '@/stores/auth'
 import CommandPalette from '@/components/CommandPalette'
 import NotificationBell from '@/components/NotificationBell'
@@ -13,9 +13,10 @@ const TABS = [
   { to: '/settings', label: '我的', icon: <SettingsIcon className="w-5 h-5" /> },
 ]
 
-// 桌面端侧栏：底部 5 Tab 已满，「课件」「统计」仅在宽屏导航里出现（移动端从题库页/我的页入口进）
+// 桌面端侧栏：底部 5 Tab 已满，「智能教案」「课件」「统计」仅在宽屏导航里出现（移动端从题库页/我的页入口进）
 const DESKTOP_TABS = [
   ...TABS.slice(0, 3),
+  { to: '/plans', label: '智能教案', icon: <NotebookPen className="w-4 h-4" /> },
   { to: '/labs', label: '课件', icon: <FlaskConical className="w-4 h-4" /> },
   ...TABS.slice(3),
   { to: '/stats', label: '统计', icon: <ChartLine className="w-4 h-4" /> },

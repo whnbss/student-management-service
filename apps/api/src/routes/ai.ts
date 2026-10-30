@@ -109,11 +109,12 @@ export default async function aiRoutes(app: FastifyInstance) {
       target = getProviders().find((p) => p.id === provider_id)
       if (!target) { reply.code(404).send({ error: '供应商不存在' }); return }
     }
-    // 视觉/文本模型互为回退：只填了其中一个也能测试
-    const model = kind === 'text' ? provider.text_model || provider.vision_model : provider.vision_model || provider.text_model
+    // 视觉/文本模型互为回退：只填了其中一个也能测试；按 provider_id 测试时回退到已保存配置的字段
+    const p: any = provider || target
+    const model = kind === 'text' ? p.text_model || p.vision_model : p.vision_model || p.text_model
     if (!model) { reply.code(400).send({ error: '未配置模型名' }); return }
     try {
-      const r = await testProvider(provider, model)
+      const r = await testProvider(p, model)
       return { ok: true, reply: r.reply }
     } catch (e: any) {
       reply.code(502).send({ error: friendlyAiError(e) })

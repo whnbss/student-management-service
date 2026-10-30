@@ -1,6 +1,6 @@
 // 我的：外观（深色模式）、修改密码、学生账号管理、智能服务配置（多供应商/多 Key/连通性测试/费用估算/用量统计）、关于、备份占位（M4）
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {ChartLine, TriangleAlert, UserRoundPlus} from 'lucide-react'
+import {ChartLine, NotebookPen, TriangleAlert, UserRoundPlus} from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useBlocker, useNavigate } from 'react-router-dom'
 import { get, put, post, del } from '@/lib/api'
@@ -616,6 +616,15 @@ export default function Settings() {
         <h2 className="font-semibold text-sm">数据备份与恢复</h2>
         <p className="text-xs text-slate-500">M4 里程碑交付：一键导出 zip（SQLite + uploads）与恢复。</p>
       </div>
+
+      {/* 智能教案入口（移动端 5 Tab 已满，从「我的」页进入） */}
+      <button className="card p-5 w-full text-left flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => navigate('/plans')}>
+        <NotebookPen className="w-5 h-5 text-primary-500" />
+        <span>
+          <span className="block text-sm font-semibold">智能教案</span>
+          <span className="block text-xs text-slate-500">上传错题试卷照片，AI 生成含诊断总览/知识框架/变形训练题的错题讲义</span>
+        </span>
+      </button>
 
       {/* 统计入口（移动端 5 Tab 已满，从「我的」页进入） */}
       <button className="card p-5 w-full text-left flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => navigate('/stats')}>

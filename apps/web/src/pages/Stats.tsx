@@ -1,8 +1,9 @@
-// 统计与经营页：每周/每月课时与收入曲线、学生留存/续费率（纯 SVG 图表，无第三方依赖）
+// 统计与经营页：每周/每月课时与收入曲线、学生留存/续费率、按日入账明细（纯 SVG 图表，无第三方依赖）
 import { useEffect, useMemo, useState } from 'react'
 import { TrendingUp, Users, Clock, Wallet } from 'lucide-react'
 import { get } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
+import { todayLocal } from '@workbench/shared'
 
 interface Bucket { week?: string; month?: string; label: string; hours: number; income: number }
 interface StatsData {
@@ -10,6 +11,13 @@ interface StatsData {
   monthly: Bucket[]
   totals: { total_income: number; total_hours: number }
   students: { total: number; active: number; paused: number; done: number; paid_students: number; renewal_rate: number }
+}
+
+// B3：按日入账明细（课时包缴费 + 按次结算 统一口径）
+interface DailyData {
+  date: string
+  total: number
+  items: Array<{ id: string; student_id: number; student_name: string; type: '课时包' | '按次结算'; amount: number; note: string }>
 }
 
 /** 双序列折线（课时=靛蓝 / 收入=绿），纯 SVG */
@@ -65,6 +73,9 @@ export default function Stats() {
   const [data, setData] = useState<StatsData | null>(null)
   const [loading, setLoading] = useState(true)
   const toast = useToastStore((s) => s.show)
+  // B3 按日入账明细：默认今天，可任选日期
+  const [dailyDate, setDailyDate] = useState(todayLocal())
+  const [daily, setDaily] = useState<DailyData | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -73,6 +84,10 @@ export default function Stats() {
       .catch((e) => toast(e.message || '加载统计数据失败'))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    get<DailyData>(`/api/stats/daily?date=${dailyDate}`).then(setDaily).catch(() => setDaily(null))
+  }, [dailyDate])
 
   const monthIncome = useMemo(() => data?.monthly.at(-1)?.income ?? 0, [data])
   const monthHours = useMemo(() => data?.monthly.at(-1)?.hours ?? 0, [data])
@@ -102,6 +117,34 @@ export default function Stats() {
           <Wallet className="w-8 h-8 text-emerald-400" strokeWidth={1.8} />
           <div><div className="num text-xl font-bold">¥{monthIncome.toLocaleString('zh-CN')}</div><div className="text-xs text-slate-400">本月收入（元）</div></div>
         </div>
+      </div>
+
+      {/* B3 按日入账明细（课时包缴费 + 按次结算统一口径） */}
+      <div className="card p-4">
+        <div className="flex items-center gap-2 flex-wrap mb-3">
+          <h2 className="text-sm font-semibold">按日入账明细</h2>
+          <input type="date" className="input num !w-40 !py-1 !px-2 text-xs" value={dailyDate} onChange={(e) => setDailyDate(e.target.value)} />
+          <span className="flex-1" />
+          <span className="num text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+            当日入账 ¥{(daily?.total ?? 0).toFixed(2)}
+          </span>
+        </div>
+        {!daily || daily.items.length === 0 ? (
+          <p className="text-sm text-slate-400 text-center py-3">当日无入账（¥0）</p>
+        ) : (
+          <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-64 overflow-y-auto">
+            {daily.items.map((it) => (
+              <div key={it.id} className="flex items-center justify-between py-2 text-sm">
+                <div className="min-w-0">
+                  <span className="font-medium">{it.student_name}</span>
+                  <span className="ml-2 text-[11px] px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-500">{it.type}</span>
+                  {it.note && <span className="ml-2 text-xs text-slate-400 truncate">{it.note}</span>}
+                </div>
+                <span className="num font-medium text-emerald-600 dark:text-emerald-400">+¥{it.amount.toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 每周曲线 */}

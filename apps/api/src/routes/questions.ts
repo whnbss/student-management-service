@@ -3,7 +3,7 @@
 import type { FastifyInstance } from 'fastify'
 import { db, nowISO, remainingHours } from '../db'
 import { pickProvider, generateQuiz, generateTiered, generateParentReport, validateQuizDrafts, reviewQuizDrafts, fixQuizDraft } from '../ai'
-import { sanitizeAiText, sanitizeLatexChinese, mergeSectionKps, daysAgo, checkSolutionArithmetic, checkAnswerTraceable, mentionsFigureStem } from '@workbench/shared'
+import { sanitizeAiText, sanitizeLatexChinese, mergeSectionKps, daysAgo, checkSolutionArithmetic, checkAnswerTraceable, mentionsFigureStem, requiresFigure } from '@workbench/shared'
 import type { QuizDraft, QuizLevel, QuizReview } from '@workbench/shared'
 
 function kpOf(raw: string): string[] {
@@ -64,7 +64,8 @@ function findDuplicates(drafts: Array<{ stem: string; knowledge_points: string[]
 }
 
 // 终稿机器硬校验（不依赖 AI 的确定性校验，未过一律不允许出现在草稿列表）：
-// ① 解析内部数值复核（checkSolutionArithmetic）② 答案↔解析一致性 ③ 「如图」⇒ 必须有 figure_spec
+// ① 解析内部数值复核（checkSolutionArithmetic）② 答案↔解析一致性
+// ③ B1 配图铁律：计算/实验题必须配图，选择/填空含情境线索必须配图（纯概念题豁免）；「如图」⇒ 必须有 figure_spec
 function finalMachineIssues(q: QuizDraft): string[] {
   const issues: string[] = []
   for (const i of checkSolutionArithmetic(q.solution || '')) {
@@ -72,6 +73,9 @@ function finalMachineIssues(q: QuizDraft): string[] {
   }
   for (const s of checkAnswerTraceable(q.answer || '', q.solution || '', q.stem || '')) issues.push(s)
   if (mentionsFigureStem(q.stem) && !q.figure_spec) issues.push('题干出现「如图」但没有配图（缺少 figure_spec）')
+  if (requiresFigure(q.stem, q.qtype) && !q.figure_spec) {
+    issues.push('配图铁律未过：本题涉及计算/情境（' + q.qtype + '），必须给出 figure_spec 配图；仅纯概念判断题才允许无图')
+  }
   return issues
 }
 

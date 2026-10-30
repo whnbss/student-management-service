@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { specToSvg } from '../apps/web/src/lib/figure.ts'
-import { FIGURE_TEMPLATES, sanitizeAiText } from '../packages/shared/src/index.ts'
+import { FIGURE_TEMPLATES, sanitizeAiText, FIGURE_TEMPLATE_DOCS, requiresFigure } from '../packages/shared/src/index.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(__dirname, '..')
@@ -116,32 +116,17 @@ function extractJson(text) {
 }
 
 // ---------- 配图 prompt ----------
-const TEMPLATE_DOCS = `- incline：斜面滑块（angle 斜面倾角度数、mu、label 滑块标注、force 可选沿斜面向上拉力如 "F"）
-- flatblock：水平地面滑块（label、force 可选外力如 "F=10N"）
-- pulley：桌面滑块+定滑轮+悬挂钩码（label_m1、label_m2）
-- hang：天花板绳吊小球（angle 绳与竖直夹角、label、second_rope 可选第二根绳与竖直夹角）
-- circuit：简单电路（emf、r、R）
-- projectile：桌边平抛（h 桌高（m）、label）
-- container2balls：圆柱容器两等大球并排贴底，球心连线水平（label1、label2、R 容器半径、r 球半径）
-- spring：墙面弹簧连滑块（label、x 压缩量）
-- bridge：桥上的车（kind=convex 拱桥 / concave 凹桥、R、label）
-- field_region：匀强场区/点电荷（kind=uniform|point、charge、label）
-- bowl：光滑半球形碗，绳一端系碗沿 A、另一端系碗内壁小球（angle 小球与碗心连线偏离竖直方向的角（度）、R、label）
-- bowl2balls：光滑半球形碗内两等大球并排相互接触、球心连线水平（angle 球与碗心连线偏离竖直方向的角（度）、R 碗半径（m）、r 球半径（m）、label1、label2）
-- incline_baffle：斜面上小球被竖直挡板挡住（angle 斜面倾角（度）、label）
-- ring_ball：光滑圆环固定，天花板 O 点（环最高点正上方）绳吊小球在环上（angle 小球相对环最高点的方位角（度）、R、d）
-- three_ropes：三绳结点 O（OA 水平向左、OB 与竖直方向夹角 angle 斜右上、OC 竖直向下挂重物；angle、G 重物标注）
-- rod_hinge：均匀直杆一端铰链 A 固定在竖直墙上、另一端 B 由水平绳系墙上 C 点（angle 杆与竖直方向夹角（度）、label）`
 
 const FIGURE_SYSTEM = `你是高中物理题目配图助手。给定题目的题干/答案/解析，请从下方模板列表中选一个最贴合题意的模板，并给出参数。
 要求：
 1. 模板只能从列表中选，参数名必须与模板说明一致；
 2. 参数数值必须与题干给出的数值严格一致（角度/μ/R/r 等），严禁改动题干数值；
-3. 若题目情境与所有模板都不匹配，输出 {"template": "none", "params": {}}；
-4. 严格输出 JSON 对象 {"template": "...", "params": {...}}，不要输出任何其他文字。
+3. 图必须与题干情境完全一致（受力题配受力装置图、波动题配波形图、电磁题配场/导轨图），严禁套用无关模板；
+4. 若题目情境与所有模板都不匹配，输出 {"template": "none", "params": {}}；
+5. 严格输出 JSON 对象 {"template": "...", "params": {...}}，不要输出任何其他文字。
 
 可用模板：
-${TEMPLATE_DOCS}`
+${FIGURE_TEMPLATE_DOCS}`
 
 const REVIEW_SYSTEM = `你是高中物理命题审查专家。给定一道题的题干/答案/解析，请专门审查「情境与几何是否自洽」：
 1. 若题干描述的装置/几何关系在物理上不可能成立（例如滑轮两侧绳的方向矛盾、角度与装置冲突），判定 contradiction=true 并给出修正后的完整题干（保持考查目标与数值不变，只修正几何描述使其自洽）；
@@ -178,8 +163,14 @@ const provider = loadProvider()
 console.log(`使用模型：${provider.name} / ${provider.text_model || provider.vision_model}`)
 
 const all = db.prepare('SELECT * FROM questions ORDER BY id').all()
-const targets = IDS ? all.filter((q) => IDS.includes(q.id)) : all.filter((q) => !q.figure)
-console.log(`待补图题目：${targets.map((q) => q.id).join(', ')}`)
+// B1 配图铁律的存量补图口径：无图 且 requiresFigure（计算/实验题型或题干含情境线索）才补；
+// 纯概念判断题（单位制/物理学史/无情境辨析）豁免——口径与出题终稿机器校验完全一致
+const targets = IDS
+  ? all.filter((q) => IDS.includes(q.id))
+  : all.filter((q) => !q.figure && requiresFigure(q.stem, q.qtype))
+const exempt = all.filter((q) => !q.figure && !requiresFigure(q.stem, q.qtype))
+console.log(`待补图题目（${targets.length}）：${targets.map((q) => q.id).join(', ')}`)
+console.log(`概念题豁免（${exempt.length}）：${exempt.map((q) => q.id).join(', ')}`)
 
 const updateFigure = db.prepare('UPDATE questions SET figure = ? WHERE id = ?')
 const results = []
@@ -188,11 +179,11 @@ for (const q of targets) {
   process.stdout.write(`题 ${q.id} ... `)
   try {
     let { spec, tpl } = await genFigureSpec(provider, q)
-    let svg = specToSvg(spec)
+    let svg = spec ? specToSvg(spec) : ''
     // 模板渲染为空（模板存在但渲染异常）时重试一次
     if (spec && !svg) {
       const retry = await genFigureSpec(provider, q)
-      if (retry.svg !== '' || retry.spec) { spec = retry.spec; tpl = retry.tpl; svg = specToSvg(spec) }
+      if (retry.spec) { spec = retry.spec; tpl = retry.tpl; svg = specToSvg(spec) }
     }
     if (!spec || !svg) {
       console.log(`失败（模板=${tpl || '无'}，AI 未给出可渲染的配图）`)
@@ -223,6 +214,16 @@ if (q9) {
 
 console.log('\n===== 结果汇总 =====')
 for (const r of results) console.log(JSON.stringify(r))
+// B1 验收口径：涉计算/情境题（requiresFigure）的补图覆盖率
+{
+  const needIds = all.filter((q) => requiresFigure(q.stem, q.qtype)).map((q) => q.id)
+  const okIds = new Set(results.filter((r) => r.ok).map((r) => r.id))
+  const stillEmpty = needIds.filter((id) => !okIds.has(id) && !String(db.prepare('SELECT figure FROM questions WHERE id = ?').get(id)?.figure || ''))
+  const covered = needIds.length - stillEmpty.length
+  const rate = needIds.length ? ((covered / needIds.length) * 100).toFixed(1) : '100.0'
+  console.log(`\n涉计算/情境题共 ${needIds.length} 题，已配图 ${covered} 题，覆盖率 ${rate}%（目标 ≥90%）`)
+  if (Number(rate) < 90) console.log('未覆盖：' + stillEmpty.join(', '))
+}
 if (review9) {
   console.log('\n===== 题 9 审查 =====')
   console.log(JSON.stringify(review9, null, 2))

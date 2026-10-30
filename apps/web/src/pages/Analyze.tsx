@@ -7,6 +7,7 @@ import { get } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
 import { useAnalyzeStore } from '@/stores/analyze'
 import Katex from '@/components/Katex'
+import { specToSvg } from '@/lib/figure'
 import type { Student } from '@workbench/shared'
 import { ERROR_TYPES } from '@workbench/shared'
 
@@ -182,6 +183,10 @@ export default function Analyze() {
                 ) : (
                   <span className={`text-sm font-medium ${VERDICT_COLOR[it.verdict] || ''}`}>{it.verdict}</span>
                 )}
+                {/* B4 原题还原状态徽章 */}
+                {it.figure_spec ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-300">题图已重绘</span>
+                  : it.figure_status === '图待补' ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-300">图待补（保留原图）</span> : null}
+                {it.stem && <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300">原题已还原</span>}
                 {(it.verdict === '错' || it.verdict === '部分对') && (
                   <label className="ml-auto flex items-center gap-1.5 text-xs text-slate-500">
                     <input
@@ -193,6 +198,34 @@ export default function Analyze() {
                   </label>
                 )}
               </div>
+              {/* B4：原题还原（题干 + 选项 + 题图）——逐项核对，严禁编造 */}
+              {(it.stem || editing) && (
+                <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 p-2.5 space-y-1.5">
+                  <p className="text-[11px] text-slate-400 font-medium">原题还原（保存后进错题本与题库）</p>
+                  {editing ? (
+                    <>
+                      <textarea className="input !text-xs" rows={3} placeholder="原题题干全文（逐字核对，识别不清请清空并判「无法识别」）" value={it.stem} onChange={(e) => updItem(idx, { stem: e.target.value })} />
+                      <textarea className="input !text-xs" rows={2} placeholder="选择题选项（每行一条：A. …），非选择题留空" value={it.options.join('\n')} onChange={(e) => updItem(idx, { options: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })} />
+                      <input className="input !text-xs" placeholder="参考答案（可见时填写）" value={it.reference_answer} onChange={(e) => updItem(idx, { reference_answer: e.target.value })} />
+                    </>
+                  ) : (
+                    <>
+                      {it.stem && <div className="text-sm"><Katex text={it.stem} /></div>}
+                      {it.options.length > 0 && (
+                        <div className="text-xs text-slate-600 dark:text-slate-300 space-y-0.5 pl-1">
+                          {it.options.map((o, i) => <p key={i}><Katex text={o} /></p>)}
+                        </div>
+                      )}
+                      {it.reference_answer && <p className="text-xs text-slate-500">参考答案：<Katex text={it.reference_answer} /></p>}
+                    </>
+                  )}
+                  {it.figure_spec && (() => {
+                    const svg = specToSvg(it.figure_spec)
+                    return svg ? <div className="bg-white dark:bg-slate-900 rounded-lg p-2" dangerouslySetInnerHTML={{ __html: svg }} /> : null
+                  })()}
+                  {it.figure_status === '图待补' && <p className="text-[11px] text-amber-500">原题有图但无法自动重绘——已保留作业原图，可在错题本中手动补图</p>}
+                </div>
+              )}
               {editing ? (
                 <>
                   <div className="flex gap-2 flex-wrap">

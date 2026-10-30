@@ -126,7 +126,7 @@ export const useAnalyzeStore = create<AnalyzeState>()(
             `【${draft.paper_meta.type}批改】共 ${draft.items.length} 题：` +
             draft.items.map((it) => `第${it.no}题${it.verdict}`).join('、') +
             `。${draft.overall_comment}`
-          const r = await post<{ id: number; mistakes_created: number }>(`/api/students/${studentId}/logs`, {
+          const r = await post<{ id: number; mistakes_created: number; bank_questions_created: number }>(`/api/students/${studentId}/logs`, {
             date: todayLocal(),
             type: logType,
             content,
@@ -135,8 +135,11 @@ export const useAnalyzeStore = create<AnalyzeState>()(
             ai_result: draft,
             create_mistakes: true,
             mistake_nos: draft.items.filter((it) => mistakeChecked[it.no]).map((it) => it.no),
+            // B4 原题还原：勾选入错题本的原题同步存入题库（source=photo），变式题仍走「举一反三」
+            photo_bank: true,
+            photo_bank_nos: draft.items.filter((it) => mistakeChecked[it.no] && it.stem).map((it) => it.no),
           })
-          show(`已保存，自动生成 ${r.mistakes_created} 道错题`)
+          show(`已保存，生成 ${r.mistakes_created} 道错题${r.bank_questions_created ? `、${r.bank_questions_created} 道原题入库` : ''}`)
           get().reset()
           onDone()
         } catch (e: any) {

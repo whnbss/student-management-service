@@ -5,7 +5,7 @@ import Database from 'better-sqlite3'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { TEXTBOOK } from '../packages/shared/src/textbook.ts'
-import { checkSolutionArithmetic } from '../packages/shared/src/index.ts'
+import { checkSolutionArithmetic, requiresFigure } from '../packages/shared/src/index.ts'
 
 const db = new Database(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data', 'app.db'), { readonly: true })
 const rows = db.prepare('SELECT id, stem, answer, solution, pitfall, qtype, difficulty, figure, knowledge_points FROM questions ORDER BY id').all() as any[]
@@ -32,6 +32,17 @@ const noFig = rows.filter((r) => /如图|图所示/.test(String(r.stem || '')) &
 if (noFig.length) { hardFail++; console.log(`✗ 缺图：${noFig.length} 题题干称「如图」但 figure 为空 → ${noFig.map((r) => '#' + r.id).join(' ')}`) }
 else console.log('✓ 缺图：0 题（题干称「如图」的题均有配图）')
 
+// ---------- 2a-2. B1 配图铁律进度（非硬校验：概念题豁免，仅报告涉计算/情境题的配图覆盖率） ----------
+{
+  const need = rows.filter((r) => requiresFigure(String(r.stem || ''), String(r.qtype || '')))
+  const covered = need.filter((r) => String(r.figure || '').trim())
+  const rate = need.length ? ((covered.length / need.length) * 100).toFixed(1) : '100.0'
+  console.log(`- B1 配图铁律口径：涉计算/情境题 ${need.length} 题，已配图 ${covered.length} 题（覆盖率 ${rate}%${Number(rate) < 90 ? '，未达 90% 目标' : ''}）`)
+  if (Number(rate) < 90) {
+    console.log('  未配图题：' + need.filter((r) => !String(r.figure || '').trim()).map((r) => '#' + r.id).join(' '))
+  }
+}
+
 // ---------- 2b. 配图场景匹配守卫（#24 教训：#698/#574 波动/热学题配了电场模板图） ----------
 // #25 升级：凡 figure 非空的题**全部**参与校验（此前仅查题干含「如图」的题，漏掉了 #609 天体题配「+q 匀强场区」等
 // 题干不含「如图」的错配，以及题干写「图甲/图乙」式引用的题）。图内含中文的标签若没有任何一个字出现在
@@ -53,7 +64,7 @@ else console.log('✓ 配图场景：全部非空配图（不限题干是否称�
 // ---------- 2c. 模板强标记守卫（#25 新增：非电磁类知识点却带「匀强场区」「+q」电场模板图 → 硬失败） ----------
 // #609（万有引力天体）题干不含「如图」且图内「匀强场区」的「匀」撞上题干「匀速」逃过字面匹配，
 // 但图是电场模板残留。此处用「知识点是否含电磁类关键词」作门槛，比字面匹配更稳。
-const EM_KP = /电场|磁场|电磁|感应|楞次|安培|洛伦兹|发电机|电动机|电容器|电荷|带电|电势|等势/
+const EM_KP = /电场|磁场|电磁|感应|楞次|安培|洛伦兹|发电机|电动机|电容器|电荷|带电|电势|等势|库仑|静电|回旋|加速器|偏转|充放电|辉光|阴极|示波/
 const STRONG_TPL = /匀强场区|\+q/
 const tmplBad: string[] = []
 for (const r of rows) {
@@ -81,6 +92,44 @@ for (const r of rows) {
 }
 if (litTotal) { hardFail++; console.log(`✗ 字面 \\n：${litTotal} 处 → ${litIds.join(' ')}`) }
 else console.log('✓ 字面 \\n：0 处')
+
+// ---------- 3b. 裸中文下标守卫（验收 #28 P2-49：x_子 之类单下划线直跟中文，KaTeX warning） ----------
+// 口径：单个下划线（且不属于 ________ 填空下划线串）后直接跟中文 → 硬失败。
+// 修复写法是 $x_{\text{子}}$；填空串 `________运动` 的尾下划线被前一个下划线吞掉不误报。
+const CJK_SUB = /(?<!_)_(?![_{])[一-龥]/
+const cjkIds: string[] = []
+let cjkTotal = 0
+for (const r of rows) {
+  for (const f of ['stem', 'answer', 'solution', 'pitfall']) {
+    const n = (String(r[f] ?? '').match(CJK_SUB) || []).length
+    if (n) { cjkTotal += n; cjkIds.push(`#${r.id}.${f}×${n}`) }
+  }
+}
+if (cjkTotal) { hardFail++; console.log(`✗ 裸中文下标：${cjkTotal} 处（应写 _{\\text{…}}）→ ${cjkIds.join(' ')}`) }
+else console.log('✓ 裸中文下标：0 处')
+
+// ---------- 3c. math 外裸 LaTeX 命令守卫（验收 #28 P2-50：\underline{\hspace{2cm}} 等在定界符外字面显示） ----------
+// 口径沿用 .agent_context/tmp/sup28-barelatex.mjs：按 $$…$$ / $…$ 切分，text 段内出现 LaTeX 命令即失败；
+// 额外把合法块级定界符 \[ … \] 也按 math 段剔除，避免误报。
+const BARE_CMD = /\\(?:underline|hspace|dfrac|tfrac|frac|sqrt|times|cdot|approx|text|mathrm|pi|Delta|omega|alpha|beta|theta|mu|lambda)/
+const MATH_BLOCK = /\$\$[\s\S]*?\$\$|\$[^$\n]*?\$|\\\[[\s\S]*?\\\]/g
+const bareIds: string[] = []
+let bareTotal = 0
+for (const r of rows) {
+  for (const f of ['stem', 'answer', 'solution', 'pitfall']) {
+    const s = String(r[f] ?? '')
+    let last = 0, m: RegExpExecArray | null, bad = 0
+    while ((m = MATH_BLOCK.exec(s))) {
+      bad += (s.slice(last, m.index).match(BARE_CMD) || []).length
+      last = m.index + m[0].length
+    }
+    bad += (s.slice(last).match(BARE_CMD) || []).length
+    MATH_BLOCK.lastIndex = 0
+    if (bad) { bareTotal += bad; bareIds.push(`#${r.id}.${f}×${bad}`) }
+  }
+}
+if (bareTotal) { hardFail++; console.log(`✗ math 外裸 LaTeX：${bareTotal} 处（定界符外命令字面显示）→ ${bareIds.join(' ')}`) }
+else console.log('✓ math 外裸 LaTeX：0 处')
 
 // ---------- 4. 数值复核（表达式求值，全库 solution 扫描） ----------
 const flagged: string[] = []

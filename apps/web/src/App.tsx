@@ -12,6 +12,7 @@ import Mistakes from '@/pages/Mistakes'
 import Labs from '@/pages/Labs'
 import LabDetail from '@/pages/LabDetail'
 import Bank from '@/pages/Bank'
+import LessonPlans from '@/pages/LessonPlans'
 import Stats from '@/pages/Stats'
 import ShareReport from '@/pages/ShareReport'
 import StudentShell from '@/pages/student/StudentShell'
@@ -62,6 +63,7 @@ const router = createBrowserRouter([
       { path: 'students/:id', element: <StudentDetail /> },
       { path: 'analyze', element: <Analyze /> },
       { path: 'bank', element: <Bank /> },
+      { path: 'plans', element: <LessonPlans /> },
       { path: 'mistakes', element: <Mistakes /> },
       { path: 'settings', element: <Settings /> },
       { path: 'stats', element: <Stats /> },

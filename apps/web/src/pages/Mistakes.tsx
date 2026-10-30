@@ -6,6 +6,9 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { get, post, put, del } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
 import Katex from '@/components/Katex'
+import QuestionFigure from '@/components/QuestionFigure'
+import { figureHtml } from '@/lib/figure'
+import { texToMathml } from '@/lib/tex'
 import TextbookPicker from '@/components/TextbookPicker'
 import { KpChips } from '@/components/Kp'
 import { aggregateKp, KpMasteryBars, KP_LEGEND } from '@/components/Charts'
@@ -14,6 +17,8 @@ import type { Mistake, Student, Question } from '@workbench/shared'
 import { ERROR_TYPES, todayLocal } from '@workbench/shared'
 
 const MASTERY = ['未掌握', '已重做一次', '已掌握'] as const
+const optionsOf = (m: Mistake): string[] => { try { const a = JSON.parse(m.options || '[]'); return Array.isArray(a) ? a.map(String) : [] } catch { return [] } }
+
 const STATUS_COLOR: Record<string, string> = {
   '未掌握': 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300',
   '已重做一次': 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-300',
@@ -162,14 +167,16 @@ export default function Mistakes() {
     const items = restList.map((m, i) => `
       <div class="q">
         <div class="no">${i + 1}. ${m.student_name} · ${JSON.parse(m.knowledge_points || '[]').join('、') || '未分类'} · 难度 ${m.difficulty}</div>
-        <div class="stem">${m.stem.replace(/</g, '&lt;')}</div>
+        <div class="stem">${texToMathml(m.stem)}</div>
+        ${optionsOf(m).length ? `<div class="stem opts">${optionsOf(m).map((o) => texToMathml(o)).join('<br>')}</div>` : ''}
+        ${figureHtml(m.figure, location.origin) ? `<div class="fig">${figureHtml(m.figure, location.origin)}</div>` : ''}
         ${m.image ? `<img src="${location.origin}${m.image}" style="max-width:100%">` : ''}
         ${withAnswer ? `<div class="ans"><b>正确解法：</b>${(m.correct_solution || '（未填写）').replace(/</g, '&lt;')}</div><div class="ans"><b>学生错误：</b>${(m.wrong_solution || '（未填写）').replace(/</g, '&lt;')}</div>` : ''}
       </div>`).join('')
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>错题集（${withAnswer ? '含答案' : '学生版'}）</title>
       <style>body{font-family:'Microsoft YaHei',sans-serif;max-width:800px;margin:24px auto;padding:0 16px}
       h1{text-align:center;font-size:20px}.q{page-break-inside:avoid;border-bottom:1px solid #ddd;padding:12px 0}
-      .no{color:#666;font-size:12px}.stem{margin:6px 0}.ans{background:#f6f6f6;padding:8px;border-radius:6px;font-size:13px;margin-top:6px}
+      .no{color:#666;font-size:12px}.stem{margin:6px 0;white-space:pre-wrap;line-height:1.9}.opts{font-size:13px;color:#333}.fig{margin:8px 0 4px;text-align:center}.fig svg{max-width:100%}.ans{background:#f6f6f6;padding:8px;border-radius:6px;font-size:13px;margin-top:6px;white-space:pre-wrap;line-height:1.8}
       @media print{.tip{display:none}}</style></head><body>
       <h1>高中物理错题集（${withAnswer ? '含答案版' : '学生版'}）</h1>
       <div class="tip" style="text-align:center;color:#999;font-size:12px">打印时选择「另存为 PDF」</div>${items || '<p style="text-align:center;color:#999">无错题</p>'}
@@ -194,6 +201,12 @@ export default function Mistakes() {
         </div>
         <div className="text-sm cursor-pointer" onClick={() => toggle(m)}>
           <Katex text={m.stem} />
+          {optionsOf(m).length > 0 && (
+            <div className="text-xs text-slate-600 dark:text-slate-300 space-y-0.5 mt-1">
+              {optionsOf(m).map((o, i) => <p key={i}><Katex text={o} /></p>)}
+            </div>
+          )}
+          <QuestionFigure figure={m.figure} />
           {m.image && <img src={m.image} className="mt-2 rounded-lg max-h-40 object-cover" loading="lazy" />}
         </div>
         <div className="mt-2">

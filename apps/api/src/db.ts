@@ -214,6 +214,26 @@ function migrateSchema() {
   if (!cols.some((c) => c.name === 'lesson_price')) {
     db.exec('ALTER TABLE students ADD COLUMN lesson_price REAL NOT NULL DEFAULT 0')
   }
+  // B4 原题还原：mistakes 表补 options（选择题选项 JSON）/ figure（题图 JSON）两列
+  cols = db.prepare('PRAGMA table_info(mistakes)').all() as Array<{ name: string }>
+  if (!cols.some((c) => c.name === 'options')) {
+    db.exec("ALTER TABLE mistakes ADD COLUMN options TEXT NOT NULL DEFAULT '[]'")
+  }
+  if (!cols.some((c) => c.name === 'figure')) {
+    db.exec("ALTER TABLE mistakes ADD COLUMN figure TEXT NOT NULL DEFAULT ''")
+  }
+  // B5 智能教案：lesson_plans 表（拍照试卷 → AI 诊断 + 教案）
+  db.exec(`
+  CREATE TABLE IF NOT EXISTS lesson_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+    exam_name TEXT NOT NULL DEFAULT '',
+    images TEXT NOT NULL DEFAULT '[]',
+    analysis_json TEXT NOT NULL DEFAULT '{}',
+    plan_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+  );
+  `)
   // 存量题目一次性清洗：字面 \n → 真实换行、字面 \\ → \（只跑一次，标记在 settings）
   if (!getSetting('question_text_sanitized_v1')) {
     const rows = db.prepare('SELECT id, stem, answer, solution, pitfall FROM questions').all() as Array<{
