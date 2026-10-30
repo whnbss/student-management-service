@@ -33,11 +33,11 @@ if (noFig.length) { hardFail++; console.log(`✗ 缺图：${noFig.length} 题题
 else console.log('✓ 缺图：0 题（题干称「如图」的题均有配图）')
 
 // ---------- 2b. 配图场景匹配守卫（#24 教训：#698/#574 波动/热学题配了电场模板图） ----------
-// 题干称「如图」且配图含文字时，图内含中文的标签若没有任何一个字出现在题干中，判为场景不匹配
-// （图是从错误模板渲染的典型特征，如热学题图上出现「匀强场区」「+q」）。轴标签/纯字母数字标签不参与。
+// #25 升级：凡 figure 非空的题**全部**参与校验（此前仅查题干含「如图」的题，漏掉了 #609 天体题配「+q 匀强场区」等
+// 题干不含「如图」的错配，以及题干写「图甲/图乙」式引用的题）。图内含中文的标签若没有任何一个字出现在
+// 题干中，判为场景不匹配。轴标签/纯字母数字标签不参与。
 const sceneBad: string[] = []
 for (const r of rows) {
-  if (!/如图|图所示/.test(String(r.stem || ''))) continue
   let fig: any = null
   try { fig = JSON.parse(String(r.figure || 'null')) } catch { continue }
   if (!fig || fig.kind !== 'svg') continue
@@ -48,7 +48,26 @@ for (const r of rows) {
   if (miss.length) sceneBad.push(`#${r.id}(${miss.join(',')})`)
 }
 if (sceneBad.length) { hardFail++; console.log(`✗ 配图场景：${sceneBad.length} 题图内中文标签与题干场景不匹配（疑为错误模板配图）→ ${sceneBad.join(' ')}`) }
-else console.log('✓ 配图场景：题干称「如图」的题图内中文标签均与题干匹配')
+else console.log('✓ 配图场景：全部非空配图（不限题干是否称「如图」）中文标签均与题干匹配')
+
+// ---------- 2c. 模板强标记守卫（#25 新增：非电磁类知识点却带「匀强场区」「+q」电场模板图 → 硬失败） ----------
+// #609（万有引力天体）题干不含「如图」且图内「匀强场区」的「匀」撞上题干「匀速」逃过字面匹配，
+// 但图是电场模板残留。此处用「知识点是否含电磁类关键词」作门槛，比字面匹配更稳。
+const EM_KP = /电场|磁场|电磁|感应|楞次|安培|洛伦兹|发电机|电动机|电容器|电荷|带电/
+const STRONG_TPL = /匀强场区|\+q/
+const tmplBad: string[] = []
+for (const r of rows) {
+  let fig: any = null
+  try { fig = JSON.parse(String(r.figure || 'null')) } catch { continue }
+  if (!fig || fig.kind !== 'svg') continue
+  const texts = [...String(fig.data).matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]).join(' ')
+  if (!STRONG_TPL.test(texts)) continue
+  let kps: string[] = []
+  try { kps = JSON.parse(r.knowledge_points || '[]') } catch { /* ignore */ }
+  if (!kps.some((k) => EM_KP.test(k))) tmplBad.push(`#${r.id}`)
+}
+if (tmplBad.length) { hardFail++; console.log(`✗ 模板强标记：${tmplBad.length} 题知识点非电磁类但图内含「匀强场区/+q」电场模板标记 → ${tmplBad.join(' ')}`) }
+else console.log('✓ 模板强标记：0 题（非电磁类知识点无「匀强场区/+q」残留）')
 
 // ---------- 3. 字面 \n（后非字母） ----------
 const litIds: string[] = []
