@@ -41,6 +41,9 @@ export default function LessonPlans() {
   const [busy, setBusy] = useState(false)
   const albumRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
+  // P1-72：基于已有批改记录生成（推荐——教案与批改错题集同源，不再独立看图另判一套）
+  const [logId, setLogId] = useState<number | null>(null)
+  const [logOptions, setLogOptions] = useState<Array<{ id: number; label: string }>>([])
 
   // 详情
   const [detail, setDetail] = useState<{ id: number; student_name: string; exam_name: string; created_at: string; images: string[]; analysis: LessonDiagnosis | null; plan: LessonPlan | null } | null>(null)
@@ -51,6 +54,21 @@ export default function LessonPlans() {
   }, [show])
   useEffect(() => { load() }, [load])
   useEffect(() => { get<Student[]>('/api/students').then(setStudents).catch(() => { /* 忽略 */ }) }, [])
+  // 选定学生后拉取其带批改结果的学情记录，供「从批改记录生成」选择
+  useEffect(() => {
+    setLogId(null); setLogOptions([])
+    if (!studentId) return
+    get<any[]>(`/api/students/${studentId}/logs`).then((logs) => {
+      setLogOptions(
+        (logs || []).map((l) => {
+          let ai: any = null
+          try { ai = typeof l.ai_result === 'string' ? JSON.parse(l.ai_result) : l.ai_result } catch { /* 损坏跳过 */ }
+          if (!ai?.items?.length) return null
+          return { id: l.id, label: `${String(l.date).slice(0, 10)} · ${l.type || '记录'} · ${String(l.content || '').slice(0, 30)}（批改 ${ai.items.length} 题）` }
+        }).filter(Boolean) as Array<{ id: number; label: string }>
+      )
+    }).catch(() => { /* 忽略 */ })
+  }, [studentId])
 
   const pick = (fl: FileList | null) => {
     if (!fl?.length) return
@@ -61,7 +79,7 @@ export default function LessonPlans() {
 
   const generate = async () => {
     if (!studentId) { show('请选择学生'); return }
-    if (!files.length) { show('请先拍照或选择试卷照片'); return }
+    if (!logId && !files.length) { show('请先拍照/选试卷照片，或选一条已有批改记录'); return }
     setBusy(true)
     try {
       const paths: string[] = []
@@ -69,12 +87,12 @@ export default function LessonPlans() {
         show(`正在上传第 ${i + 1}/${files.length} 张…`)
         paths.push(await uploadImage(files[i], studentId, token!))
       }
-      show('AI 正在逐题诊断并生成教案（约 1~3 分钟）…')
+      show(logId ? '正在基于批改结果生成教案（约 1~2 分钟）…' : 'AI 正在逐题诊断并生成教案（约 1~3 分钟）…')
       const r = await post<{ id: number; plan: LessonPlan }>('/api/lesson-plans', {
-        student_id: studentId, exam_name: examName, images: paths,
+        student_id: studentId, exam_name: examName, images: paths, log_id: logId || undefined,
       })
       show('教案已生成')
-      setFiles([]); setPreviews([]); setExamName('')
+      setFiles([]); setPreviews([]); setExamName(''); setLogId(null)
       await load()
       openDetail(r.id)
     } catch (e: any) {
@@ -297,6 +315,15 @@ export default function LessonPlans() {
           </select>
           <input className="input flex-1 !min-w-40" placeholder="试卷名称（如：10月检测）" value={examName} onChange={(e) => setExamName(e.target.value)} />
         </div>
+        {logOptions.length > 0 && (
+          <div>
+            <select className="input !w-full" value={logId ?? ''} onChange={(e) => setLogId(Number(e.target.value) || null)}>
+              <option value="">基于批改记录生成（推荐）：从该生的拍照批改记录中选择…</option>
+              {logOptions.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+            </select>
+            <p className="text-xs text-slate-400 mt-1">选择批改记录后，教案直接采用该次批改的逐题判定与错题集（与批改结果完全一致）；不选则按下方照片重新诊断。</p>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <button className="btn-outline !py-4" onClick={() => cameraRef.current?.click()}>📷 拍照</button>
           <button className="btn-outline !py-4" onClick={() => albumRef.current?.click()}>🖼️ 相册多选</button>

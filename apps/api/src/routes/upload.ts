@@ -24,9 +24,20 @@ export default async function uploadRoutes(app: FastifyInstance) {
   })
 
   app.post('/api/upload', async (req, reply) => {
-    const file = await req.file()
+    // P2-73：字段顺序无关——req.parts() 遍历全部 part 先收集字段再取文件。
+    // 旧实现 req.file() 只读第一个 part，其 fields 仅含文件**之前**的字段；前端先 append file
+    // 时 student_id/folder 全部丢失，作业图被堆到 /uploads/0/（按学生清理链路断裂）
+    let file: any = null
+    const fields: Record<string, string> = {}
+    for await (const part of req.parts()) {
+      if ((part as any).type === 'file') {
+        if (!file) file = part
+      } else {
+        fields[(part as any).fieldname] = String((part as any).value ?? '')
+      }
+    }
     if (!file) { reply.code(400).send({ error: '未收到文件' }); return }
-    const folder = String((file.fields.folder as any)?.value || '')
+    const folder = fields.folder || ''
     // 只允许图片类型
     if (!/^image\//.test(file.mimetype)) { reply.code(400).send({ error: '只支持图片文件' }); return }
     const ext = path.extname(file.filename || '').toLowerCase() || '.jpg'
@@ -40,8 +51,8 @@ export default async function uploadRoutes(app: FastifyInstance) {
       return { ok: true, path: `/uploads/questions/${name}` }
     }
     // 默认：学生作业图片，按 学生ID/日期/ 归档
-    const studentId = (file.fields.student_id as any)?.value || '0'
-    const date = (file.fields.date as any)?.value || nowISO().slice(0, 10)
+    const studentId = fields.student_id || '0'
+    const date = fields.date || nowISO().slice(0, 10)
     const dir = path.join(UPLOADS_DIR, String(studentId), date)
     fs.mkdirSync(dir, { recursive: true })
     const filepath = path.join(dir, name)
@@ -57,13 +68,22 @@ export default async function uploadRoutes(app: FastifyInstance) {
     const sid = Number(id)
     const student = db.prepare('SELECT id, name FROM students WHERE id = ?').get(sid) as any
     if (!student) { reply.code(404).send({ error: '学生不存在' }); return }
-    const file = await req.file()
+    // P2-73：字段顺序无关（title 在 file 之后提交也能收到）
+    let file: any = null
+    const fields: Record<string, string> = {}
+    for await (const part of req.parts()) {
+      if ((part as any).type === 'file') {
+        if (!file) file = part
+      } else {
+        fields[(part as any).fieldname] = String((part as any).value ?? '')
+      }
+    }
     if (!file) { reply.code(400).send({ error: '未收到文件' }); return }
     const ext = path.extname(file.filename || '').toLowerCase()
     if (!REPORT_EXTS.includes(ext)) {
       reply.code(400).send({ error: '只支持 ' + REPORT_EXTS.join(' / ') + ' 格式' }); return
     }
-    const title = String((file.fields.title as any)?.value || path.basename(file.filename || '讲义', ext)).trim().slice(0, 100) || '未命名讲义'
+    const title = String(fields.title || path.basename(file.filename || '讲义', ext)).trim().slice(0, 100) || '未命名讲义'
     const dir = path.join(UPLOADS_DIR, 'reports', String(sid))
     fs.mkdirSync(dir, { recursive: true })
     const name = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`

@@ -10,7 +10,7 @@ import type { FastifyInstance } from 'fastify'
 import path from 'node:path'
 import fs from 'node:fs'
 import { UPLOADS_DIR, db, getSetting } from '../db'
-import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, adjudicateDispute, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper } from '../ai'
+import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper } from '../ai'
 import type { SheetReadItem, PaperExtractItem, PaperSolvedItem } from '@workbench/shared'
 
 const MIME: Record<string, string> = {
@@ -143,43 +143,47 @@ export default async function analysisRoutes(app: FastifyInstance) {
           questions: extracted.items,
           images: paperUrls,
         })
-        // ②′ 三票表决：初解(主视觉模型看图) + 两次独立复解(强模型纯文本、逐选项排除、不同温度)，
-        // 两票一致采纳；三票互不一致 → 终裁仲裁。注意：不做「给初解答案让它复核」的锚定式复核——
-        // 实测复核会被初解答案带偏（复核票与初解高度相关），两次独立复解的去相关性更好
+        // ②′ 五票表决（P0-71）：初解(主视觉模型看图) + 四次独立复解(强模型纯文本、逐选项排除、不同温度)，
+        // 严格多数票（>可用票数一半）一致才采纳；多数分歧 → 标「待确认」不强行判定（识别不清进待确认，
+        // 严禁硬给一个可能错的标准答案）。注意：不做「给初解答案让它复核」的锚定式复核——实测复核会被
+        // 初解答案带偏（复核票与初解高度相关），多次独立复解的去相关性更好
         let solved = solved0
         let u2x: Usage = accUsage()
         let u2b: Usage = accUsage()
-        let u2c: Usage = accUsage()
+        let u2d: Usage = accUsage()
+        // 待确认题号集合：票数无严格多数的题，后续比对阶段强制标「无法识别/待确认」
+        const pendingNos = new Set<string>()
+        // 每题的候选答案摘要（票N=答案），用于待确认 comment 与清单展示
+        const votesMemo = new Map<string, string[]>()
         {
           const v0 = new Map(solved0.items.map((s) => [String(Number(s.no)), s]))
-          // 两次独立复解票（强模型纯文本；失败降级跳过该票）
-          const v1 = new Map<string, PaperSolvedItem>()
-          try {
-            const p2 = await solvePaperPass2(provider, { grade: meta.grade, questions: extracted.items, temperature: 0.2 })
-            u2x = p2.usage
-            for (const s of p2.result.items) v1.set(String(Number(s.no)), s)
-          } catch (e: any) {
-            console.error('[analyze] 复解票一失败（跳过）:', e.message)
+          // 四次独立复解票（强模型纯文本，不同温度去相关；失败降级跳过该票）
+          const votes: Array<Map<string, PaperSolvedItem>> = [v0]
+          const temps = [0.0, 0.2, 0.5, 0.7]
+          for (let ti = 0; ti < temps.length; ti++) {
+            const vm = new Map<string, PaperSolvedItem>()
+            try {
+              const pr = await solvePaperPass2(provider, { grade: meta.grade, questions: extracted.items, temperature: temps[ti] })
+              if (ti === 0) u2x = pr.usage
+              else if (ti === 1) u2b = pr.usage
+              else u2d = pr.usage
+              for (const s of pr.result.items) vm.set(String(Number(s.no)), s)
+              votes.push(vm)
+            } catch (e: any) {
+              console.error(`[analyze] 复解票${ti + 1}失败（跳过）:`, e.message)
+            }
           }
-          const v2 = new Map<string, PaperSolvedItem>()
-          try {
-            const p3 = await solvePaperPass2(provider, { grade: meta.grade, questions: extracted.items, temperature: 0.7 })
-            u2b = p3.usage
-            for (const s of p3.result.items) v2.set(String(Number(s.no)), s)
-          } catch (e: any) {
-            console.error('[analyze] 复解票二失败（跳过）:', e.message)
-          }
-          // 表决：找「两票及以上一致」的答案组；找不出 → 终裁
-          const votesOf = (no: string) => [v0.get(no), v1.get(no), v2.get(no)].filter(Boolean) as PaperSolvedItem[]
-          const disputes: Array<{ q: PaperExtractItem; candidates: Array<{ source: string; answer: string; solution: string }> }> = []
+          // 表决：按答案一致性分组，取「严格多数」（超过可用票数一半）组；无多数 → 待确认
+          const votesOf = (no: string) => votes.map((vm) => vm.get(no)).filter(Boolean) as PaperSolvedItem[]
           const final = new Map<string, PaperSolvedItem>()
           for (const q of extracted.items) {
             const no = String(Number(q.no))
             const vs = votesOf(no)
+            votesMemo.set(no, votes.map((vm, i) => vm.get(no) && `票${i}=${vm.get(no)!.answer.slice(0, 60)}`).filter(Boolean) as string[])
             if (q.qtype === '选择') {
-              console.log(`[analyze] 第${no}题三票：初解=${v0.get(no)?.answer || '—'} / 复解一=${v1.get(no)?.answer || '—'} / 复解二=${v2.get(no)?.answer || '—'}`)
+              console.log(`[analyze] 第${no}题五票：${votes.map((vm, i) => `票${i}=${vm.get(no)?.answer || '—'}`).join(' / ')}`)
             }
-            if (vs.length >= 2) {
+            if (vs.length) {
               const groups: Array<{ rep: PaperSolvedItem; members: PaperSolvedItem[] }> = []
               for (const v of vs) {
                 const g = groups.find((g) => answersAgree(g.rep.answer, v.answer, q.qtype))
@@ -188,38 +192,21 @@ export default async function analysisRoutes(app: FastifyInstance) {
               }
               groups.sort((a, b) => b.members.length - a.members.length)
               const top = groups[0]
-              if (top.members.length >= 2 || vs.length === 1) {
-                // 多数票采纳；仅一票时（复解都失败）直接采纳初解
+              const need = Math.floor(vs.length / 2) + 1 // 严格多数：5票需3，4票需3，3票需2，2票需2
+              if (top.members.length >= need) {
+                // 多数票采纳（组内优先采初解票，保留其看图得到的解析/配图）
                 final.set(no, top.members.includes(v0.get(no)!) ? v0.get(no)! : top.rep)
                 continue
               }
             }
-            disputes.push({
-              q,
-              candidates: [
-                v0.get(no) && { source: '初解（看图）', answer: v0.get(no)!.answer, solution: v0.get(no)!.solution },
-                v1.get(no) && { source: '复解一', answer: v1.get(no)!.answer, solution: v1.get(no)!.solution },
-                v2.get(no) && { source: '复解二', answer: v2.get(no)!.answer, solution: v2.get(no)!.solution },
-              ].filter(Boolean) as Array<{ source: string; answer: string; solution: string }>,
-            })
-          }
-          if (disputes.length) {
-            try {
-              const adj = await adjudicateDispute(provider, { grade: meta.grade, disputes, images: paperUrls })
-              u2c = adj.usage
-              for (const s of adj.result.items) final.set(String(Number(s.no)), s)
-              console.log(`[analyze] ${disputes.length} 题三票分歧 → 终裁完成`)
-            } catch (e: any) {
-              console.error('[analyze] 终裁失败（分歧题采纳初解）:', e.message)
-              for (const d of disputes) {
-                const v = v0.get(String(Number(d.q.no)))
-                if (v) final.set(String(Number(d.q.no)), v)
-              }
-            }
+            // 无严格多数 → 待确认，不强行判定（candidates 信息进比对说明与待确认清单）
+            pendingNos.add(no)
+            const cands = votes.map((vm, i) => vm.get(no) && `票${i}=${vm.get(no)!.answer}`).filter(Boolean)
+            console.log(`[analyze] 第${no}题票数无多数 → 待确认（${cands.join('，')}）`)
           }
           solved = {
             items: extracted.items.map((q) => final.get(String(Number(q.no)))).filter(Boolean) as PaperSolvedItem[],
-            note: [solved0.note, `标准答案经三票表决+终裁（初解/复解一/复解二）`].filter(Boolean).join(' '),
+            note: [solved0.note, `标准答案经五票表决（初解/复解一~四，不同温度独立复解），无多数分歧的题标「待确认」不强行判定`].filter(Boolean).join(' '),
           }
         }
         // ③ 读取答题卡学生作答（有答题卡页才调用；逐页读取提高识别保真度）
@@ -309,7 +296,7 @@ export default async function analysisRoutes(app: FastifyInstance) {
           questions: extracted.items,
           solved: solved.items,
           sheet: sheet.items,
-          extraNote: [extracted.unrecognized.length ? `试卷页识别说明：${extracted.unrecognized.join('；')}` : '', sheet.unrecognized.length ? `答题卡识别说明：${sheet.unrecognized.join('；')}` : '', solved.note ? `求解说明：${solved.note}` : ''].filter(Boolean).join(' '),
+          extraNote: [extracted.unrecognized.length ? `试卷页识别说明：${extracted.unrecognized.join('；')}` : '', sheet.unrecognized.length ? `答题卡识别说明：${sheet.unrecognized.join('；')}` : '', solved.note ? `求解说明：${solved.note}` : '', pendingNos.size ? `第${[...pendingNos].join('、')}题标准答案存在多解分歧已标待确认——这些题一律输出 verdict=「无法识别」并在 comment 注明「标准答案待确认」，不得自行判定对错` : ''].filter(Boolean).join(' '),
           images: paperUrls,
         })
         // ④′ 选择题判定机器裁定：标准答案字母集合 vs 学生填涂字母集合直接比对（不受模型比对偶发影响）；
@@ -367,11 +354,29 @@ export default async function analysisRoutes(app: FastifyInstance) {
           const s = ansOf(it.no)
           if (s && (!it.reference_answer || /题干缺失|无法比对/.test(it.reference_answer))) it.reference_answer = s.answer + (s.solution ? `（解析：${s.solution.slice(0, 200)}）` : '')
         }
+        // ④″ 待确认题强制落标（P0-71）：标准答案五票无多数的题——无论比对模型给了什么判定，
+        // 一律改「无法识别」+ comment 注明分歧候选，进待确认清单，不强行判定（严禁硬给可能错的标准答案）
+        if (pendingNos.size) {
+          for (const it of analysis.items) {
+            const no = String(Number(it.no))
+            if (!pendingNos.has(no)) continue
+            const q = stemOf(it.no)
+            const cands = votesMemo.get(no) || []
+            it.verdict = '无法识别'
+            it.sub_answers = []
+            it.comment = `标准答案存在多解分歧，已标待确认，请人工核对卷面后判定（候选：${cands.join('；')}）`
+            it.reference_answer = `待确认（模型候选：${cands.join('；')}）`
+            it.error_step = ''
+            it.error_type = ''
+          }
+          analysis.unrecognized.push(...[...pendingNos].map((no) => `第${no}题：标准答案多解分歧（${votesMemo.get(no)?.join('；') || '候选见逐题说明'}），未强行判定，待人工确认`))
+          console.log(`[analyze] ${pendingNos.size} 题标准答案无多数 → 已标待确认`)
+        }
         analysis.items = analysis.items.filter((it) => it.stem)
         const usage = {
-          prompt_tokens: u1.prompt_tokens + u2.prompt_tokens + u2x.prompt_tokens + u2b.prompt_tokens + u2c.prompt_tokens + u3.prompt_tokens + u4.prompt_tokens,
-          completion_tokens: u1.completion_tokens + u2.completion_tokens + u2x.completion_tokens + u2b.completion_tokens + u2c.completion_tokens + u3.completion_tokens + u4.completion_tokens,
-          cost: u1.cost + u2.cost + u2x.cost + u2b.cost + u2c.cost + u3.cost + u4.cost,
+          prompt_tokens: u1.prompt_tokens + u2.prompt_tokens + u2x.prompt_tokens + u2b.prompt_tokens + u2d.prompt_tokens + u3.prompt_tokens + u4.prompt_tokens,
+          completion_tokens: u1.completion_tokens + u2.completion_tokens + u2x.completion_tokens + u2b.completion_tokens + u2d.completion_tokens + u3.completion_tokens + u4.completion_tokens,
+          cost: u1.cost + u2.cost + u2x.cost + u2b.cost + u2d.cost + u3.cost + u4.cost,
         }
         return { ok: true, analysis, usage, provider: provider.name, pipeline: 'two-phase' as const }
       }

@@ -1,10 +1,32 @@
 // C2 验收实测：用 6 张真实试卷/答题卡照片走完整两阶段批改流水线
-// 用法：node scripts/accept-c2.mjs [--save]
+// 用法：node scripts/accept-c2.mjs [--save] [--baseline]
 //   --save：分析后真实落库（学情 + 错题），否则只跑分析回读验证
+//   --baseline：跑完后逐项对照 #42 验收基准表断言（PASS/FAIL 明细 + 总体结论，FAIL 时 exit 1）
 // 输出逐题判定表 + 与验收口径的自动核对结果
 import fs from 'node:fs'
 import path from 'node:path'
 import { Agent } from 'undici'
+
+// P0-71②：监督者 #41/#42 建立的独立基准（逐题人工求解 + 放大核图），固化为离线回归断言。
+// 注意：基准里的「标准答案」是唯一真值；学生填涂与红叉是卷面事实。系统判定应向它收敛。
+const BASELINE = {
+  choice_std: { 1: 'C', 2: 'B', 3: 'C', 4: 'A', 5: 'B', 6: 'D', 7: 'C', 8: 'A', 9: 'B', 10: 'D', 11: 'C' },
+  choice_student: { 1: 'D', 2: 'B', 3: 'C', 4: 'A', 5: 'B', 6: 'D', 7: 'B', 8: 'D', 9: 'D', 10: 'C', 11: 'C' },
+  wrong_expected: ['1', '7', '8', '9', '10'], // 错题集基准（各 -4 分 = -20）
+  blank12: [
+    { key: '(1)', verdict: '错', correct: 'AD' },
+    { key: '(2)', verdict: '对', correct: '2.4' },
+    { key: '(3)', verdict: '对' },
+    { key: '(4)', verdict: '错', correct: '大于' },
+    { key: '(5)', verdict: '对' },
+  ],
+  full_score: ['13', '14'], // 13 满分；14 满分（μ=0.1，m_A=0.8kg）
+  value_checks: [
+    { no: '14(2)', contains: ['0.8'] }, // 14(2) 标准解 m_A=0.8kg（学生 0.8 应判对）
+    { no: '15(3)', contains: ['3750'] }, // 学生 3600J 漏减初动能，正确 3750J
+    { no: '16(3)', contains: ['8.625'] }, // 学生 9.625J 误读，正确 8.625J
+  ],
+}
 
 const BASE = process.env.SMOKE_BASE || 'http://127.0.0.1:3210'
 // 两阶段批改（pro 级求解 + 复核）可能 >5 分钟：放宽脚本侧响应头超时
@@ -24,6 +46,10 @@ const FILES = [
   ['20261030-173355.765-6.jpg', 'paper'],
 ]
 const DO_SAVE = process.argv.includes('--save')
+const DO_BASELINE = process.argv.includes('--baseline')
+
+// 字母集合提取（与后端 answersAgree 同口径）
+const lettersOf = (s) => [...new Set(String(s || '').replace(/[^ABCD]/g, '').split(''))].sort().join('')
 
 const j = async (r) => {
   const d = await r.json().catch(() => null)
@@ -99,6 +125,65 @@ const has3750 = JSON.stringify(r).includes('3750')
 const has9625 = JSON.stringify(r).includes('9.625')
 const has8625 = JSON.stringify(r).includes('8.625')
 console.log(`15(3) 数值出现：3600=${has3600} 3750=${has3750}；16(3) 数值出现：9.625=${has9625} 8.625=${has8625}`)
+
+// ---------- P0-71②：基准表逐项断言（--baseline） ----------
+if (DO_BASELINE) {
+  console.log('\n===== 基准表断言（监督者 #41/#42 独立基准） =====')
+  const itemOf = (no) => a.items.find((x) => String(Number(x.no)) === String(no))
+  const rows = []
+  const push = (item, ok, note) => rows.push({ item, ok, note })
+
+  // ① 选择题标准答案（reference_answer 的字母集合 vs 基准）
+  for (const [no, std] of Object.entries(BASELINE.choice_std)) {
+    const it = itemOf(no)
+    const got = lettersOf(it?.reference_answer)
+    const pending = it?.verdict === '无法识别' || /待确认/.test(it?.reference_answer || '')
+    push(`第${no}题标准答案(基准${std})`, pending ? null : got === lettersOf(std), pending ? '待确认（未强行判定）' : `系统=${it?.reference_answer?.slice(0, 30) || '—'}`)
+  }
+  // ② 学生填涂（student_answer vs 基准卷面）
+  for (const [no, stu] of Object.entries(BASELINE.choice_student)) {
+    const it = itemOf(no)
+    push(`第${no}题学生填涂(基准${stu})`, lettersOf(it?.student_answer) === lettersOf(stu), `系统=${(it?.student_answer || '—').slice(0, 20)}`)
+  }
+  // ③ 错题集合
+  const wrongGot = a.items.filter((it) => it.verdict === '错').map((it) => String(it.no)).sort((x, y) => Number(x) - Number(y))
+  const okSet = wrongGot.length === BASELINE.wrong_expected.length && BASELINE.wrong_expected.every((n) => wrongGot.includes(n))
+  push(`错题集合(基准 ${BASELINE.wrong_expected.join(',')})`, okSet, `系统={${wrongGot.join(',')}}`)
+  // ④ 12 题逐空
+  const q12 = itemOf(12)
+  for (const b of BASELINE.blank12) {
+    const sa = (q12?.sub_answers || []).find((x) => String(x.key).includes(b.key.replace(/[()]/g, '')) || String(x.key) === b.key)
+    push(`12${b.key} 判定(基准${b.verdict})`, sa ? sa.verdict === b.verdict : false, sa ? `系统=${sa.verdict} 学生=${String(sa.student || '—').slice(0, 20)}` : '未找到该空')
+    if (b.correct) push(`12${b.key} 正解(基准${b.correct})`, sa && String(sa.correct || '').replace(/\s/g, '').includes(b.correct.replace(/\s/g, '')), sa ? `系统=${String(sa.correct || '—').slice(0, 30)}` : '')
+  }
+  // ⑤ 满分题
+  for (const no of BASELINE.full_score) {
+    const it = itemOf(no)
+    const subs = it?.sub_answers || []
+    const allOk = subs.length ? subs.every((s) => s.verdict === '对') : it?.verdict === '对'
+    push(`第${no}题满分(基准)`, !!allOk, subs.length ? `逐 ${subs.length} 空：${subs.map((s) => s.verdict).join('/')}` : `整体=${it?.verdict}`)
+  }
+  // ⑥ 关键数值
+  for (const vc of BASELINE.value_checks) {
+    const it = itemOf(vc.no.replace(/\(.*\),?$/, '').replace(/\(.*\)/, '')) || itemOf(vc.no.split('(')[0])
+    const hit = vc.contains.some((v) => JSON.stringify(it || {}).includes(v))
+    push(`${vc.no} 含正确数值 ${vc.contains.join('/')}`, hit, hit ? '在判定/解析中出现' : '未出现')
+  }
+  let fails = 0, pendings = 0
+  for (const r of rows) {
+    if (r.ok === false) fails++
+    if (r.ok === null) pendings++
+    const mark = r.ok === true ? '✓' : r.ok === null ? '⏳' : '✗'
+    console.log(` ${mark} ${r.item} — ${r.note}`)
+  }
+  console.log(`\n基准断言：PASS ${rows.filter((r) => r.ok === true).length} / FAIL ${fails} / 待确认 ${pendings}`)
+  if (fails > 0) {
+    console.error('⛔ 未达基准（FAIL 非零）')
+    process.exitCode = 1
+  } else {
+    console.log('✅ 全部达标（待确认项符合「不强行判定」纪律）')
+  }
+}
 
 if (DO_SAVE) {
   const nos = a.items.filter((it) => it.verdict === '错' || it.verdict === '部分对').map((it) => it.no)

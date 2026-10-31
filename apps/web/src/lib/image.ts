@@ -28,8 +28,9 @@ export async function compressImage(file: File, maxSide = 1280, quality = 0.7): 
 export async function uploadImage(file: File, studentId: number | string, token: string): Promise<string> {
   const blob = await compressImage(file)
   const fd = new FormData()
-  fd.append('file', new File([blob], `photo.jpg`, { type: blob.type || 'image/jpeg' }))
+  // P2-73：字段放在 file 之前（后端已改为顺序无关，这里双保险）
   fd.append('student_id', String(studentId))
+  fd.append('file', new File([blob], `photo.jpg`, { type: blob.type || 'image/jpeg' }))
   const res = await fetch('/api/upload', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },

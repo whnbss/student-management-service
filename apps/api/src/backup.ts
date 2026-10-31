@@ -9,7 +9,7 @@ import { db, getSetting, setSetting, DATA_DIR, UPLOADS_DIR } from './db'
 const BACKUP_DIR = path.join(DATA_DIR, 'backups')
 const KEEP_COUNT = 14 // 最多保留的备份份数（每日兜底 + purge 前强制快照共用轮转）
 const DAY_MS = 24 * 60 * 60 * 1000 // 备份周期：每日兜底一次
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000 // 每 6 小时检查一次是否到期
+const CHECK_INTERVAL_MS = 1 * 60 * 60 * 1000 // 每 1 小时检查一次是否到期（P3-74：缩小「每日兜底」的滞后窗口，到期后最多 1 小时内补上）
 const UPLOADS_SIZE_LIMIT = 500 * 1024 * 1024 // uploads 超过该体积时仅备份数据库
 const ZIP_PREFIX = 'backup-'
 
@@ -80,7 +80,7 @@ export async function runBackup(): Promise<{ ok: boolean; file?: string; db_only
   }
 }
 
-// 启动后 30 秒做首次到期检查（避免拖慢启动），之后每 6 小时检查一次
+// 启动后 30 秒做首次到期检查（避免拖慢启动），之后每 1 小时检查一次（P3-74：滞后 ≤1h）
 export function scheduleBackups() {
   const check = async () => {
     try {
