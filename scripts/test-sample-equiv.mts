@@ -1,5 +1,6 @@
-// P1-81/P1-82/P2-80 单测：数值抽样等价判定 + 判定文案机器校正启发式（验收 #45/#46 实测案例）
+// P1-81/P1-82/P2-80/P1-84 单测：数值抽样等价判定 + 判定文案机器校正启发式 + 展示层/判定层交叉校验（验收 #45/#46/#47 实测案例）
 import { sampleEquivalent as eq, isEquivClaim, hasJudgeContradiction } from '../packages/shared/src/index.ts'
+import { answersClearlyDisagree as dis } from '../apps/api/src/answerMatch.ts'
 
 let fail = 0
 function chk(name: string, got: unknown, expect: unknown) {
@@ -40,5 +41,27 @@ chk('note 写「≠」', hasJudgeContradiction('学生结果 x≠2m/s'), true)
 chk('「无错误」不算矛盾', hasJudgeContradiction('与标准答案一致，无错误'), false)
 chk('「无不一致」不算矛盾', hasJudgeContradiction('两者并无不一致'), false)
 chk('「没判错」不算矛盾', hasJudgeContradiction('该空没判错'), false)
+
+// ---- P1-84 展示层/判定层交叉校验（answersClearlyDisagree）----
+// #47 Q7 实况：展示层 C、判定层表决答案 B —— 必须确证不一致（进待确认而非静默判对）
+chk('Q7 选择题 C vs B → 不一致', dis('C', 'B', '选择', eq), true)
+chk('Q7 带解析尾巴 C（解析：…） vs B → 不一致', dis('C（解析：剪断L2瞬间T1=0）', 'B', '选择', eq), true)
+chk('选择题一致 C vs C → 一致', dis('C', 'C', '选择', eq), false)
+chk('选择题归一化 AD vs A、D → 一致', dis('AD', 'A、D', '选择', eq), false)
+chk('选择题单侧长叙述解析不出 → 保守不表态', dis('正确答案见解析，图示法求解得选项', 'C', '选择', eq), false)
+// 12(5) 代数等价（P1-82 求值器）不再误标不一致
+chk('12(5) (g−k)/(2k) vs g/(2k)−1/2 → 等价即一致', dis('(g−k)/(2k)', 'g/(2k)−1/2', '其它', eq), false)
+chk('数值一致 3750J vs 3750 → 一致', dis('3750J（解析：动能定理）', '3750', '其它', eq), false)
+chk('数值漂移 3000 vs 3750 → 不一致', dis('3000J', '3750J', '其它', eq), true)
+chk('多问数值漂移 (1)2.4(2)8 vs (1)2.4(2)9 → 不一致', dis('(1)2.4；(2)8', '(1)2.4；(2)9', '其它', eq), true)
+chk('多问数值一致 → 一致', dis('(1)2.4；(2)8', '(1)2.4；(2)8.0', '其它', eq), false)
+// 12(4) 文字答案：一致/不一致
+chk('12(4) 大于 vs 大于 → 一致', dis('大于', '大于', '其它', eq), false)
+chk('12(4) 大于 vs 小于 → 不一致', dis('大于', '小于', '其它', eq), true)
+chk('文字带「答案：」前缀归一化', dis('答案：大于', '大于', '其它', eq), false)
+// 保守边界：单侧空、解析口径不齐
+chk('单侧空 → 不表态', dis('', '3750', '其它', eq), false)
+chk('单侧无数值 → 保守不表态', dis('见解析', '3750J', '其它', eq), false)
+chk('单位不对称 2.4 m/s vs 2.4 → 保守不表态', dis('2.4 m/s', '2.4', '其它', eq), false)
 
 process.exit(fail ? 1 : 0)

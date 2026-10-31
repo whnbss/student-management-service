@@ -13,6 +13,7 @@ import { UPLOADS_DIR, db, getSetting } from '../db'
 import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper, redrawFigures } from '../ai'
 import type { SheetReadItem, PaperExtractItem, PaperSolvedItem } from '@workbench/shared'
 import { sampleEquivalent, isEquivClaim, hasJudgeContradiction } from '@workbench/shared'
+import { letterSetOf, canonAnswer, splitParts, numsOf, answersAgree, answersClearlyDisagree } from '../answerMatch'
 
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif',
@@ -36,93 +37,6 @@ function readDataUrls(paths: string[]): string[] {
 type Usage = { prompt_tokens: number; completion_tokens: number; cost: number }
 function accUsage(): Usage {
   return { prompt_tokens: 0, completion_tokens: 0, cost: 0 }
-}
-
-// ---------- 答案一致性判定（C2 三票表决用） ----------
-// 选择题：提取 A~D 字母集合（答案串较短时）；其它题：提取全部数值（含 LaTeX 里的数字），2% 容差配对
-function letterSetOf(s: string): string[] | null {
-  const clean = String(s || '').replace(/\s+/g, '')
-  if (!clean || clean.length > 60) return null
-  const letters = [...new Set(clean.replace(/[^ABCD]/g, '').split(''))]
-  if (!letters.length || letters.length > 4) return null
-  // 至少要有一个字母紧邻答案语境（如「C」「AD」「答案：C」），纯叙述文字不算
-  return /^[^A-Za-z]{0,6}[ABCD]/.test(clean) || /^(答案|选)[^A-Za-z]{0,3}[ABCD]/.test(clean) ? letters.sort() : null
-}
-// P1-76：答案写法归一化 —— 消除「语义一致仅写法不同」的表决票差异：
-//   \frac12 vs \frac{1}{2} vs ½、\dfrac、全角括号/标点、空白、分隔标点、大小写。
-// 只用于表决一致性比对，不改动任何入库文本。
-const VULGAR_FRACS: Record<string, string> = {
-  '½': '\\frac{1}{2}', '⅓': '\\frac{1}{3}', '⅔': '\\frac{2}{3}', '¼': '\\frac{1}{4}', '¾': '\\frac{3}{4}',
-  '⅕': '\\frac{1}{5}', '⅖': '\\frac{2}{5}', '⅗': '\\frac{3}{5}', '⅘': '\\frac{4}{5}', '⅙': '\\frac{1}{6}', '⅛': '\\frac{1}{8}',
-}
-function canonAnswer(s: string): string {
-  let t = String(s || '')
-  t = t.replace(/[½⅓⅔¼¾⅕⅖⅗⅘⅙⅛]/g, (c) => VULGAR_FRACS[c] || c)
-  // 上标数字统一成 ^n（v² vs v^2 之类写法差）
-  t = t.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]/g, (c) => '^' + '⁰¹²³⁴⁵⁶⁷⁸⁹'.indexOf(c))
-  // \frac12 / \frac1{2} / \dfrac{1}{2} → 统一成 \frac{1}{2}（单数字分子/分母补花括号）
-  t = t.replace(/\\[dt]\s*frac/g, '\\frac')
-  t = t.replace(/\\frac\s*(\d)\s*(\d)/g, '\\frac{$1}{$2}')
-  t = t.replace(/\\left|\\right/g, '')
-  t = t.replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/[：]/g, ':')
-  // 顿号只作列举分隔（字母选项间常见），直接去掉；其余分隔标点统一成半角逗号；句号去掉
-  t = t.replace(/[、]/g, '').replace(/[，；;]/g, ',').replace(/[。]/g, '')
-  t = t.replace(/^答案[:]*/, '').replace(/^选[,]?/, '')
-  return t.replace(/\s+/g, '').toLowerCase()
-}
-// P1-76：多问拆分 —— "(1)…；(2)…" 结构按问号切开逐问比对（问数一致且逐问一致才算一致）
-function splitParts(s: string): string[] | null {
-  const t = canonAnswer(s)
-  const marks = [...t.matchAll(/\((\d{1,2})\)/g)]
-  if (marks.length < 2 || marks[0][1] !== '1') return null
-  const parts: string[] = []
-  for (let i = 0; i < marks.length; i++) {
-    const start = (marks[i].index || 0) + marks[i][0].length
-    const end = i + 1 < marks.length ? marks[i + 1].index || t.length : t.length
-    parts.push(t.slice(start, end).replace(/^,+|,+$/g, ''))
-  }
-  return parts
-}
-function numsOf(s: string): number[] {
-  const t = canonAnswer(s).replace(/\\[a-zA-Z]+/g, ' ').replace(/[{}]/g, ' ')
-  const out: number[] = []
-  const re = /-?\d+(?:\.\d+)?(?:\s*[eE]\s*(-?\d+)|\s*[×x*]\s*10\s*\^?\s*\{?(-?\d+)\}?)?/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(t))) {
-    const base = parseFloat(m[0].replace(/[×x*]\s*10\s*\^?\s*\{?-?\d+\}?$/, '').replace(/\s+/g, ''))
-    if (!isFinite(base)) continue
-    const exp = m[1] || m[2]
-    out.push(exp ? base * Math.pow(10, parseInt(exp)) : base)
-    if (out.length > 12) break
-  }
-  return out
-}
-function answersAgree(a: string, b: string, qtype: string): boolean {
-  const na = String(a || '').trim(); const nb = String(b || '').trim()
-  if (!na || !nb) return false
-  if (qtype === '选择') {
-    const la = letterSetOf(na); const lb = letterSetOf(nb)
-    if (la && lb) return la.join('') === lb.join('')
-  }
-  // P1-76：多问结构逐问比对（(1)…(2)…，问数一致且逐问一致才算一致）
-  const pa = splitParts(na); const pb = splitParts(nb)
-  if (pa && pb && pa.length === pb.length) {
-    return pa.every((p, i) => answersAgree(p, pb[i], '其它'))
-  }
-  const xs = numsOf(na); const ys = numsOf(nb)
-  if (xs.length && ys.length && xs.length === ys.length) {
-    const used = new Set<number>()
-    let all = true
-    for (const x of xs) {
-      const hit = ys.findIndex((y, i) => !used.has(i) && (Math.abs(x - y) <= 0.02 * Math.max(Math.abs(x), Math.abs(y), 1e-9)))
-      if (hit < 0) { all = false; break }
-      used.add(hit)
-    }
-    if (all) return true
-    // 数值集合不一致不直接判分歧：可能是 \frac12→"12" 之类的写法噪声（P1-76），
-    // 交给归一化字符串比对兜底；真分歧（数值实质不同）归一化后必然不同
-  }
-  return canonAnswer(na) === canonAnswer(nb)
 }
 
 export default async function analysisRoutes(app: FastifyInstance) {
@@ -529,6 +443,39 @@ export default async function analysisRoutes(app: FastifyInstance) {
           }
           analysis.unrecognized.push(...[...pendingNos].map((no) => `第${no}题：标准答案多解分歧（${votesMemo.get(no)?.join('；') || '候选见逐题说明'}），未强行判定，待人工确认`))
           console.log(`[analyze] ${pendingNos.size} 题标准答案无多数 → 已标待确认`)
+        }
+        // ④⁗ 展示层/判定层同源校验（P1-84）：判定实际采用的是五票表决答案（solved.items），
+        // 但展示给教师的 items.reference_answer 可能是比对模型自己写的另一份答案——两者不一致时
+        //（#47 的 Q7：展示层 C、判定层用 B 判「对」，教师看到的标准答案与判定依据不符），
+        // 不得静默判定，该题一律进待确认交人工；一致的同源改写，杜绝展示与判定口径分裂。
+        {
+          const votedOf = new Map(solved.items.map((s) => [String(Number(s.no)), s]))
+          const qtypeOf = (no: number) => String(extracted.items.find((q) => Number(q.no) === no)?.qtype || '')
+          const clip = (s: string) => String(s || '').slice(0, 60)
+          let crossFlagged = 0
+          for (const it of analysis.items) {
+            const no = String(Number(it.no))
+            if (pendingNos.has(no)) continue
+            const s = votedOf.get(no)
+            if (!s || !String(s.answer || '').trim()) continue
+            const shown = String(it.reference_answer || '')
+            const voted = String(s.answer)
+            if (shown && answersClearlyDisagree(shown, voted, qtypeOf(Number(it.no)), sampleEquivalent)) {
+              it.verdict = '无法识别'
+              it.sub_answers = []
+              it.error_step = ''
+              it.error_type = ''
+              it.comment = `标准答案展示层与判定层不一致，已标待确认，请人工核对卷面后判定（展示：${clip(shown)}；判定用：${clip(voted)}）`
+              it.reference_answer = `待确认（展示层：${clip(shown)}；判定层：${clip(voted)}）`
+              analysis.unrecognized.push(`第${it.no}题：标准答案展示层（${clip(shown)}）与判定层（${clip(voted)}）不一致，未静默判定，待人工确认`)
+              crossFlagged++
+              console.log(`[analyze] 第${it.no}题展示层/判定层答案不一致 → 改待确认（展示=${clip(shown)}，判定=${clip(voted)}）`)
+            } else {
+              // 同源：展示层改写为判定实际采用的表决答案（解析尾巴照旧回填）
+              it.reference_answer = voted + (s.solution ? `（解析：${s.solution.slice(0, 200)}）` : '')
+            }
+          }
+          if (crossFlagged) console.log(`[analyze] ${crossFlagged} 题展示层/判定层不一致 → 已标待确认`)
         }
         // ④‴ 配图落标：重绘成功的题把 figure_spec 写进分析结果（figure_status=已重绘）；
         // 原题有图但模板不能还原/重绘失败的标「图待补」，不编造

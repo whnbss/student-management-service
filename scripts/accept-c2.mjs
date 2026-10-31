@@ -134,11 +134,14 @@ if (DO_BASELINE) {
   const push = (item, ok, note) => rows.push({ item, ok, note })
 
   // ① 选择题标准答案（reference_answer 的字母集合 vs 基准）
+  // P1-84 起 reference_answer 与判定层同源（= 表决答案 + （解析：…）尾巴），断言只取答案本体
+  // 解析文本可能含嵌套括号且总在串尾——从「（解析：」直接截到串尾
+  const stripTail = (s) => String(s || '').replace(/[（(]解析[：:][\s\S]*$/, '').trim()
   for (const [no, std] of Object.entries(BASELINE.choice_std)) {
     const it = itemOf(no)
-    const got = lettersOf(it?.reference_answer)
+    const got = lettersOf(stripTail(it?.reference_answer))
     const pending = it?.verdict === '无法识别' || /待确认/.test(it?.reference_answer || '')
-    push(`第${no}题标准答案(基准${std})`, pending ? null : got === lettersOf(std), pending ? '待确认（未强行判定）' : `系统=${it?.reference_answer?.slice(0, 30) || '—'}`)
+    push(`第${no}题标准答案(基准${std})`, pending ? null : got === lettersOf(std), pending ? '待确认（未强行判定）' : `系统=${stripTail(it?.reference_answer)?.slice(0, 30) || '—'}`)
   }
   // ② 学生填涂（student_answer vs 基准卷面）
   for (const [no, stu] of Object.entries(BASELINE.choice_student)) {
