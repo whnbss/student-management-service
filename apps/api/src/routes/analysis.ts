@@ -10,7 +10,7 @@ import type { FastifyInstance } from 'fastify'
 import path from 'node:path'
 import fs from 'node:fs'
 import { UPLOADS_DIR, db, getSetting } from '../db'
-import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper } from '../ai'
+import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper, redrawFigures } from '../ai'
 import type { SheetReadItem, PaperExtractItem, PaperSolvedItem } from '@workbench/shared'
 
 const MIME: Record<string, string> = {
@@ -47,8 +47,43 @@ function letterSetOf(s: string): string[] | null {
   // 至少要有一个字母紧邻答案语境（如「C」「AD」「答案：C」），纯叙述文字不算
   return /^[^A-Za-z]{0,6}[ABCD]/.test(clean) || /^(答案|选)[^A-Za-z]{0,3}[ABCD]/.test(clean) ? letters.sort() : null
 }
+// P1-76：答案写法归一化 —— 消除「语义一致仅写法不同」的表决票差异：
+//   \frac12 vs \frac{1}{2} vs ½、\dfrac、全角括号/标点、空白、分隔标点、大小写。
+// 只用于表决一致性比对，不改动任何入库文本。
+const VULGAR_FRACS: Record<string, string> = {
+  '½': '\\frac{1}{2}', '⅓': '\\frac{1}{3}', '⅔': '\\frac{2}{3}', '¼': '\\frac{1}{4}', '¾': '\\frac{3}{4}',
+  '⅕': '\\frac{1}{5}', '⅖': '\\frac{2}{5}', '⅗': '\\frac{3}{5}', '⅘': '\\frac{4}{5}', '⅙': '\\frac{1}{6}', '⅛': '\\frac{1}{8}',
+}
+function canonAnswer(s: string): string {
+  let t = String(s || '')
+  t = t.replace(/[½⅓⅔¼¾⅕⅖⅗⅘⅙⅛]/g, (c) => VULGAR_FRACS[c] || c)
+  // 上标数字统一成 ^n（v² vs v^2 之类写法差）
+  t = t.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]/g, (c) => '^' + '⁰¹²³⁴⁵⁶⁷⁸⁹'.indexOf(c))
+  // \frac12 / \frac1{2} / \dfrac{1}{2} → 统一成 \frac{1}{2}（单数字分子/分母补花括号）
+  t = t.replace(/\\[dt]\s*frac/g, '\\frac')
+  t = t.replace(/\\frac\s*(\d)\s*(\d)/g, '\\frac{$1}{$2}')
+  t = t.replace(/\\left|\\right/g, '')
+  t = t.replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/[：]/g, ':')
+  // 顿号只作列举分隔（字母选项间常见），直接去掉；其余分隔标点统一成半角逗号；句号去掉
+  t = t.replace(/[、]/g, '').replace(/[，；;]/g, ',').replace(/[。]/g, '')
+  t = t.replace(/^答案[:]*/, '').replace(/^选[,]?/, '')
+  return t.replace(/\s+/g, '').toLowerCase()
+}
+// P1-76：多问拆分 —— "(1)…；(2)…" 结构按问号切开逐问比对（问数一致且逐问一致才算一致）
+function splitParts(s: string): string[] | null {
+  const t = canonAnswer(s)
+  const marks = [...t.matchAll(/\((\d{1,2})\)/g)]
+  if (marks.length < 2 || marks[0][1] !== '1') return null
+  const parts: string[] = []
+  for (let i = 0; i < marks.length; i++) {
+    const start = (marks[i].index || 0) + marks[i][0].length
+    const end = i + 1 < marks.length ? marks[i + 1].index || t.length : t.length
+    parts.push(t.slice(start, end).replace(/^,+|,+$/g, ''))
+  }
+  return parts
+}
 function numsOf(s: string): number[] {
-  const t = String(s || '').replace(/\\[a-zA-Z]+/g, ' ').replace(/[{}]/g, ' ')
+  const t = canonAnswer(s).replace(/\\[a-zA-Z]+/g, ' ').replace(/[{}]/g, ' ')
   const out: number[] = []
   const re = /-?\d+(?:\.\d+)?(?:\s*[eE]\s*(-?\d+)|\s*[×x*]\s*10\s*\^?\s*\{?(-?\d+)\}?)?/g
   let m: RegExpExecArray | null
@@ -68,18 +103,25 @@ function answersAgree(a: string, b: string, qtype: string): boolean {
     const la = letterSetOf(na); const lb = letterSetOf(nb)
     if (la && lb) return la.join('') === lb.join('')
   }
+  // P1-76：多问结构逐问比对（(1)…(2)…，问数一致且逐问一致才算一致）
+  const pa = splitParts(na); const pb = splitParts(nb)
+  if (pa && pb && pa.length === pb.length) {
+    return pa.every((p, i) => answersAgree(p, pb[i], '其它'))
+  }
   const xs = numsOf(na); const ys = numsOf(nb)
-  if (xs.length && ys.length) {
-    if (xs.length !== ys.length) return false
+  if (xs.length && ys.length && xs.length === ys.length) {
     const used = new Set<number>()
+    let all = true
     for (const x of xs) {
       const hit = ys.findIndex((y, i) => !used.has(i) && (Math.abs(x - y) <= 0.02 * Math.max(Math.abs(x), Math.abs(y), 1e-9)))
-      if (hit < 0) return false
+      if (hit < 0) { all = false; break }
       used.add(hit)
     }
-    return true
+    if (all) return true
+    // 数值集合不一致不直接判分歧：可能是 \frac12→"12" 之类的写法噪声（P1-76），
+    // 交给归一化字符串比对兜底；真分歧（数值实质不同）归一化后必然不同
   }
-  return na.replace(/\s+/g, '') === nb.replace(/\s+/g, '')
+  return canonAnswer(na) === canonAnswer(nb)
 }
 
 export default async function analysisRoutes(app: FastifyInstance) {
@@ -137,6 +179,24 @@ export default async function analysisRoutes(app: FastifyInstance) {
           u1.completion_tokens += r1.usage.completion_tokens || 0
           u1.cost += r1.usage.cost || 0
         }
+        // ①′ 原卷配图重绘（验收#43 ②）：有插图的题按模板库选模板补 figure_spec，
+        // 模板不能还原的如实标「图待补」，严禁硬套模板编造；失败不阻塞批改
+        const figureItems = extracted.items.filter((q) => q.has_figure || /如图/.test(q.stem))
+        const figureSpecMap = new Map<string, { template: string; params: Record<string, number | string> }>()
+        if (figureItems.length) {
+          try {
+            const rf = await redrawFigures(provider, { grade: meta.grade, items: figureItems, images: paperUrls })
+            u1.prompt_tokens += rf.usage.prompt_tokens || 0
+            u1.completion_tokens += rf.usage.completion_tokens || 0
+            u1.cost += rf.usage.cost || 0
+            for (const f of rf.result.items) {
+              if (f.status === '已重绘' && f.template) figureSpecMap.set(String(Number(f.no)), { template: f.template, params: f.params })
+            }
+            console.log(`[analyze] 配图重绘：${figureItems.length} 题有插图，成功重绘 ${figureSpecMap.size} 题`)
+          } catch (e: any) {
+            console.error('[analyze] 配图重绘失败（跳过，不影响批改）:', e.message)
+          }
+        }
         // ② 独立求解标准答案（带试卷页原图：纸带读数/图像/装置必须看图）
         const { result: solved0, usage: u2 } = await solvePaper(provider, {
           grade: meta.grade,
@@ -157,21 +217,34 @@ export default async function analysisRoutes(app: FastifyInstance) {
         const votesMemo = new Map<string, string[]>()
         {
           const v0 = new Map(solved0.items.map((s) => [String(Number(s.no)), s]))
-          // 四次独立复解票（强模型纯文本，不同温度去相关；失败降级跳过该票）
+          // 四次独立复解票（强模型纯文本，不同温度去相关；失败降级跳过该票）。
+          // 验收#43建议：复解票跨供应商分配——4 张复解票按 2+2 分给另一家已配置供应商
+          //（异构模型 ensemble 去相关）；只有一家可用时回退主供应商（行为不变）。
+          // 备选供应商调用失败时同票回退主供应商再试一次，避免票数无谓减员
+          const altProvider = getProviders().find((p) => p.id !== provider.id && p.api_key && (p.text_model || p.vision_model)) || provider
           const votes: Array<Map<string, PaperSolvedItem>> = [v0]
           const temps = [0.0, 0.2, 0.5, 0.7]
           for (let ti = 0; ti < temps.length; ti++) {
             const vm = new Map<string, PaperSolvedItem>()
-            try {
-              const pr = await solvePaperPass2(provider, { grade: meta.grade, questions: extracted.items, temperature: temps[ti] })
-              if (ti === 0) u2x = pr.usage
-              else if (ti === 1) u2b = pr.usage
-              else u2d = pr.usage
-              for (const s of pr.result.items) vm.set(String(Number(s.no)), s)
-              votes.push(vm)
-            } catch (e: any) {
-              console.error(`[analyze] 复解票${ti + 1}失败（跳过）:`, e.message)
+            const chain = ti % 2 === 1 && altProvider.id !== provider.id ? [altProvider, provider] : [provider]
+            let done = false; let lastErr: any = null
+            for (const pv of chain) {
+              try {
+                const pr = await solvePaperPass2(pv, { grade: meta.grade, questions: extracted.items, temperature: temps[ti] })
+                if (ti === 0) u2x = pr.usage
+                else if (ti === 1) u2b = pr.usage
+                else u2d = pr.usage
+                for (const s of pr.result.items) vm.set(String(Number(s.no)), s)
+                votes.push(vm)
+                done = true
+                if (pv.id !== provider.id) console.log(`[analyze] 复解票${ti + 1} 由备选供应商「${pv.name}」承担`)
+                break
+              } catch (e: any) {
+                lastErr = e
+                console.error(`[analyze] 复解票${ti + 1}（供应商「${pv.name}」）失败:`, e.message)
+              }
             }
+            if (!done) console.error(`[analyze] 复解票${ti + 1}失败（跳过）:`, lastErr?.message)
           }
           // 表决：按答案一致性分组，取「严格多数」（超过可用票数一半）组；无多数 → 待确认。
           // 空答案的票不计入（复解对复杂计算题可能只给解题过程没给 answer——那属于该票弃权，不算分歧票）
@@ -310,7 +383,18 @@ export default async function analysisRoutes(app: FastifyInstance) {
             const s = stdBy.get(no); const sh = sheetBy.get(no)
             if (!s || !sh || !choiceOf(no)) return
             const la = letterSetOf(s.answer); const lb = letterSetOf(sh.student_answer)
-            if (la && lb) it.verdict = la.join('') === lb.join('') ? '对' : '错'
+            if (!la || !lb) return
+            it.verdict = la.join('') === lb.join('') ? '对' : '错'
+            // P2-75：机器裁定后清洗比对模型残留文案——「判对却残留误选C/正确为D」式矛盾
+            // 描述会误导教师；判对的题错误步骤/错因一并清空（判对不存在错误步骤）
+            const text = `${it.comment || ''}${it.error_step || ''}`
+            if (it.verdict === '对' && (/误选|错选|正确为|正确的是|正确答案|选错|不正确|应选/.test(text) || it.error_step || it.error_type)) {
+              it.error_step = ''
+              it.error_type = ''
+              it.comment = `机器裁定：学生填涂 ${lb.join('')} 与标准答案 ${la.join('')} 一致，判对`
+            } else if (it.verdict === '错' && /判对|答对|正确无误|完全正确|填涂与标准答案一致/.test(text)) {
+              it.comment = `机器裁定：学生填涂 ${lb.join('')} 与标准答案 ${la.join('')} 不一致，判错`
+            }
           }
           const conflicts: string[] = []
           for (const it of analysis.items) {
@@ -372,6 +456,15 @@ export default async function analysisRoutes(app: FastifyInstance) {
           }
           analysis.unrecognized.push(...[...pendingNos].map((no) => `第${no}题：标准答案多解分歧（${votesMemo.get(no)?.join('；') || '候选见逐题说明'}），未强行判定，待人工确认`))
           console.log(`[analyze] ${pendingNos.size} 题标准答案无多数 → 已标待确认`)
+        }
+        // ④‴ 配图落标：重绘成功的题把 figure_spec 写进分析结果（figure_status=已重绘）；
+        // 原题有图但模板不能还原/重绘失败的标「图待补」，不编造
+        for (const it of analysis.items) {
+          const q = stemOf(it.no)
+          if (!q || !(q.has_figure || /如图/.test(q.stem))) continue
+          const spec = figureSpecMap.get(String(Number(it.no)))
+          if (spec) { it.figure_spec = spec; it.figure_status = '已重绘' }
+          else if (!it.figure_spec) it.figure_status = '图待补'
         }
         analysis.items = analysis.items.filter((it) => it.stem)
         const usage = {

@@ -477,6 +477,29 @@ export function paperExtractUserPrompt(grade: string, pageCount: number): string
 请逐题完整转录所有可见题目并按约定 JSON 结构输出。`
 }
 
+// ①′ 原卷配图重绘（验收#43 ②）：转录后对有插图的题按模板库补 figure_spec。
+// 模板能忠实还原才给规格（status=已重绘）；不能还原如实标「图待补」，严禁硬套模板编造图形
+export interface PaperFigureItem {
+  no: string
+  template: string | null // FIGURE_TEMPLATES 白名单内的模板名；不能重绘为 null
+  params: Record<string, number | string>
+  status: '已重绘' | '图待补'
+}
+export const REDRAW_FIGURES_SYSTEM_PROMPT = `你是一名资深高中物理教师，正在为转录好的试卷题目补配「题图重绘」规格。
+给定题目（题干 + 原图内容描述 figure_note）与试卷页原图，请对**每道有插图的题**从下方模板库中选出能忠实还原原卷插图的模板并给出参数（参数必须与原题数值严格一致）：
+- 模板能还原时：template 填模板名，params 按模板说明给出，status 填「已重绘」；
+- 原题有图但**没有合适模板**（复杂装置/组合图像/复杂电路等）时：template 填 null，status 填「图待补」，严禁硬套不相干模板编造图形内容；
+- 原题没有插图的题不要输出该题。
+可用模板：
+${FIGURE_TEMPLATE_DOCS}
+严格输出 JSON（不要输出任何 JSON 以外的文字，不要 markdown 代码块标记）：
+{"items":[{"no":"1","template":"incline","params":{"angle":37},"status":"已重绘"}]}
+其中 template 选不了时填 null 且 status 填「图待补」。`
+
+export function redrawFiguresUserPrompt(grade: string, count: number): string {
+  return `学生年级：${grade || '未知'}。本次共 ${count} 道有插图的题，请对照原图逐题给出 figure_spec（no/template/params/status）。`
+}
+
 // ② 文本：独立求解试卷（不依赖学生作答，得出标准答案与解析）
 export const PAPER_SOLVE_SYSTEM_PROMPT = `你是一名资深高中物理命题与解题专家。给你一份**逐字转录的试卷原题**，请你作为「标准答案出品方」**独立求解每一道题**：
 1. 不依赖任何学生作答信息，只根据题干与你的物理知识求解，得出标准答案与解析；

@@ -12,6 +12,7 @@ import {
   FIX_SYSTEM_PROMPT, fixUserPrompt,
   LESSON_DIAGNOSE_SYSTEM_PROMPT, LESSON_PLAN_SYSTEM_PROMPT,
   PAPER_EXTRACT_SYSTEM_PROMPT, paperExtractUserPrompt,
+  REDRAW_FIGURES_SYSTEM_PROMPT, redrawFiguresUserPrompt,
   PAPER_SOLVE_SYSTEM_PROMPT, paperSolveUserPrompt,
   SHEET_READ_SYSTEM_PROMPT, sheetReadUserPrompt,
   COMPARE_SYSTEM_PROMPT, compareUserPrompt,
@@ -23,7 +24,7 @@ import {
   sanitizeAiText, sanitizeLatexChinese, sanitizeMathText, FIGURE_TEMPLATES,
 } from '@workbench/shared'
 import type {
-  PaperExtractItem, PaperSolvedItem, SheetReadItem, SubAnswer,
+  PaperExtractItem, PaperSolvedItem, SheetReadItem, SubAnswer, PaperFigureItem,
 } from '@workbench/shared'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -784,6 +785,44 @@ export async function solvePaperPass2(
     opts,
     validateSolve,
     'paper-solve-2'
+  )
+}
+
+// ①′ 原卷配图重绘（验收#43 ②）：转录后对有插图的题按模板库补 figure_spec——
+// 模板能忠实还原才给规格；不能还原如实标「图待补」，严禁硬套模板编造图形内容
+function validateFigureRedraw(obj: any): { items: PaperFigureItem[] } {
+  if (!obj || !Array.isArray(obj.items)) throw new Error('配图重绘结果没有题目')
+  return {
+    items: obj.items
+      .map((it: any) => {
+        const template = typeof it?.template === 'string' && (FIGURE_TEMPLATES as readonly string[]).includes(it.template.trim()) ? it.template.trim() : null
+        return {
+          no: sanitizeAiText(String(it?.no ?? '')).trim(),
+          template,
+          params: template ? sanitizeFigureSpec({ template, params: it?.params || {} })?.params || {} : {},
+          status: template && it?.status === '已重绘' ? '已重绘' as const : '图待补' as const,
+        }
+      })
+      .filter((x: PaperFigureItem) => x.no),
+  }
+}
+
+export async function redrawFigures(
+  provider: AiProvider,
+  p: { grade: string; items: PaperExtractItem[]; images: string[] }
+): Promise<{ result: { items: PaperFigureItem[] }; usage: ReturnType<typeof recordUsage> }> {
+  if (!p.items.length) throw new Error('没有需要重绘配图的题')
+  return chatJson(
+    provider,
+    {
+      model: provider.vision_model || provider.text_model,
+      system: REDRAW_FIGURES_SYSTEM_PROMPT,
+      user: redrawFiguresUserPrompt(p.grade, p.items.length),
+      images: p.images.slice(0, 9),
+      temperature: 0.1,
+    },
+    validateFigureRedraw,
+    'figure-redraw'
   )
 }
 
