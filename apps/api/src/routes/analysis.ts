@@ -10,8 +10,8 @@ import type { FastifyInstance } from 'fastify'
 import path from 'node:path'
 import fs from 'node:fs'
 import { UPLOADS_DIR, db, getSetting } from '../db'
-import { getProviders, pickProvider, extractPaperQuestions, solvePaper, reviewSolve, readAnswerSheet, compareAndJudge, analyzePaper } from '../ai'
-import type { SheetReadItem, PaperExtractItem } from '@workbench/shared'
+import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, reviewSolve, adjudicateDispute, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper } from '../ai'
+import type { SheetReadItem, PaperExtractItem, PaperSolvedItem } from '@workbench/shared'
 
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif',
@@ -35,6 +35,51 @@ function readDataUrls(paths: string[]): string[] {
 type Usage = { prompt_tokens: number; completion_tokens: number; cost: number }
 function accUsage(): Usage {
   return { prompt_tokens: 0, completion_tokens: 0, cost: 0 }
+}
+
+// ---------- 答案一致性判定（C2 三票表决用） ----------
+// 选择题：提取 A~D 字母集合（答案串较短时）；其它题：提取全部数值（含 LaTeX 里的数字），2% 容差配对
+function letterSetOf(s: string): string[] | null {
+  const clean = String(s || '').replace(/\s+/g, '')
+  if (!clean || clean.length > 60) return null
+  const letters = [...new Set(clean.replace(/[^ABCD]/g, '').split(''))]
+  if (!letters.length || letters.length > 4) return null
+  // 至少要有一个字母紧邻答案语境（如「C」「AD」「答案：C」），纯叙述文字不算
+  return /^[^A-Za-z]{0,6}[ABCD]/.test(clean) || /^(答案|选)[^A-Za-z]{0,3}[ABCD]/.test(clean) ? letters.sort() : null
+}
+function numsOf(s: string): number[] {
+  const t = String(s || '').replace(/\\[a-zA-Z]+/g, ' ').replace(/[{}]/g, ' ')
+  const out: number[] = []
+  const re = /-?\d+(?:\.\d+)?(?:\s*[eE]\s*(-?\d+)|\s*[×x*]\s*10\s*\^?\s*\{?(-?\d+)\}?)?/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(t))) {
+    const base = parseFloat(m[0].replace(/[×x*]\s*10\s*\^?\s*\{?-?\d+\}?$/, '').replace(/\s+/g, ''))
+    if (!isFinite(base)) continue
+    const exp = m[1] || m[2]
+    out.push(exp ? base * Math.pow(10, parseInt(exp)) : base)
+    if (out.length > 12) break
+  }
+  return out
+}
+function answersAgree(a: string, b: string, qtype: string): boolean {
+  const na = String(a || '').trim(); const nb = String(b || '').trim()
+  if (!na || !nb) return false
+  if (qtype === '选择') {
+    const la = letterSetOf(na); const lb = letterSetOf(nb)
+    if (la && lb) return la.join('') === lb.join('')
+  }
+  const xs = numsOf(na); const ys = numsOf(nb)
+  if (xs.length && ys.length) {
+    if (xs.length !== ys.length) return false
+    const used = new Set<number>()
+    for (const x of xs) {
+      const hit = ys.findIndex((y, i) => !used.has(i) && (Math.abs(x - y) <= 0.02 * Math.max(Math.abs(x), Math.abs(y), 1e-9)))
+      if (hit < 0) return false
+      used.add(hit)
+    }
+    return true
+  }
+  return na.replace(/\s+/g, '') === nb.replace(/\s+/g, '')
 }
 
 export default async function analysisRoutes(app: FastifyInstance) {
@@ -98,42 +143,132 @@ export default async function analysisRoutes(app: FastifyInstance) {
           questions: extracted.items,
           images: paperUrls,
         })
-        // ②′ 标准答案交叉复核（二审）：只复核选择题（字母级重算收益大、无误伤）；
-        // 计算/实验题复核反而易引入新错（实测），保持原解。复核失败降级用原解（不阻塞）
+        // ②′ 三票表决：初解(看图) + 交叉复核(全题) + 第二次独立求解(纯文本逐选项排除)，
+        // 两票一致采纳；三票互不一致 → 终裁仲裁。杜绝单次求解偶发错误直接当标准答案
         let solved = solved0
         let u2x: Usage = accUsage()
-        const choiceNo = new Set(extracted.items.filter((q) => q.qtype === '选择').map((q) => String(Number(q.no))))
-        if (choiceNo.size) {
+        let u2b: Usage = accUsage()
+        let u2c: Usage = accUsage()
+        {
+          const qByNo = new Map(extracted.items.map((q) => [String(Number(q.no)), q]))
+          const v0 = new Map(solved0.items.map((s) => [String(Number(s.no)), s]))
+          // 复核票（全题型；失败降级跳过该票）
+          const v1 = new Map<string, PaperSolvedItem>()
           try {
-            const choiceSolved = solved0.items.filter((s) => choiceNo.has(String(Number(s.no))))
-            const rv = await reviewSolve(provider, {
-              grade: meta.grade,
-              questions: extracted.items.filter((q) => choiceNo.has(String(Number(q.no)))),
-              solved: choiceSolved,
-            })
+            const rv = await reviewSolve(provider, { grade: meta.grade, questions: extracted.items, solved: solved0.items })
             u2x = rv.usage
-            const byNo = new Map(rv.result.items.map((s) => [s.no, s]))
-            const fixCount = rv.result.items.filter((s) => s.changed && s.answer).length
-            solved = {
-              items: solved0.items.map((s) => {
-                if (!choiceNo.has(String(Number(s.no)))) return s
-                const r2 = byNo.get(String(Number(s.no)))
-                return r2 && r2.answer ? { ...s, answer: r2.answer, solution: r2.solution || s.solution } : s
-              }),
-              note: [solved0.note, fixCount ? `选择题答案经交叉复核修正 ${fixCount} 题` : ''].filter(Boolean).join(' '),
-            }
-            console.log(`[analyze] 选择题答案复核修正 ${fixCount} 题`)
+            for (const s of rv.result.items) v1.set(String(Number(s.no)), s)
           } catch (e: any) {
-            console.error('[analyze] 答案复核失败（降级用原解）:', e.message)
+            console.error('[analyze] 复核票失败（跳过）:', e.message)
+          }
+          // 第二次独立求解票（纯文本；失败降级跳过该票）
+          const v2 = new Map<string, PaperSolvedItem>()
+          try {
+            const p2 = await solvePaperPass2(provider, { grade: meta.grade, questions: extracted.items })
+            u2b = p2.usage
+            for (const s of p2.result.items) v2.set(String(Number(s.no)), s)
+          } catch (e: any) {
+            console.error('[analyze] 第二次求解票失败（跳过）:', e.message)
+          }
+          // 表决：找「两票及以上一致」的答案组；找不出 → 终裁
+          const votesOf = (no: string) => [v0.get(no), v1.get(no), v2.get(no)].filter(Boolean) as PaperSolvedItem[]
+          const disputes: Array<{ q: PaperExtractItem; candidates: Array<{ source: string; answer: string; solution: string }> }> = []
+          const final = new Map<string, PaperSolvedItem>()
+          for (const q of extracted.items) {
+            const no = String(Number(q.no))
+            const vs = votesOf(no)
+            if (vs.length >= 2) {
+              const groups: Array<{ rep: PaperSolvedItem; members: PaperSolvedItem[] }> = []
+              for (const v of vs) {
+                const g = groups.find((g) => answersAgree(g.rep.answer, v.answer, q.qtype))
+                if (g) g.members.push(v)
+                else groups.push({ rep: v, members: [v] })
+              }
+              groups.sort((a, b) => b.members.length - a.members.length)
+              const top = groups[0]
+              const runner = groups[1]?.members.length || 0
+              if (top.members.length >= 2 || (top.members.length === 1 && vs.length === 1)) {
+                // 多数票采纳；仅一票时（复核/复解都失败）直接采纳初解
+                final.set(no, top.members.includes(v0.get(no)!) ? v0.get(no)! : top.rep)
+                continue
+              }
+              if (top.members.length === 1 && runner === 1 && vs.length === 2) {
+                // 两票各执一词 → 终裁
+              }
+            }
+            disputes.push({
+              q,
+              candidates: [
+                v0.get(no) && { source: '初解（看图）', answer: v0.get(no)!.answer, solution: v0.get(no)!.solution },
+                v1.get(no) && { source: '复核', answer: v1.get(no)!.answer, solution: v1.get(no)!.solution },
+                v2.get(no) && { source: '复解', answer: v2.get(no)!.answer, solution: v2.get(no)!.solution },
+              ].filter(Boolean) as Array<{ source: string; answer: string; solution: string }>,
+            })
+          }
+          if (disputes.length) {
+            try {
+              const adj = await adjudicateDispute(provider, { grade: meta.grade, disputes, images: paperUrls })
+              u2c = adj.usage
+              for (const s of adj.result.items) final.set(String(Number(s.no)), s)
+              console.log(`[analyze] ${disputes.length} 题三票分歧 → 终裁完成`)
+            } catch (e: any) {
+              console.error('[analyze] 终裁失败（分歧题采纳初解）:', e.message)
+              for (const d of disputes) {
+                const v = v0.get(String(Number(d.q.no)))
+                if (v) final.set(String(Number(d.q.no)), v)
+              }
+            }
+          }
+          solved = {
+            items: extracted.items.map((q) => final.get(String(Number(q.no)))).filter(Boolean) as PaperSolvedItem[],
+            note: [solved0.note, `标准答案经三票表决+终裁（初解/复核/复解）`].filter(Boolean).join(' '),
           }
         }
-        // ③ 读取答题卡学生作答（有答题卡页才调用）
+        // ③ 读取答题卡学生作答（有答题卡页才调用；逐页读取提高识别保真度）
         let sheet: { items: SheetReadItem[]; unrecognized: string[] } = { items: [], unrecognized: [] }
         let u3: Usage = accUsage()
         if (sheetUrls.length) {
-          const r3 = await readAnswerSheet(provider, sheetUrls, meta)
-          sheet = r3.result
-          u3 = r3.usage
+          for (const pageUrl of sheetUrls) {
+            try {
+              const r3 = await readAnswerSheet(provider, [pageUrl], meta)
+              u3.prompt_tokens += r3.usage.prompt_tokens || 0
+              u3.completion_tokens += r3.usage.completion_tokens || 0
+              u3.cost += r3.usage.cost || 0
+              sheet.unrecognized.push(...r3.result.unrecognized)
+              for (const it of r3.result.items) {
+                const key = String(Number(it.no))
+                const prev = sheet.items.find((x) => String(Number(x.no)) === key)
+                if (prev) Object.assign(prev, it)
+                else sheet.items.push(it)
+              }
+            } catch (e: any) {
+              console.error('[analyze] 答题卡页读取失败（跳过该页）:', e.message)
+            }
+          }
+          // ③′ 手写/填涂逐题回看复核：把第一轮读到的结果连同原图再发一遍，要求逐位核对
+          //（根号内数字、小数点、字母）——纯手写识别单次调用错读率不低，二次回看显著提升保真度
+          if (sheet.items.length) {
+            try {
+              const firstPass = sheet.items.map((s) => `第${s.no}题：学生作答=${s.student_answer}${s.per_blank.length ? `（逐空：${s.per_blank.map((b) => `${b.key}=${b.answer}`).join('，')}）` : ''}${s.handwritten_note ? `；手写：${s.handwritten_note.slice(0, 200)}` : ''}`).join('\n')
+              const vr = await verifyAnswerSheetFull(provider, {
+                grade: meta.grade,
+                firstPass,
+                images: sheetUrls,
+              })
+              u3.prompt_tokens += vr.usage.prompt_tokens || 0
+              u3.completion_tokens += vr.usage.completion_tokens || 0
+              u3.cost += vr.usage.cost || 0
+              for (const it of vr.result.items) {
+                const key = String(Number(it.no))
+                const prev = sheet.items.find((x) => String(Number(x.no)) === key)
+                if (prev && (it.student_answer || it.handwritten_note)) Object.assign(prev, it)
+                else if (!prev) sheet.items.push(it)
+              }
+              console.log(`[analyze] 答题卡二次回看复核完成（${vr.result.items.length} 题）`)
+            } catch (e: any) {
+              console.error('[analyze] 答题卡二次复核失败（用第一轮结果）:', e.message)
+            }
+          }
         }
         // ④ 逐题比对判定（带试卷页原图，便于模型核对图题与重绘 figure_spec）
         const { result: analysis, usage: u4 } = await compareAndJudge(provider, {
@@ -145,6 +280,48 @@ export default async function analysisRoutes(app: FastifyInstance) {
           extraNote: [extracted.unrecognized.length ? `试卷页识别说明：${extracted.unrecognized.join('；')}` : '', sheet.unrecognized.length ? `答题卡识别说明：${sheet.unrecognized.join('；')}` : '', solved.note ? `求解说明：${solved.note}` : ''].filter(Boolean).join(' '),
           images: paperUrls,
         })
+        // ④′ 选择题判定机器裁定：标准答案字母集合 vs 学生填涂字母集合直接比对（不受模型比对偶发影响）；
+        // 判「对」但卷面有红叉 → targeted 放大重读后再裁一次
+        {
+          const stdBy = new Map(solved.items.map((s) => [String(Number(s.no)), s]))
+          const sheetBy = new Map(sheet.items.map((s) => [String(Number(s.no)), s]))
+          const choiceOf = (no: string) => extracted.items.find((q) => String(Number(q.no)) === no && q.qtype === '选择')
+          const rejudge = (it: any, no: string) => {
+            const s = stdBy.get(no); const sh = sheetBy.get(no)
+            if (!s || !sh || !choiceOf(no)) return
+            const la = letterSetOf(s.answer); const lb = letterSetOf(sh.student_answer)
+            if (la && lb) it.verdict = la.join('') === lb.join('') ? '对' : '错'
+          }
+          const conflicts: string[] = []
+          for (const it of analysis.items) {
+            const no = String(Number(it.no))
+            const sh = sheetBy.get(no)
+            if (sh) it.student_answer = sh.student_answer || it.student_answer
+            rejudge(it, no)
+            if (it.verdict === '对' && sh?.red_x) conflicts.push(no)
+          }
+          if (conflicts.length) {
+            try {
+              console.log(`[analyze] 红叉线索与「对」判定冲突，targeted 复核题号：${conflicts.join('、')}`)
+              const rr = await rereadSheetQuestions(provider, sheetUrls, conflicts, meta)
+              u3.prompt_tokens += rr.usage.prompt_tokens || 0
+              u3.completion_tokens += rr.usage.completion_tokens || 0
+              u3.cost += rr.usage.cost || 0
+              for (const it of rr.result.items) {
+                const key = String(Number(it.no))
+                const prev = sheet.items.find((x) => String(Number(x.no)) === key)
+                if (prev) Object.assign(prev, it)
+                else sheet.items.push(it)
+              }
+              for (const it of analysis.items) {
+                const no = String(Number(it.no))
+                if (conflicts.includes(no)) rejudge(it, no)
+              }
+            } catch (e: any) {
+              console.error('[analyze] 红叉冲突复核失败（保持原判定）:', e.message)
+            }
+          }
+        }
         // 后处理兜底：比对模型偷懒没抄全的题干/答案，用转录与求解结果回填（严禁「（题干缺失）」式占位直出）
         const stemOf = (no: number) => extracted.items.find((q) => Number(q.no) === no)
         const ansOf = (no: number) => solved.items.find((s) => Number(s.no) === no)
@@ -160,9 +337,9 @@ export default async function analysisRoutes(app: FastifyInstance) {
         }
         analysis.items = analysis.items.filter((it) => it.stem)
         const usage = {
-          prompt_tokens: u1.prompt_tokens + u2.prompt_tokens + u2x.prompt_tokens + u3.prompt_tokens + u4.prompt_tokens,
-          completion_tokens: u1.completion_tokens + u2.completion_tokens + u2x.completion_tokens + u3.completion_tokens + u4.completion_tokens,
-          cost: u1.cost + u2.cost + u2x.cost + u3.cost + u4.cost,
+          prompt_tokens: u1.prompt_tokens + u2.prompt_tokens + u2x.prompt_tokens + u2b.prompt_tokens + u2c.prompt_tokens + u3.prompt_tokens + u4.prompt_tokens,
+          completion_tokens: u1.completion_tokens + u2.completion_tokens + u2x.completion_tokens + u2b.completion_tokens + u2c.completion_tokens + u3.completion_tokens + u4.completion_tokens,
+          cost: u1.cost + u2.cost + u2x.cost + u2b.cost + u2c.cost + u3.cost + u4.cost,
         }
         return { ok: true, analysis, usage, provider: provider.name, pipeline: 'two-phase' as const }
       }

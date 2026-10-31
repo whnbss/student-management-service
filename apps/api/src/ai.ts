@@ -16,6 +16,10 @@ import {
   SHEET_READ_SYSTEM_PROMPT, sheetReadUserPrompt,
   COMPARE_SYSTEM_PROMPT, compareUserPrompt,
   SOLVE_REVIEW_SYSTEM_PROMPT, solveReviewUserPrompt,
+  SOLVE_PASS2_SYSTEM_PROMPT, solvePass2UserPrompt,
+  ADJUDICATE_SYSTEM_PROMPT, adjudicateUserPrompt,
+  SHEET_VERIFY_SYSTEM_PROMPT, sheetVerifyUserPrompt,
+  SHEET_VERIFY_FULL_SYSTEM_PROMPT,
   sanitizeAiText, sanitizeLatexChinese, sanitizeMathText, FIGURE_TEMPLATES,
 } from '@workbench/shared'
 import type {
@@ -685,6 +689,17 @@ function validateSheetRead(obj: any): { items: SheetReadItem[]; unrecognized: st
   }
 }
 
+// 求解族模型升级（C2 精度）：settings 里配置了 solve_model（如网关更强的 deepseek-v4-pro-saas）时，
+// 纯文本求解/复核调用优先用更强模型，调用失败自动回退供应商配置的模型。视觉调用（看图）不升级——
+// 网关的 pro 档模型不支持图片输入（实测 413）
+function solveModelOverride(): string {
+  try {
+    return String(getSetting('solve_model') || '').trim()
+  } catch {
+    return ''
+  }
+}
+
 // 标准答案交叉复核（二审）：独立重算并修正求解结果；复核失败不阻塞（降级用原解）
 export async function reviewSolve(
   provider: AiProvider,
@@ -698,14 +713,23 @@ export async function reviewSolve(
     })
     return { items, note: base.note }
   }
+  const opts = {
+    model: provider.text_model || provider.vision_model,
+    system: SOLVE_REVIEW_SYSTEM_PROMPT,
+    user: solveReviewUserPrompt(p),
+    temperature: 0.2,
+  }
+  const override = solveModelOverride()
+  if (override && override !== opts.model) {
+    try {
+      return await chatJson(provider, { ...opts, model: override }, validate, 'solve-review')
+    } catch (e: any) {
+      console.warn(`[ai] 复核模型 ${override} 调用失败，回退 ${opts.model}:`, e.message)
+    }
+  }
   return chatJson(
     provider,
-    {
-      model: provider.text_model || provider.vision_model,
-      system: SOLVE_REVIEW_SYSTEM_PROMPT,
-      user: solveReviewUserPrompt(p),
-      temperature: 0.2,
-    },
+    opts,
     validate,
     'solve-review'
   )
@@ -729,6 +753,100 @@ export async function readAnswerSheet(
     },
     validateSheetRead,
     'sheet-read'
+  )
+}
+
+// ②″ 第二次独立求解（纯文本、逐选项排除纪律）——与第一次结果做三票表决
+export async function solvePaperPass2(
+  provider: AiProvider,
+  p: { grade: string; questions: PaperExtractItem[] }
+): Promise<{ result: { items: PaperSolvedItem[]; note: string }; usage: ReturnType<typeof recordUsage> }> {
+  if (!p.questions.length) throw new Error('没有可求解的题目')
+  const opts = {
+    model: provider.text_model || provider.vision_model,
+    system: SOLVE_PASS2_SYSTEM_PROMPT,
+    user: solvePass2UserPrompt(p.grade, p.questions),
+    temperature: 0.6,
+  }
+  const override = solveModelOverride()
+  if (override && override !== opts.model) {
+    try {
+      return await chatJson(provider, { ...opts, model: override }, validateSolve, 'paper-solve-2')
+    } catch (e: any) {
+      console.warn(`[ai] 复解模型 ${override} 调用失败，回退 ${opts.model}:`, e.message)
+    }
+  }
+  return chatJson(
+    provider,
+    opts,
+    validateSolve,
+    'paper-solve-2'
+  )
+}
+
+// ②‴ 分歧仲裁：候选答案不一致时终裁（带试卷页原图）
+export async function adjudicateDispute(
+  provider: AiProvider,
+  p: {
+    grade: string
+    disputes: Array<{ q: PaperExtractItem; candidates: Array<{ source: string; answer: string; solution: string }> }>
+    images?: string[]
+  }
+): Promise<{ result: { items: PaperSolvedItem[]; note: string }; usage: ReturnType<typeof recordUsage> }> {
+  if (!p.disputes.length) throw new Error('没有分歧题')
+  return chatJson(
+    provider,
+    {
+      model: provider.vision_model || provider.text_model,
+      system: ADJUDICATE_SYSTEM_PROMPT,
+      user: adjudicateUserPrompt({ grade: p.grade, disputes: p.disputes }),
+      images: p.images || [],
+      temperature: 0.2,
+    },
+    validateSolve,
+    'solve-adjudicate'
+  )
+}
+
+// ③′ 答题卡 targeted 复核：仅对存疑题号放大重读
+export async function rereadSheetQuestions(
+  provider: AiProvider,
+  images: string[],
+  nos: string[],
+  meta: { grade: string }
+): Promise<{ result: { items: SheetReadItem[]; unrecognized: string[] }; usage: ReturnType<typeof recordUsage> }> {
+  if (!images.length || !nos.length) throw new Error('没有待复核的题目或图片')
+  return chatJson(
+    provider,
+    {
+      model: provider.vision_model || provider.text_model,
+      system: SHEET_VERIFY_SYSTEM_PROMPT,
+      user: sheetVerifyUserPrompt(nos, images.length),
+      images,
+      temperature: 0.1,
+    },
+    validateSheetRead,
+    'sheet-verify'
+  )
+}
+
+// ③″ 答题卡整卡回看复核：第一轮读取结果 + 原图逐位核对
+export async function verifyAnswerSheetFull(
+  provider: AiProvider,
+  p: { grade: string; firstPass: string; images: string[] }
+): Promise<{ result: { items: SheetReadItem[]; unrecognized: string[] }; usage: ReturnType<typeof recordUsage> }> {
+  if (!p.images.length) throw new Error('没有答题卡图片')
+  return chatJson(
+    provider,
+    {
+      model: provider.vision_model || provider.text_model,
+      system: SHEET_VERIFY_FULL_SYSTEM_PROMPT,
+      user: `学生年级：${p.grade || '未知'}。下面是第一轮从这批答题卡照片（共 ${p.images.length} 张）读到的作答，请逐题对照原图逐位核对（特别留意根号内的数字与系数、上下标、小数点、填涂字母与题号的行对应），发现不一致以原图为准修正，并如实输出每题的最终结果：\n\n${p.firstPass}\n\n请逐题输出（items 必须覆盖第一轮的全部题号）。`,
+      images: p.images,
+      temperature: 0.1,
+    },
+    validateSheetRead,
+    'sheet-verify-full'
   )
 }
 
