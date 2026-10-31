@@ -426,6 +426,45 @@ export default async function analysisRoutes(app: FastifyInstance) {
             }
           }
         }
+        // ④′² 代数等价后置校正（P1-78）：比对模型会自认「代数等价」却仍判「错」（note 写
+        // 「代数等价，但学生书写形式错误」）——等价即等价，书写形式不是扣分点。机器后置校正：
+        // 凡 verdict=错 且判定文案自认代数等价的（整题或逐空），改判「对」并清洗错因文案；
+        // 含逐空的题校正后按逐空重算整题 verdict（全对→对，部分→部分对）
+        {
+          const EQUIV_RE = /代数等价|数学等价|等价[，,]但|等价,但|等价仅|仅.{0,4}形式不同/
+          const fixItem = (it: any) => {
+            let fixedSub = 0
+            // 逐空层：sub_answers 里的空判「错」但 note 自认等价 → 改「对」
+            for (const sa of Array.isArray(it.sub_answers) ? it.sub_answers : []) {
+              if (sa?.verdict === '错' && EQUIV_RE.test(`${sa.note || ''}${sa.comment || ''}`)) {
+                sa.verdict = '对'
+                sa.note = `代数等价校正：学生作答与标准答案数学等价（仅书写形式不同），判对${sa.note ? `（原note：${String(sa.note).slice(0, 80)}）` : ''}`
+                fixedSub++
+              }
+            }
+            // 整题层：无逐空（或逐空全对后）整题仍「错」且文案自认等价 → 改「对」
+            const selfEquiv = it.verdict === '错' && EQUIV_RE.test(`${it.comment || ''}${it.error_step || ''}`)
+            if (it.verdict === '错' && Array.isArray(it.sub_answers) && it.sub_answers.length) {
+              // 逐空重算：全部「对」→ 对；有对有错 → 部分对；否则维持错
+              const vs: string[] = it.sub_answers.map((sa: any) => String(sa?.verdict || ''))
+              if (fixedSub > 0 && vs.length && vs.every((v: string) => v === '对')) {
+                it.verdict = '对'
+                it.error_step = ''
+                it.error_type = ''
+                it.comment = `代数等价校正：学生作答与标准答案数学等价（仅书写形式不同），逐空均判对`
+              } else if (fixedSub > 0 && vs.some((v: string) => v === '对') && vs.some((v: string) => v === '错' || v === '未作答')) {
+                it.verdict = '部分对'
+              }
+            } else if (selfEquiv) {
+              it.verdict = '对'
+              it.error_step = ''
+              it.error_type = ''
+              it.comment = `代数等价校正：学生作答与标准答案数学等价（仅书写形式不同），判对（原判定文案：${String(it.comment || '').slice(0, 80)}）`
+            }
+            if (fixedSub > 0 || selfEquiv) console.log(`[analyze] 代数等价后置校正：第${it.no}题 → ${it.verdict}`)
+          }
+          for (const it of analysis.items) fixItem(it)
+        }
         // 后处理兜底：比对模型偷懒没抄全的题干/答案，用转录与求解结果回填（严禁「（题干缺失）」式占位直出）
         const stemOf = (no: number) => extracted.items.find((q) => Number(q.no) === no)
         const ansOf = (no: number) => solved.items.find((s) => Number(s.no) === no)

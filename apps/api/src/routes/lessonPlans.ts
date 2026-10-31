@@ -34,11 +34,28 @@ function aiResultToDiagnosis(a: any, fallbackName: string): LessonDiagnosis {
           : `判定：${it?.verdict}（作答正确，作对照用）`,
     }
   }).filter(Boolean) as LessonDiagnosisItem[]
+  // P2-79：失分事实由 items 程序化统计（verdict 直接数，不经模型转述）——overview.text 的
+  // 失分题号与计数必须与这份事实逐字对齐，杜绝「选择题错3题(第1、8、9)」与实际错 5 题的矛盾
+  const rawItems = Array.isArray(a?.items) ? a.items : []
+  const isChoice = (it: any) => Array.isArray(it?.options) && it.options.length > 0
+  const nosOf = (verdicts: string[]): string[] =>
+    rawItems.filter((it: any) => verdicts.includes(String(it?.verdict || ''))).map((it: any) => String(it?.no ?? '').trim()).filter(Boolean)
+  const wrongNos = nosOf(['错', '部分对'])
+  const choiceWrong = rawItems.filter((it: any) => isChoice(it) && ['错', '部分对'].includes(String(it?.verdict || '')))
+  const nonchoiceWrong = wrongNos.filter((no) => !choiceWrong.some((it: any) => String(it?.no ?? '').trim() === no))
+  const pendingNos = nosOf(['无法识别', '未作答'])
+  const wrongFacts = rawItems.length
+    ? `批改共 ${rawItems.length} 题：判错/部分对 ${wrongNos.length} 题${wrongNos.length ? `（第${wrongNos.join('、')}题）` : ''}；` +
+      `选择题失分 ${choiceWrong.length} 道${choiceWrong.length ? `（第${choiceWrong.map((it: any) => String(it?.no)).join('、')}题）` : ''}；` +
+      `非选择题失分 ${nonchoiceWrong.length} 道${nonchoiceWrong.length ? `（第${nonchoiceWrong.join('、')}题）` : ''}；` +
+      `待确认 ${pendingNos.length} 题${pendingNos.length ? `（第${pendingNos.join('、')}题）` : ''}。以上为逐题统计的唯一事实`
+    : ''
   return {
     paper_name: fallbackName || String(a?.paper_meta?.type || '拍照批改试卷'),
     paper_note: a?.overall_comment ? `批改总评：${String(a.overall_comment).slice(0, 150)}` : '',
     items,
     note: ['本教案基于「拍作业」批改的逐题判定结果生成（与批改错题集同源）', ...(Array.isArray(a?.unrecognized) ? a.unrecognized : [])].filter(Boolean).join('；'),
+    wrong_facts: wrongFacts,
   }
 }
 

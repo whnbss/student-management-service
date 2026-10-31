@@ -29,14 +29,23 @@ function dirSize(dir: string): number {
   return total
 }
 
-// 时间戳（本地时间，用于备份文件名）
+// P2-77：时间戳带毫秒 + 进程内自增序号——每日兜底备份与 purge 前强制快照可能在**同一秒**并发，
+// 秒级文件名会撞名（VACUUM INTO 报 output file already exists → backup_ok=0，删错后悔药静默失效）。
+// 毫秒把碰撞窗口从 1s 缩到 1ms，序号则彻底消除同进程同毫秒碰撞（跨进程由进程内互斥兜底）
+let backupSeq = 0
 function stamp(): string {
   const d = new Date()
   const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+  const ms = String(d.getMilliseconds()).padStart(3, '0')
+  const seq = String(++backupSeq % 100).padStart(2, '0')
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}${ms}-${seq}`
 }
 
-export async function runBackup(): Promise<{ ok: boolean; file?: string; db_only?: boolean; error?: string }> {
+// P2-77：进程内互斥——runBackup 串行化，杜绝本进程内两路备份并发（含 VACUUM INTO 与
+// Compress-Archive 的中间态互相踩踏）；多进程共用 data 目录的场景由毫秒+序号文件名兜底
+let backupChain: Promise<unknown> = Promise.resolve()
+
+async function doRunBackup(): Promise<{ ok: boolean; file?: string; db_only?: boolean; error?: string }> {
   const tag = stamp()
   const zipPath = path.join(BACKUP_DIR, `${ZIP_PREFIX}${tag}.zip`)
   const snap = path.join(BACKUP_DIR, `app-${tag}.db`)
@@ -55,9 +64,10 @@ export async function runBackup(): Promise<{ ok: boolean; file?: string; db_only
     })
     fs.rmSync(snap, { force: true })
     // 轮转：按文件名（即时间）倒序，超出 KEEP_COUNT 的删除
+    //（兼容旧秒级命名 \d{6} 与新毫秒+序号命名 \d{9}-\d{2}，旧备份也能正常轮转淘汰）
     const zips = fs
       .readdirSync(BACKUP_DIR)
-      .filter((f) => new RegExp(`^${ZIP_PREFIX}\\d{8}-\\d{6}\\.zip$`).test(f))
+      .filter((f) => new RegExp(`^${ZIP_PREFIX}\\d{8}-\\d{6,9}(?:-\\d{2})?\\.zip$`).test(f))
       .sort()
       .reverse()
     for (const f of zips.slice(KEEP_COUNT)) {
@@ -78,6 +88,19 @@ export async function runBackup(): Promise<{ ok: boolean; file?: string; db_only
     }
     return { ok: false, error: e?.message || String(e) }
   }
+}
+
+// 对外入口：排队串行执行（doRunBackup 自身不抛错，chain 仅作互斥队列用）
+export function runBackup(): Promise<{ ok: boolean; file?: string; db_only?: boolean; error?: string }> {
+  const next = backupChain.then(
+    () => doRunBackup(),
+    () => doRunBackup()
+  )
+  backupChain = next.then(
+    () => undefined,
+    () => undefined
+  )
+  return next
 }
 
 // 启动后 30 秒做首次到期检查（避免拖慢启动），之后每 1 小时检查一次（P3-74：滞后 ≤1h）

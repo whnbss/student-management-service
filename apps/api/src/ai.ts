@@ -973,7 +973,7 @@ function validateDiagnosis(obj: any): LessonDiagnosis {
   }
 }
 
-function validateLessonPlan(obj: any): LessonPlan {
+function validateLessonPlan(obj: any, wrongFacts = ''): LessonPlan {
   if (!obj || typeof obj !== 'object') throw new Error('教案结果不是对象')
   const cover = obj.cover || {}
   const ov = obj.overview || {}
@@ -1025,6 +1025,16 @@ function validateLessonPlan(obj: any): LessonPlan {
   // 结构底线：诊断表与变式题是讲义的灵魂，缺失即失败（触发重试）
   if (!plan.overview.choice_table.length && !plan.overview.nonchoice_table.length) throw new Error('教案缺少失分诊断表')
   if (plan.variants.length < 3) throw new Error('教案变形训练题不足 3 道')
+  // P2-79：overview.text 必须覆盖「失分事实」里的全部失分题号（从事实串里抽题号逐个核对），
+  // 漏数/改数直接判失败重试——叙述与数据矛盾是讲义硬伤
+  if (wrongFacts) {
+    const factPart = wrongFacts.match(/判错\/部分对 \d+ 题（第([^）]+)题）/)
+    if (factPart) {
+      const factNos = factPart[1].split('、').map((s) => s.trim()).filter(Boolean)
+      const missing = factNos.filter((no) => !plan.overview.text.includes(no))
+      if (missing.length) throw new Error(`overview 失分题号与事实不符（漏提：第${missing.join('、')}题），需按「失分事实」重写总览`)
+    }
+  }
   return plan
 }
 
@@ -1061,14 +1071,15 @@ export async function generateLessonPlan(
   const user = `学生年级：${p.grade || '未知'}
 试卷：${d.paper_name || '（未命名）'}${d.paper_note ? `（${d.paper_note}）` : ''}
 今天日期：${p.today}
-逐题诊断结果：
+${d.wrong_facts ? `失分事实（系统逐题统计，overview.text 的失分题号与计数必须与其严格一致）：${d.wrong_facts}\n` : ''}逐题诊断结果：
 ${lines}
 ${d.note ? `识别说明：${d.note}` : ''}
 请按约定 JSON 结构输出完整教案（cover/overview/frameworks/variants/homework 五部分齐全）。`
   return chatJson(
     provider,
     { model: provider.text_model || provider.vision_model, system: LESSON_PLAN_SYSTEM_PROMPT, user, temperature: 0.4 },
-    validateLessonPlan,
+    // P2-79：程序化校验 overview 失分题号与「失分事实」对齐，不符触发重试（与 JSON 校验同一纪律）
+    (obj: any) => validateLessonPlan(obj, d.wrong_facts || ''),
     'lesson-plan'
   )
 }
