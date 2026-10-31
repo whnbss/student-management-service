@@ -247,6 +247,7 @@ export const FIGURE_TEMPLATES = [
   'projectile', // 平抛（桌边小球）
   'container2balls', // 圆柱容器两球（并排挤压/浮力类）
   'spring', // 弹簧连接
+  'spring_vertical', // 竖直悬挂弹簧（天花板固定+下端钩码/物块，标 L₀ 原长/L 现长）
   'bridge', // 拱桥/凹桥上的车
   'field_region', // 匀强场区（点电荷/粒子入射）
   'bowl', // 半球形碗 + 绳系碗沿 + 球在碗内壁
@@ -302,6 +303,7 @@ export const FIGURE_TEMPLATE_DOCS = `- incline：斜面滑块（angle 斜面倾�
 - projectile：桌边平抛（h 桌高（m）、label）
 - container2balls：圆柱容器内两球（默认并排贴底；label1、label2、R 容器半径可选、r 球半径可选；liquid 画液体）
 - spring：墙面弹簧连滑块（label、x 压缩量（m））
+- spring_vertical：竖直悬挂弹簧（天花板固定+竖直弹簧+下端钩码/物块；label 默认 "钩码"、l0 可选原长如 "10.0cm"、l 可选现长如 "14.0cm"；竖直悬挂/钩码拉伸实验一律用本模板，勿用水平 spring）
 - bridge：桥上的车（kind 填 convex（拱桥）或 concave（凹桥）、R 半径（m）、label）
 - field_region：匀强场区/点电荷（kind 填 uniform 或 point、charge 可选 +q/-q、label）
 - bowl：光滑半球形碗（angle 球与碗心连线偏离竖直方向角（度）、R 半径（m）、label）

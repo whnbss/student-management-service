@@ -258,6 +258,46 @@ function tSpring(p: FigureSpec['params']): string {
   return wrap(inner)
 }
 
+// 竖直悬挂弹簧：天花板固定 + 竖直弹簧 + 下端钩码/物块；l0（原长，如 "10.0cm"）、l（现长，如 "14.0cm"）可选标注
+function tSpringVertical(p: FigureSpec['params']): string {
+  const label = str(p.label, '钩码')
+  const l0 = str(p.l0)
+  const l = str(p.l)
+  const topY = 40
+  const botY = 152
+  const cx = 150
+  // 天花板（固定端在上）
+  let hatch = ''
+  for (let x = 112; x <= 288; x += 24) hatch += `<line x1="${x}" y1="${topY}" x2="${x - 12}" y2="${topY - 12}" stroke="#94a3b8" stroke-width="1.5"/>`
+  const ceiling = `<line x1="90" y1="${topY}" x2="310" y2="${topY}" stroke="${INK}" stroke-width="3"/>` + hatch
+  // 竖直弹簧锯齿
+  let zig = `M ${cx} ${topY} `
+  for (let i = 1; i <= 8; i++) zig += `L ${cx + (i % 2 ? 14 : -14)} ${topY + i * 13} `
+  zig += `L ${cx} ${botY}`
+  // 下端钩码/物块
+  const block = `<rect x="${cx - 26}" y="${botY}" width="52" height="36" rx="4" fill="#c7d2fe" stroke="${INK}" stroke-width="2"/>` +
+    txt(cx, botY + 23, label, 14)
+  // 右侧尺寸线标现长 L；左侧按 l0/l 比例画原长虚线参考 + 尺寸线标 L₀
+  let dims = ''
+  if (l) {
+    dims = arrow(250, topY, 250, botY, '#64748b', 1.8) + arrow(250, botY, 250, topY, '#64748b', 1.8) +
+      `<line x1="176" y1="${botY}" x2="256" y2="${botY}" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4 3"/>` +
+      txt(258, (topY + botY) / 2 + 4, `L=${l}`, 13, '#64748b', 'start')
+  }
+  const m0 = l0.match(/[\d.]+/)
+  const ml = l.match(/[\d.]+/)
+  if (m0 && ml) {
+    const y0 = topY + (botY - topY) * (parseFloat(m0[0]) / parseFloat(ml[0]))
+    if (y0 > topY + 12 && y0 < botY - 6) {
+      dims += `<line x1="84" y1="${y0}" x2="216" y2="${y0}" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5 4"/>` +
+        arrow(84, topY, 84, y0, '#64748b', 1.8) + arrow(84, y0, 84, topY, '#64748b', 1.8) +
+        txt(78, (topY + y0) / 2 + 4, `L₀=${l0}`, 13, '#64748b', 'end')
+    }
+  }
+  const inner = ceiling + `<path d="${zig}" fill="none" stroke="${INK}" stroke-width="2"/>` + block + dims
+  return wrap(inner)
+}
+
 // 拱桥/凹桥：kind=convex|concave、R 半径（m）、label
 function tBridge(p: FigureSpec['params']): string {
   const kind = str(p.kind, 'convex') === 'concave' ? 'concave' : 'convex'
@@ -1452,6 +1492,7 @@ const TEMPLATES: Record<string, (p: FigureSpec['params']) => string> = {
   projectile: tProjectile,
   container2balls: tContainer2balls,
   spring: tSpring,
+  spring_vertical: tSpringVertical,
   bridge: tBridge,
   field_region: tFieldRegion,
   bowl: tBowl,
