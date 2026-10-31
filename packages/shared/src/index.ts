@@ -549,7 +549,7 @@ export function sheetReadUserPrompt(grade: string, pageCount: number): string {
 // ④ 文本：标准答案 vs 学生作答 逐题比对 → 判定/错因/错题集
 export const COMPARE_SYSTEM_PROMPT = `你是一名资深高中物理教师，正在逐题比对「标准答案」与「学生实际作答」，输出批改结论。
 判定纪律（严格执行）：
-1. 结论只来自**作答内容 vs 标准答案**的比对：一致=「对」；不一致=「错」；多小问部分正确=「部分对」（并逐小问说明）；答题卡上该题无作答内容=「未作答」；作答内容看不清无法比对=「无法识别」；**填空/表达式答案必须做代数等价判断**——形式不同但数学等价的式子视为一致（如 (g−k)/(2k) = g/(2k) − 1/2、θ√(L/2g) = (θ/2)·√(2L/g)、θL/√(2gL) = θ√(L/(2g))），严禁仅因书写形式不同判错（未化简、分式拆合、负号提出、系数移位都只是书写形式差异）；**自相矛盾禁令**：只要你在 note 里写了「代数等价」，该空 verdict 就必须是「对」——写「代数等价，但书写形式不规范/错误」再判「错」属于自相矛盾的无效输出，系统会按校验失败打回重试；
+1. 结论只来自**作答内容 vs 标准答案**的比对：一致=「对」；不一致=「错」；多小问部分正确=「部分对」（并逐小问说明）；答题卡上该题无作答内容=「未作答」；作答内容看不清无法比对=「无法识别」；**填空/表达式答案必须做代数等价判断**——形式不同但数学等价的式子视为一致（如 (g−k)/(2k) = g/(2k) − 1/2、θ√(L/2g) = (θ/2)·√(2L/g)、θL/√(2gL) = θ√(L/(2g))），严禁仅因书写形式不同判错（未化简、分式拆合、负号提出、系数移位都只是书写形式差异）；**自相矛盾禁令**：只要你在 note 里写了「代数等价」，该空 verdict 就必须是「对」——写「代数等价，但书写形式不规范/错误」再判「错」属于自相矛盾的无效输出，系统会按校验失败打回重试；**反向同理**：note 写了「判错/不一致/不等于」的空 verdict 就必须是「错」（如学生填「小于」标准答案为「大于」，不得判「对」）；系统判定后会对表达式做**数值抽样等价校验**（两侧各代 3 组取值，数值一致即判等价），note 与 verdict 自相矛盾的输出一律会被机器校正；
 2. 红笔叉号（red_x）**只作交叉校验线索**：若比对结论为「对」但卷面有红叉，优先复核学生作答转录是否遗漏（如填涂识别错位），仍无法确定时判「无法识别」并放入 unrecognized，**不得仅凭红叉直接判错**；
 3. 计算/大题按**得分点**判定：用学生 handwritten_note 中的方程与结果，对照标准 solution 的关键步骤与小问分值，判定「对/部分对/错」，error_step 精确到失分的那一步（如「(3) 求拉力时漏乘 cosθ，得 3600J，正确为 3750J」）；
 4. error_type 只能从枚举中选：概念不清、公式/模型用错、计算失误、审题偏差、过程不规范、时间分配问题、其他；判定正确的题 error_type 留空；无学生作答信息的题（如只传了试卷页）该题判「无法识别」并写明原因；
@@ -1278,6 +1278,212 @@ export function checkAnswerTraceable(answer: unknown, solution: unknown, stem?: 
     if (!hit) issues.push(`答案中的数值 ${v} 在解析与题干中找不到对应（答案与解析脱节）`)
   }
   return issues
+}
+
+// ---------- P1-81/P1-82/P2-80：C2 判定后置机器校正（验收 #45/#46 实测驱动） ----------
+// 背景：
+//   12(5) 学生 (g−k)/(2k) 与标准 g/(2k)−1/2 完全等价却判「错」——P1-78 的等价校正只在模型
+//   note 自认「等价」时触发，模型只写「表达式错误」就漏救（P1-82）；
+//   12(4) 学生「小于」vs 标准「大于」竟判「对」，note 自书「此处判错」，矛盾文案直出（P1-81）；
+//   「不等价，但…」类文案会被等价正则误翻「对」（P2-80）。
+// 做法：
+//   ① sampleEquivalent：两侧表达式解析成可求值形式，各代 3 组取值，数值全一致 → 代数等价；
+//     解析不了（文字/单位/函数）返回 null 不表态。方向保守：只用于把「错」救回「对」。
+//   ② isEquivClaim：模型 note 是否「自认等价」（先抹掉 不等价/非等价 类否定表述再测，P2-80）。
+//   ③ hasJudgeContradiction：note 是否自书「判错/错误/不等于/不一致/≠」（先抹掉
+//     「无错误/无不一致」类否定前缀，避免「无误」被误当矛盾，P1-81）。
+
+/** 变量字符类：拉丁单字母 + 常用希腊物理量（π 按常数处理不在此列） */
+const SAMPLE_VAR_CLASS = 'a-zA-Zθαβγδμλφωσρ'
+/** 抽样取值（固定值保证可复现；取非 0/1 的无理感数值，降低巧合相等概率） */
+const SAMPLE_VALUES = [1.7, 2.9, 4.3]
+const PI_LITERAL = '(3.141592653589793)'
+
+/** 读一个平衡组（{} 或 ()）；无组时读单个 token 字符（LaTeX 单参数惯例） */
+function readSampleGroup(t: string, pos: number): { content: string; end: number } | null {
+  const c = t[pos]
+  if (c === '{' || c === '(') {
+    const close = c === '{' ? '}' : ')'
+    let depth = 0
+    for (let j = pos; j < t.length; j++) {
+      if (t[j] === c) depth++
+      else if (t[j] === close) { depth--; if (depth === 0) return { content: t.slice(pos + 1, j), end: j + 1 } }
+    }
+    return null
+  }
+  if (pos < t.length && new RegExp(`[0-9${SAMPLE_VAR_CLASS}.]`).test(t[pos])) return { content: t[pos], end: pos + 1 }
+  return null
+}
+
+/** LaTeX/物理记号表达式 → 可代入求值形式（变量保留）；解析不了返回 null（宁漏判不误判） */
+export function parseSampleExpr(raw: string): { expr: string; vars: string[] } | null {
+  let t = String(raw || '').trim()
+  if (!t) return null
+  t = t.replace(/\\(?:ne|neq|approx)/g, '≠')
+  if (/[≠≈≤≥°℃%]/.test(t)) return null
+  // 取最后一个等号右侧（"x=2.4"）；多问串（含中文分隔）会被白名单拒掉
+  const eq = t.lastIndexOf('=')
+  if (eq >= 0) t = t.slice(eq + 1)
+  t = t.replace(/\s+/g, '')
+  t = t.replace(/^[（(]\d{1,2}[)）]/, '') // 小问号前缀残留「(1)」
+  t = t.replace(/\$|\\left|\\right|~/g, '')
+  t = t.replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/[−－—–]/g, '-').replace(/[×·⨯]/g, '*').replace(/[÷∶]/g, '/')
+  t = t.replace(/\\(?:d|t)?frac/g, '\\frac')
+  // Unicode 上下标：v₀ → v_0、v² → v**(2)
+  t = t.replace(/[₀₁₂₃₄₅₆₇₈₉]/g, (c) => '_' + ('₀₁₂₃₄₅₆₇₈₉'.indexOf(c)))
+  t = t.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]/g, (c) => `**(${('⁰¹²³⁴⁵⁶⁷⁸⁹'.indexOf(c))})`)
+  // π 常数
+  t = t.replace(/\\pi|π/g, PI_LITERAL)
+  // \frac{A}{B} → ((A)/(B))（嵌套由循环覆盖；参数缺失放弃）
+  for (;;) {
+    const m = /\\frac/.exec(t)
+    if (!m) break
+    const a = readSampleGroup(t, m.index + 5)
+    if (!a) return null
+    const b = readSampleGroup(t, a.end)
+    if (!b) return null
+    t = t.slice(0, m.index) + `((${a.content})/(${b.content}))` + t.slice(b.end)
+  }
+  // \sqrt{A} / √A → ((A)**(0.5))
+  for (;;) {
+    const m = /\\sqrt|√/.exec(t)
+    if (!m) break
+    const a = readSampleGroup(t, m.index + m[0].length)
+    if (!a) return null
+    t = t.slice(0, m.index) + `((${a.content})**(0.5))` + t.slice(a.end)
+  }
+  // 幂：^{...} / ^单token → **(...)
+  for (;;) {
+    const m = /\^/.exec(t)
+    if (!m) break
+    const nx = t[m.index + 1]
+    if (nx !== '{' && !new RegExp(`[0-9${SAMPLE_VAR_CLASS}（(]`).test(nx || '')) return null
+    const a = readSampleGroup(t, m.index + 1)
+    if (!a) return null
+    t = t.slice(0, m.index) + `**(${a.content})` + t.slice(a.end)
+  }
+  // 下标：数字下标并入变量名（v₀/v₁ 保持互异），其余下标剥除
+  t = t.replace(/_\{(\d+)\}/g, '$1').replace(/_(\d)/g, '$1').replace(/_\{[^{}]*\}/g, '').replace(/_/g, '')
+  // 单位/文字宏与其余 LaTeX 命令剥除
+  t = t.replace(/\\(?:text|mathrm|mathit|mathbf|operatorname)\s*\{[^{}]*\}/g, '').replace(/\\[a-zA-Z]+/g, '')
+  if (t.includes('\\') || /[{}]/.test(t)) return null
+  // 函数名/多字母记号/科学计数（e 会错当变量）一律放弃
+  if (/[a-zA-Z]{3,}/.test(t)) return null
+  if (new RegExp(`(?:ln|lg|log|sin|cos|tan|cot|sec|csc)[^${SAMPLE_VAR_CLASS}]|^(?:ln|lg|log|sin|cos|tan|cot|sec|csc)`, 'i').test(t)) return null
+  if (/\d[eE][-+]?\d/.test(t)) return null
+  // 字符白名单（中文/单位残留在此被拒）
+  if (!new RegExp(`^[\\d+\\-*/().^${SAMPLE_VAR_CLASS}]+$`).test(t)) return null
+  // 隐式乘法：数字/右括号 × 变量、变量/右括号 × 左括号、变量 × 变量（循环至稳定，覆盖 mgk 链）
+  const varCls = `[${SAMPLE_VAR_CLASS}]`
+  for (;;) {
+    const prev = t
+    t = t.replace(new RegExp(`([\\d)]|${varCls})(${varCls})`, 'g'), '$1*$2')
+    t = t.replace(new RegExp(`([${SAMPLE_VAR_CLASS})])(\\()`, 'g'), '$1*$2')
+    if (t === prev) break
+  }
+  // 物理惯例：除号后的隐式乘积按整体分母处理——「L/2g」是 L/(2*g) 而非 (L/2)*g
+  const FACT = `(?:\\d+(?:\\.\\d+)?|[${SAMPLE_VAR_CLASS}]\\d*)`
+  for (;;) {
+    const prev = t
+    t = t.replace(new RegExp(`\\/(${FACT}(?:\\*${FACT})+)`, 'g'), '/($1)')
+    if (t === prev) break
+  }
+  const vars = [...new Set(t.match(new RegExp(`[${SAMPLE_VAR_CLASS}]\\d*`, 'g')) || [])].sort()
+  return { expr: t, vars }
+}
+
+/** 带变量的递归下降求值（+ - * / ^ 括号、单字母/希腊变量）；解析失败或非有限返回 null */
+function evalSampleExpr(src: string, values: Record<string, number>): number | null {
+  let i = 0
+  const s = src
+  const varRe = new RegExp(`^[${SAMPLE_VAR_CLASS}]\\d*`)
+  const ws = () => { while (i < s.length && s[i] === ' ') i++ }
+  function expr(): number | null {
+    let v = term(); if (v === null) return null
+    for (;;) {
+      ws()
+      if (s[i] === '+') { i++; const r = term(); if (r === null) return null; v += r }
+      else if (s[i] === '-') { i++; const r = term(); if (r === null) return null; v -= r }
+      else return v
+    }
+  }
+  function term(): number | null {
+    let v = pow(); if (v === null) return null
+    for (;;) {
+      ws()
+      if (s[i] === '*') { i++; const r = pow(); if (r === null) return null; v *= r }
+      else if (s[i] === '/') { i++; const r = pow(); if (r === null) return null; if (r === 0) return null; v /= r }
+      else return v
+    }
+  }
+  function pow(): number | null {
+    const base = factor(); if (base === null) return null
+    ws()
+    if (s[i] === '*' && s[i + 1] === '*') {
+      i += 2
+      const e = pow(); if (e === null) return null
+      const v = Math.pow(base, e)
+      return Number.isFinite(v) ? v : null
+    }
+    return base
+  }
+  function factor(): number | null {
+    ws()
+    if (s[i] === '-') { i++; const v = factor(); return v === null ? null : -v }
+    if (s[i] === '+') { i++; return factor() }
+    if (s[i] === '(') { i++; const v = expr(); ws(); if (v === null || s[i] !== ')') return null; i++; return v }
+    const vm = varRe.exec(s.slice(i))
+    if (vm) { i += vm[0].length; const v = values[vm[0]]; return typeof v === 'number' && Number.isFinite(v) ? v : null }
+    const m = /^\d+(?:\.\d+)?/.exec(s.slice(i))
+    if (!m) return null
+    i += m[0].length
+    return Number(m[0])
+  }
+  const v = expr()
+  ws()
+  if (i !== s.length || v === null || !Number.isFinite(v)) return null
+  return v
+}
+
+/**
+ * P1-82 数值抽样代数等价判定：两侧表达式各代 3 组取值，数值全部一致 → true（等价）；
+ * 有一次不一致 → false；任一侧解析不了/求值失败 → null（不表态）。
+ * 用途（保守方向）：只用于把「错」救回「对」，绝不用于把「对」改「错」。
+ */
+export function sampleEquivalent(a: string, b: string): boolean | null {
+  const pa = parseSampleExpr(a)
+  const pb = parseSampleExpr(b)
+  if (!pa || !pb) return null
+  const union = [...new Set([...pa.vars, ...pb.vars])]
+  for (let j = 0; j < SAMPLE_VALUES.length; j++) {
+    const values: Record<string, number> = {}
+    union.forEach((v, idx) => { values[v] = SAMPLE_VALUES[(idx + j) % SAMPLE_VALUES.length] })
+    const va = evalSampleExpr(pa.expr, values)
+    const vb = evalSampleExpr(pb.expr, values)
+    if (va === null || vb === null) return null
+    if (Math.abs(va - vb) > 1e-9 * Math.max(1, Math.abs(va), Math.abs(vb))) return false
+  }
+  return true
+}
+
+/** P2-80 等价自认正则（负向断言兜底；调用侧先用 isEquivClaim 抹否定表述） */
+export const EQUIVALENCE_CLAIM_RE =
+  /(?<![不非])(?<![不非].)(?:代数等价|数学等价|等价[，,]但|等价,但|等价仅)|(?<![不非])(?<![不非].)仅.{0,4}形式不同/
+
+/** P2-80：note 是否「自认等价」——先抹掉 不等价/非等价/并非等价/并非仅形式不同 类否定表述再测 */
+export function isEquivClaim(text: string): boolean {
+  const s = String(text || '')
+    .replace(/(?:不|非|并非)(?:代数|数学)?等价/g, '□')
+    .replace(/(?:不|非|并非)仅.{0,4}形式不同/g, '□')
+  return EQUIVALENCE_CLAIM_RE.test(s)
+}
+
+const VERDICT_CONTRA_RE = /判错|错误|不等于|不一致|≠/
+
+/** P1-81：note 是否自书矛盾（判错/错误/不等于/不一致/≠）——先抹掉「无错误/无不一致」类否定前缀 */
+export function hasJudgeContradiction(text: string): boolean {
+  const s = String(text || '').replace(/(?:无|没[有]?|不|非)(?:判错|错误|不一致|不等)/g, '□□')
+  return VERDICT_CONTRA_RE.test(s)
 }
 
 // ---------- P1-7：知识点标签与教材节名对齐 ----------

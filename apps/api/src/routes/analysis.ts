@@ -12,6 +12,7 @@ import fs from 'node:fs'
 import { UPLOADS_DIR, db, getSetting } from '../db'
 import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper, redrawFigures } from '../ai'
 import type { SheetReadItem, PaperExtractItem, PaperSolvedItem } from '@workbench/shared'
+import { sampleEquivalent, isEquivClaim, hasJudgeContradiction } from '@workbench/shared'
 
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif',
@@ -426,42 +427,75 @@ export default async function analysisRoutes(app: FastifyInstance) {
             }
           }
         }
-        // ④′² 代数等价后置校正（P1-78）：比对模型会自认「代数等价」却仍判「错」（note 写
-        // 「代数等价，但学生书写形式错误」）——等价即等价，书写形式不是扣分点。机器后置校正：
-        // 凡 verdict=错 且判定文案自认代数等价的（整题或逐空），改判「对」并清洗错因文案；
-        // 含逐空的题校正后按逐空重算整题 verdict（全对→对，部分→部分对）
+        // ④′² 判定后置机器校正（P1-78 扩展 → P1-81/P1-82/P2-80，验收 #45/#46 实测驱动）：
+        //   P2-80：等价自认判定加否定表述排除（先抹「不等价/非等价/并非等价」再测），合法「错」不再误翻；
+        //   P1-78：verdict=错 且 note 自认「代数等价」→ 改对并清洗文案（书写形式差异不是扣分点）；
+        //   P1-82：verdict=错 但数值抽样证实两侧表达式等价（各代 3 组取值）→ 同样救回「对」，
+        //          不依赖模型自认（#45 的 12(5)：模型只写「表达式错误」未自认等价）；
+        //   P1-81：verdict=对 但 note 自书「判错/错误/不等于/不一致/≠」（#45 的 12(4)：学生「小于」
+        //          vs 标准「大于」被判对，学生虚增得分）→ 改错；数值抽样证实等价的例外——保留「对」只清洗文案。
+        //   含逐空的题校正后按逐空重算整题 verdict（全对→对、全错→错、有对有错→部分对）
         {
-          const EQUIV_RE = /代数等价|数学等价|等价[，,]但|等价,但|等价仅|仅.{0,4}形式不同/
-          const fixItem = (it: any) => {
-            let fixedSub = 0
-            // 逐空层：sub_answers 里的空判「错」但 note 自认等价 → 改「对」
-            for (const sa of Array.isArray(it.sub_answers) ? it.sub_answers : []) {
-              if (sa?.verdict === '错' && EQUIV_RE.test(`${sa.note || ''}${sa.comment || ''}`)) {
-                sa.verdict = '对'
-                sa.note = `代数等价校正：学生作答与标准答案数学等价（仅书写形式不同），判对${sa.note ? `（原note：${String(sa.note).slice(0, 80)}）` : ''}`
-                fixedSub++
-              }
+          const fixSub = (sa: any): boolean => {
+            const note = String(sa?.note || '')
+            const equiv = sampleEquivalent(sa?.student, sa?.correct)
+            // 错→对：数值抽样证实等价（P1-82，优先）或 note 自认等价（P1-78，P2-80 已排除否定表述）
+            if (sa?.verdict === '错' && (equiv === true || isEquivClaim(note))) {
+              sa.verdict = '对'
+              sa.note = `代数等价校正：${equiv === true ? '数值抽样证实两侧表达式各代 3 组取值一致' : '学生作答与标准答案数学等价（仅书写形式不同）'}，判对${note ? `（原note：${note.slice(0, 80)}）` : ''}`
+              return true
             }
-            // 整题层：无逐空（或逐空全对后）整题仍「错」且文案自认等价 → 改「对」
-            const selfEquiv = it.verdict === '错' && EQUIV_RE.test(`${it.comment || ''}${it.error_step || ''}`)
-            if (it.verdict === '错' && Array.isArray(it.sub_answers) && it.sub_answers.length) {
-              // 逐空重算：全部「对」→ 对；有对有错 → 部分对；否则维持错
-              const vs: string[] = it.sub_answers.map((sa: any) => String(sa?.verdict || ''))
-              if (fixedSub > 0 && vs.length && vs.every((v: string) => v === '对')) {
+            // 对→错：note 自书判错/不一致却 verdict=对（P1-81）
+            if (sa?.verdict === '对' && hasJudgeContradiction(note)) {
+              if (equiv === true) {
+                // 数学上确实等价——保留「对」，只清洗误导性 note
+                sa.note = `代数等价校正：学生作答与标准答案数学等价，判对（原note：${note.slice(0, 80)}）`
+              } else {
+                sa.verdict = '错'
+                sa.note = `矛盾校正：note 自书「判错/不一致」与 verdict=对 矛盾，机器改判错${note ? `（原note：${note.slice(0, 80)}）` : ''}`
+              }
+              return true
+            }
+            return false
+          }
+          const stdAnswerOf = new Map(solved.items.map((s) => [String(Number(s.no)), s.answer]))
+          const fixItem = (it: any) => {
+            const subs = Array.isArray(it.sub_answers) ? it.sub_answers : []
+            let fixedSub = 0
+            for (const sa of subs) if (fixSub(sa)) fixedSub++
+            // 整题层（无逐空时）：对 整题作答 vs 标准答案（取求解答案原文，避开「（解析…）」尾巴）做同样校正。
+            // 整题层「对→错」向只认强矛盾词「判错」——整题 comment 是叙述文字，宽关键词误伤面大
+            if (!subs.length && (it.verdict === '对' || it.verdict === '错')) {
+              const correct = String(stdAnswerOf.get(String(Number(it.no))) || it.reference_answer || '')
+              const text = `${it.comment || ''}${it.error_step || ''}`
+              const equiv = sampleEquivalent(it.student_answer, correct)
+              if (it.verdict === '错' && (equiv === true || isEquivClaim(text))) {
                 it.verdict = '对'
                 it.error_step = ''
                 it.error_type = ''
-                it.comment = `代数等价校正：学生作答与标准答案数学等价（仅书写形式不同），逐空均判对`
-              } else if (fixedSub > 0 && vs.some((v: string) => v === '对') && vs.some((v: string) => v === '错' || v === '未作答')) {
+                it.comment = `代数等价校正：${equiv === true ? '数值抽样证实两侧表达式各代 3 组取值一致' : '学生作答与标准答案数学等价（仅书写形式不同）'}，判对（原判定文案：${String(it.comment || '').slice(0, 80)}）`
+                console.log(`[analyze] 判定后置校正：第${it.no}题 → 对`)
+              } else if (it.verdict === '对' && /判错/.test(text) && equiv !== true) {
+                it.verdict = '错'
+                it.comment = `矛盾校正：判定文案自书「判错」与 verdict=对 矛盾，机器改判错（原文案：${String(it.comment || '').slice(0, 80)}）`
+                console.log(`[analyze] 判定后置校正：第${it.no}题 → 错`)
+              }
+            }
+            // 逐空重算：校正后全对→对、全错→错、有对有错→部分对（只动 对/错/部分对 三态）
+            if (fixedSub > 0 && subs.length && ['对', '错', '部分对'].includes(it.verdict)) {
+              const vs: string[] = subs.map((sa: any) => String(sa?.verdict || ''))
+              if (vs.length && vs.every((v: string) => v === '对')) {
+                it.verdict = '对'
+                it.error_step = ''
+                it.error_type = ''
+                it.comment = `代数等价校正：逐空均判对`
+              } else if (vs.length && vs.every((v: string) => v === '错' || v === '未作答')) {
+                it.verdict = '错'
+              } else if (vs.some((v: string) => v === '对') && vs.some((v: string) => v === '错' || v === '未作答')) {
                 it.verdict = '部分对'
               }
-            } else if (selfEquiv) {
-              it.verdict = '对'
-              it.error_step = ''
-              it.error_type = ''
-              it.comment = `代数等价校正：学生作答与标准答案数学等价（仅书写形式不同），判对（原判定文案：${String(it.comment || '').slice(0, 80)}）`
             }
-            if (fixedSub > 0 || selfEquiv) console.log(`[analyze] 代数等价后置校正：第${it.no}题 → ${it.verdict}`)
+            if (fixedSub > 0) console.log(`[analyze] 判定后置校正：第${it.no}题 ${fixedSub} 空被机器校正 → ${it.verdict}`)
           }
           for (const it of analysis.items) fixItem(it)
         }
