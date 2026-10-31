@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {BarChart3, BookOpen, CalendarClock, Camera, Download, Mail, PenLine, Pin, Printer, SquarePen, Wallet} from 'lucide-react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { get, post, del } from '@/lib/api'
+import { get, post, put, del } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
 import TextbookPicker from '@/components/TextbookPicker'
 import { NextKeyText } from '@/components/Kp'
@@ -40,9 +40,13 @@ export default function StudentDetail() {
   const [settlements, setSettlements] = useState<Settlement[]>([])
   const [settleTotal, setSettleTotal] = useState(0)
 
-  // 学情日志表单
-  const [logForm, setLogForm] = useState({ date: todayLocal(), type: '上课', content: '', next_class_key: '' })
+  // 学情日志表单（C3：homework=下次课作业布置，可选）
+  const [logForm, setLogForm] = useState({ date: todayLocal(), type: '上课', content: '', next_class_key: '', homework: '' })
   const [logSaving, setLogSaving] = useState(false)
+  // C3：日志卡内编辑作业布置（补填/修改）
+  const [editingLogId, setEditingLogId] = useState<number | null>(null)
+  const [logEditForm, setLogEditForm] = useState({ homework: '', next_class_key: '' })
+  const [logEditSaving, setLogEditSaving] = useState(false)
   // 课时包表单
   const [pkgForm, setPkgForm] = useState({ hours: 10, amount: 0, purchase_date: todayLocal(), note: '' })
   const [pkgSaving, setPkgSaving] = useState(false)
@@ -127,12 +131,27 @@ export default function StudentDetail() {
     try {
       await post(`/api/students/${id}/logs`, logForm)
       show('已记录')
-      setLogForm({ ...logForm, content: '', next_class_key: '' })
+      setLogForm({ ...logForm, content: '', next_class_key: '', homework: '' })
       load()
     } catch (e: any) {
       show(e.message || '保存失败')
     } finally {
       setLogSaving(false)
+    }
+  }
+
+  // C3：保存日志补填（作业布置/下次课重点）
+  const saveLogEdit = async (logId: number) => {
+    setLogEditSaving(true)
+    try {
+      await put(`/api/logs/${logId}`, { homework: logEditForm.homework, next_class_key: logEditForm.next_class_key })
+      show('已保存')
+      setEditingLogId(null)
+      load()
+    } catch (e: any) {
+      show(e.message || '保存失败')
+    } finally {
+      setLogEditSaving(false)
     }
   }
 
@@ -284,8 +303,9 @@ export default function StudentDetail() {
                 {LOG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
-            <textarea className="input" rows={3} placeholder="本节内容、学生表现、作业布置…" value={logForm.content} onChange={(e) => setLogForm({ ...logForm, content: e.target.value })} />
+            <textarea className="input" rows={3} placeholder="本节内容、学生表现…" value={logForm.content} onChange={(e) => setLogForm({ ...logForm, content: e.target.value })} />
             <input className="input" placeholder="下次课重点（可选，将出现在今日工作台）" value={logForm.next_class_key} onChange={(e) => setLogForm({ ...logForm, next_class_key: e.target.value })} />
+            <input className="input" placeholder="下次课作业布置（可选，学生端「日志」可见；不填留空）" value={logForm.homework} onChange={(e) => setLogForm({ ...logForm, homework: e.target.value })} />
             <button className="btn-primary w-full" disabled={logSaving} onClick={saveLog}>{logSaving ? '保存中…' : '保存记录'}</button>
           </div>
 
@@ -343,6 +363,29 @@ export default function StudentDetail() {
                         <p className="text-xs mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-primary-600 dark:text-primary-400">
                           <Pin className="w-3.5 h-3.5 inline-block align-[-2px]" /> 下次课重点：<NextKeyText text={log.next_class_key} />
                         </p>
+                      )}
+                      {/* C3：下次课作业布置（可选，学生端「日志」Tab 同步展示） */}
+                      {(log.homework || editingLogId === log.id) && (
+                        <div className="text-xs mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                          {editingLogId === log.id ? (
+                            <div className="space-y-2">
+                              <input className="input !text-xs" placeholder="下次课作业布置（留空 = 无作业）" value={logEditForm.homework} onChange={(e) => setLogEditForm({ ...logEditForm, homework: e.target.value })} />
+                              <input className="input !text-xs" placeholder="下次课重点" value={logEditForm.next_class_key} onChange={(e) => setLogEditForm({ ...logEditForm, next_class_key: e.target.value })} />
+                              <div className="flex gap-2">
+                                <button className="btn-primary !px-3 !py-1.5 text-xs" disabled={logEditSaving} onClick={() => saveLogEdit(log.id)}>{logEditSaving ? '保存中…' : '保存'}</button>
+                                <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setEditingLogId(null)}>取消</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-amber-600 dark:text-amber-400">
+                              <PenLine className="w-3.5 h-3.5 inline-block align-[-2px]" /> 下次课作业布置：{log.homework}
+                              <button className="ml-2 text-slate-400 hover:text-primary-600 underline" onClick={() => { setEditingLogId(log.id); setLogEditForm({ homework: log.homework || '', next_class_key: log.next_class_key || '' }) }}>编辑</button>
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      {!log.homework && editingLogId !== log.id && (
+                        <button className="text-[11px] text-slate-400 hover:text-primary-600 mt-2" onClick={() => { setEditingLogId(log.id); setLogEditForm({ homework: '', next_class_key: log.next_class_key || '' }) }}>＋ 补填作业布置</button>
                       )}
                     </div>
                   </div>

@@ -2,6 +2,7 @@
 // 打印窗口不加载 KaTeX 的 HTML/CSS 渲染（会全是源码），改用 katex.renderToString(output:'mathml')
 // 预渲染成 MathML 内联进打印 HTML —— MathML 由浏览器原生渲染，无需字体/网络，自包含离线可用
 import katex from 'katex'
+import { wrapBareLatex } from '@workbench/shared'
 
 function renderMathml(tex: string, displayMode: boolean): string | null {
   try {
@@ -19,6 +20,8 @@ function escapeHtml(s: string): string {
 // 任一公式渲染失败时整段回退为转义原文
 export function texToMathml(text: string): string {
   if (!text) return ''
+  // C1：打印前对裸 LaTeX（\frac、^、_ 等）自动补 $...$ 定界，口径与页面 KaTeX 渲染一致
+  const src = wrapBareLatex(String(text))
   const parts: string[] = []
   const blockRe = /\$\$([\s\S]+?)\$\$/g
   let last = 0
@@ -37,12 +40,12 @@ export function texToMathml(text: string): string {
     }
     parts.push(escapeHtml(s.slice(l)))
   }
-  while ((m = blockRe.exec(text))) {
-    pushPlain(text.slice(last, m.index))
+  while ((m = blockRe.exec(src))) {
+    pushPlain(src.slice(last, m.index))
     const html = renderMathml(m[1], true)
     if (html === null) { parts.push(escapeHtml(m[0])) } else { parts.push(html) }
     last = m.index + m[0].length
   }
-  pushPlain(text.slice(last))
+  pushPlain(src.slice(last))
   return parts.join('')
 }

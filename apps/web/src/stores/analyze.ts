@@ -10,12 +10,15 @@ import type { Student, AiAnalysisResult } from '@workbench/shared'
 import { todayLocal } from '@workbench/shared'
 
 export type AnalyzeStep = 'pick' | 'uploading' | 'analyzing' | 'review' | 'saving'
+// C2：图片角色 —— paper=试卷题目页（转录原题+独立求解），sheet=答题卡作答页（读取学生作答）
+export type ImageRole = 'paper' | 'sheet'
 
 interface AnalyzeState {
   step: AnalyzeStep
   studentId: number | null
   files: File[] // 原始文件（仅内存，不持久化；刷新后为空属预期）
   previews: string[] // blob 预览地址（仅内存）
+  roles: ImageRole[] // 每张图的角色（与 files/previews 对齐）
   progress: string
   analysis: AiAnalysisResult | null
   draft: AiAnalysisResult | null
@@ -27,8 +30,9 @@ interface AnalyzeState {
 
   setStep: (s: AnalyzeStep) => void
   setStudentId: (id: number | null) => void
-  addFiles: (files: File[]) => void
+  addFiles: (files: File[], role?: ImageRole) => void
   removeFile: (idx: number) => void
+  setRole: (idx: number, role: ImageRole) => void
   setProgress: (p: string) => void
   setDraft: (updater: (d: AiAnalysisResult | null) => AiAnalysisResult | null) => void
   setMistakeChecked: (v: Record<number, boolean>) => void
@@ -46,6 +50,7 @@ export const useAnalyzeStore = create<AnalyzeState>()(
       studentId: null,
       files: [],
       previews: [],
+      roles: [],
       progress: '',
       analysis: null,
       draft: null,
@@ -57,15 +62,19 @@ export const useAnalyzeStore = create<AnalyzeState>()(
 
       setStep: (s) => set({ step: s }),
       setStudentId: (id) => set({ studentId: id }),
-      addFiles: (arr) => {
-        const { files, previews } = get()
+      addFiles: (arr, role) => {
+        const { files, previews, roles } = get()
         const nf = [...files, ...arr].slice(0, 9)
         const np = [...previews, ...arr.map((f) => URL.createObjectURL(f))].slice(0, 9)
-        set({ files: nf, previews: np })
+        const nr = [...roles, ...arr.map(() => role || 'paper')].slice(0, 9)
+        set({ files: nf, previews: np, roles: nr })
       },
       removeFile: (idx) => {
-        const { files, previews } = get()
-        set({ files: files.filter((_, i) => i !== idx), previews: previews.filter((_, i) => i !== idx) })
+        const { files, previews, roles } = get()
+        set({ files: files.filter((_, i) => i !== idx), previews: previews.filter((_, i) => i !== idx), roles: roles.filter((_, i) => i !== idx) })
+      },
+      setRole: (idx, role) => {
+        set({ roles: get().roles.map((r, i) => (i === idx ? role : r)) })
       },
       setProgress: (p) => set({ progress: p }),
       setDraft: (updater) => set({ draft: updater(get().draft) }),
@@ -74,7 +83,7 @@ export const useAnalyzeStore = create<AnalyzeState>()(
       setNextKey: (v) => set({ nextKey: v }),
 
       start: async () => {
-        const { studentId, files } = get()
+        const { studentId, files, roles } = get()
         const show = useToastStore.getState().show
         const token = useAuthStore.getState().token
         if (!studentId) { show('请先选择学生'); return }
@@ -88,14 +97,20 @@ export const useAnalyzeStore = create<AnalyzeState>()(
             paths.push(await uploadImage(files[i], studentId, token!))
           }
           set({ uploadedPaths: paths })
-          // 第 3 步：AI 分析
-          set({ step: 'analyzing', progress: '智能分析正在识别题目与作答…' })
-          const tips = ['智能分析正在识别题目与作答…', '正在逐题判定对错…', '正在归类错因与薄弱点…', '即将完成，正在整理建议…']
+          // 第 3 步：AI 分析（C2 两阶段：试卷转录 → 独立求解 → 答题卡读取 → 逐题比对）
+          const hasSheet = roles.includes('sheet')
+          const hasPaper = roles.includes('paper')
+          set({ step: 'analyzing', progress: hasPaper && hasSheet ? '正在逐题转录试卷原题…' : '智能分析正在识别题目与作答…' })
+          const tips = hasPaper && hasSheet
+            ? ['正在逐题转录试卷原题…', '系统正在独立求解试卷（得出标准答案）…', '正在读取答题卡上的学生作答…', '正在逐题比对：标准答案 vs 学生作答…', '正在归类错因与薄弱点…']
+            : ['智能分析正在识别题目与作答…', '正在逐题判定对错…', '正在归类错因与薄弱点…', '即将完成，正在整理建议…']
           let ti = 0
-          const timer = setInterval(() => { ti = (ti + 1) % tips.length; set({ progress: tips[ti] }) }, 4000)
+          const timer = setInterval(() => { ti = (ti + 1) % tips.length; set({ progress: tips[ti] }) }, 6000)
           try {
             const r = await post<{ analysis: AiAnalysisResult; provider: string }>('/api/analyze', {
-              student_id: studentId, images: paths,
+              student_id: studentId,
+              // C2：带角色上传（paper=试卷页 / sheet=答题卡页）；旧后端兼容由字段结构保证
+              images: paths.map((p, i) => ({ path: p, role: roles[i] || 'paper' })),
             })
             clearInterval(timer)
             set({
@@ -150,7 +165,7 @@ export const useAnalyzeStore = create<AnalyzeState>()(
 
       reset: () =>
         set({
-          step: 'pick', studentId: null, files: [], previews: [], progress: '',
+          step: 'pick', studentId: null, files: [], previews: [], roles: [], progress: '',
           analysis: null, draft: null, uploadedPaths: [], aiNote: '', mistakeChecked: {},
           logType: '作业', nextKey: '',
         }),

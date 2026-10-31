@@ -98,7 +98,7 @@ export default async function logRoutes(app: FastifyInstance) {
   app.post('/api/students/:id/logs', async (req, reply) => {
     const { id } = req.params as { id: string }
     const b = (req.body || {}) as {
-      date?: string; type?: string; content?: string; next_class_key?: string
+      date?: string; type?: string; content?: string; next_class_key?: string; homework?: string
       images?: string[]; ai_result?: any; create_mistakes?: boolean; mistake_nos?: number[]
       photo_bank?: boolean // B4：原题是否同步存入题库（默认 true）
       photo_bank_nos?: number[] // B4：存入题库的题号（默认跟随错题勾选）
@@ -108,12 +108,12 @@ export default async function logRoutes(app: FastifyInstance) {
     const images = Array.isArray(b.images) ? b.images : []
     const aiJson = b.ai_result ? JSON.stringify(b.ai_result) : null
     const r = db.prepare(
-      `INSERT INTO study_logs(student_id, date, type, content, images, ai_result, ai_generated, next_class_key, created_at)
-       VALUES(?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO study_logs(student_id, date, type, content, images, ai_result, ai_generated, next_class_key, homework, created_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?)`
     ).run(
       id, b.date || nowISO().slice(0, 10), type, b.content.trim(),
       JSON.stringify(images),
-      aiJson, b.ai_result ? 1 : 0, b.next_class_key || '', nowISO()
+      aiJson, b.ai_result ? 1 : 0, b.next_class_key || '', String(b.homework || '').trim(), nowISO()
     )
     const logId = Number(r.lastInsertRowid)
     // AI 分析结果确认入库时，抽取错/部分对题目进错题本（教师可在错题本中编辑）——B4：原题全文/选项/题图一并入库
@@ -129,6 +129,25 @@ export default async function logRoutes(app: FastifyInstance) {
       }
     }
     return { ok: true, id: logId, mistakes_created: mistakeCount, bank_questions_created: bankCount }
+  })
+
+  // 编辑学情记录（C3：可事后补填/修改「下次课作业布置」等字段；不传的字段保持不变）
+  app.put('/api/logs/:id', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const cur = db.prepare('SELECT id FROM study_logs WHERE id = ?').get(id)
+    if (!cur) { reply.code(404).send({ error: '学情记录不存在' }); return }
+    const b = (req.body || {}) as { content?: string; next_class_key?: string; homework?: string; type?: string; date?: string }
+    const sets: string[] = []
+    const args: any[] = []
+    if (b.content !== undefined) { if (!b.content.trim()) { reply.code(400).send({ error: '记录内容必填' }); return }; sets.push('content = ?'); args.push(b.content.trim()) }
+    if (b.next_class_key !== undefined) { sets.push('next_class_key = ?'); args.push(String(b.next_class_key || '').trim()) }
+    if (b.homework !== undefined) { sets.push('homework = ?'); args.push(String(b.homework || '').trim()) }
+    if (b.type !== undefined && ['上课', '作业', '考试', '其他'].includes(b.type)) { sets.push('type = ?'); args.push(b.type) }
+    if (b.date !== undefined && b.date.trim()) { sets.push('date = ?'); args.push(b.date.trim()) }
+    if (!sets.length) { reply.code(400).send({ error: '没有要更新的字段' }); return }
+    args.push(id)
+    db.prepare(`UPDATE study_logs SET ${sets.join(', ')} WHERE id = ?`).run(...args)
+    return { ok: true }
   })
 
   app.delete('/api/logs/:id', async (req) => {

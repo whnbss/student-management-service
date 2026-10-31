@@ -507,6 +507,63 @@ log('学生看学习日志', r.status === 200 && Array.isArray(r.data) && r.data
 log('学生日志不含内部分析', r.data?.every((l) => !('ai_result' in l)))
 token = savedTeacherToken
 
+// ---- C3：学情日志「下次课作业布置」（不填可保存 / PUT 补填 / 学生端可见） ----
+r = await req('POST', `/api/students/${sid}/logs`, { date, type: '上课', content: 'C3冒烟：未填作业布置' })
+const c3LogId = r.data?.id
+log('C3 不填作业布置可保存', r.status === 200 && !!c3LogId)
+r = await req('PUT', `/api/logs/${c3LogId}`, { homework: '完成练习册 P42 第 1~5 题' })
+log('C3 事后补填作业布置', r.status === 200 && r.data?.ok)
+r = await req('GET', `/api/students/${sid}/logs`)
+const c3Log = r.data?.find((l) => l.id === c3LogId)
+log('C3 教师端回读 homework', c3Log?.homework === '完成练习册 P42 第 1~5 题', `homework=${c3Log?.homework}`)
+r = await req('POST', '/api/auth/login', { username: '张小明', password: 'stud123456' })
+const c3StuToken = r.data?.token
+const c3SavedTeacher = token
+token = c3StuToken
+r = await req('GET', '/api/student/logs')
+const c3StuLog = r.data?.find((l) => l.id === c3LogId)
+log('C3 学生端可见作业布置', r.status === 200 && c3StuLog?.homework === '完成练习册 P42 第 1~5 题', `homework=${c3StuLog?.homework}`)
+token = c3SavedTeacher
+
+// ---- C4：老师讲义（docx/pdf 上传 → 学生端下载 → 越权 403） ----
+{
+  const boundary = '----smokeC4' + Date.now()
+  const fileBytes = Buffer.from('PK\x03\x04 smoke-placeholder docx content')
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="title"\r\n\r\nC4验收讲义\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="test.pdf"\r\nContent-Type: application/pdf\r\n\r\n`),
+    fileBytes,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ])
+  const up4 = await fetch(BASE + `/api/students/${sid}/report-files`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+    body: new Uint8Array(body),
+  })
+  const up4d = await up4.json().catch(() => null)
+  log('C4 上传讲义', up4.status === 200 && up4d?.ok && !!up4d?.id, `id=${up4d?.id}`)
+  const c4FileId = up4d?.id
+  r = await req('GET', `/api/students/${sid}/report-files`)
+  log('C4 教师端讲义列表', r.status === 200 && r.data?.length === 1 && r.data[0].title === 'C4验收讲义')
+  // 学生端：下载自己的（?token= 查询参数口径，浏览器 <a> 直链场景；用张小明自己的 token）
+  const dl = await fetch(BASE + up4d.path + `?token=${encodeURIComponent(c3StuToken || '')}`)
+  log('C4 学生带 token 下载', dl.status === 200, `status=${dl.status}`)
+  // 越权：学生 token 访问别人讲义目录（不存在的学生 id）→ 403 或 404
+  const dlBad = await fetch(BASE + `/uploads/reports/999999/${(up4d.path || '').split('/').pop() || 'x'}?token=${encodeURIComponent(c3StuToken || '')}`)
+  log('C4 越权访问他人讲义拒绝', dlBad.status === 403 || dlBad.status === 404, `status=${dlBad.status}`)
+  // 未登录访问 → 401
+  const dlNoAuth = await fetch(BASE + up4d.path)
+  log('C4 未登录访问讲义 401', dlNoAuth.status === 401, `status=${dlNoAuth.status}`)
+  // 学生端列表
+  const c4Saved = token
+  token = c3StuToken
+  r = await req('GET', '/api/student/report-files')
+  log('C4 学生端讲义列表（仅自己）', r.status === 200 && r.data?.length === 1, `n=${r.data?.length}`)
+  token = c4Saved
+  r = await req('DELETE', `/api/report-files/${c4FileId}`)
+  log('C4 删除讲义', r.status === 200 && r.data?.ok)
+}
+
 // 32i3. 教师改学生手机号 → 登录账号同步：accounts.phone 跟上、重置密码用新手机号、新手机号可直接登录
 r = await req('PUT', `/api/students/${sid}`, { phone: '13811112222' })
 log('教师改学生手机号', r.status === 200)

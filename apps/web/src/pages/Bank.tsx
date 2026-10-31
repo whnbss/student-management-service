@@ -21,7 +21,8 @@ import { todayLocal } from '@workbench/shared'
 
 const QTYPES = ['选择', '填空', '实验', '计算']
 const GRADES = ['高一', '高二', '高三']
-const LEVELS = ['基础', '高考', '竞赛'] as const
+// C5：难度四档（替换旧 基础/高考/竞赛），与 shared QUIZ_LEVELS 区间一一对应
+const LEVELS = ['基础', '中档', '稍难', '压轴'] as const
 // 难度文案徽章（1 基础 / 2 较易 / 3 中档 / 4 较难 / 5 压轴）
 const DIFF_LABELS = ['', '基础', '较易', '中档', '较难', '压轴']
 const DIFF_COLORS: Record<number, string> = {
@@ -61,7 +62,10 @@ export default function Bank() {
 
   // AI 出题器
   const [showGen, setShowGen] = useState(false)
-  const [genForm, setGenForm] = useState({ kps: '', count: 5, level: '高考' as (typeof LEVELS)[number], qtypes: ['计算'] as string[], grade: '高一' })
+  const [genForm, setGenForm] = useState({ kps: '', count: 5, level: '中档' as (typeof LEVELS)[number], qtypes: ['计算'] as string[], grade: '高一' })
+  // C5 同参数去重：上次生成的题干摘要（作为排除项传后端）+ 本次来自教材选择器的知识点（覆盖式管理）
+  const [lastStems, setLastStems] = useState<string[]>([])
+  const [pickerKps, setPickerKps] = useState<string[]>([])
   const [generating, setGenerating] = useState(false)
   const [drafts, setDrafts] = useState<QuizDraft[]>([])
   // 终稿闭环：后端已自动修复/重生成，这里只展示被弃置的题（附原因），不会有「未解决」状态的草稿
@@ -185,7 +189,13 @@ export default function Bank() {
     setGenerating(true)
     try {
       // 后端终稿闭环：二审未过的题已自动修复/重生成，列表里只有终稿与弃置记录
-      const r = await post<{ questions: QuizDraft[]; discarded?: Array<{ reason: string }> }>('/api/quiz/generate', { ...genForm, kps, qtypes: genForm.qtypes })
+      // C5：同参数再次生成时把上次题干摘要作为排除项传入，后端注入 prompt 并做相似度去重
+      const r = await post<{ questions: QuizDraft[]; discarded?: Array<{ reason: string }> }>('/api/quiz/generate', {
+        ...genForm, kps, qtypes: genForm.qtypes,
+        avoid_stems: lastStems.slice(0, 30),
+      })
+      // 记录本次题干摘要，供下次同参数生成时排除重复
+      setLastStems(r.questions.map((d) => d.stem.replace(/\s+/g, '').slice(0, 60)).filter(Boolean))
       // 稳定排序：按固定题型顺序渲染（后端已按题型分批生成，这里再兜底排一次）
       const order = r.questions.map((_, i) => i)
       const sorted = order
@@ -728,12 +738,15 @@ export default function Bank() {
       {tbPicker === 'gen' && (
         <TextbookPicker
           mode="multi"
-          initial={genForm.kps.split(/[、,，]/).map((s) => s.trim()).filter(Boolean)}
+          initial={pickerKps}
           onConfirm={(picked) => {
+            // C5：以本次选择结果「覆盖」教材来源知识点；手动输入/从错题带入的项保留
             const cur = genForm.kps.split(/[、,，]/).map((s) => s.trim()).filter(Boolean)
-            const merged = [...new Set([...cur, ...picked])]
+            const manual = cur.filter((k) => !pickerKps.includes(k))
+            const merged = [...new Set([...manual, ...picked])]
+            setPickerKps([...picked])
             setGenForm((f) => ({ ...f, kps: merged.join('、') }))
-            show(`已带入 ${picked.length} 个教材知识点`)
+            show(`已带入 ${picked.length} 个教材知识点（覆盖上次教材选择，手动输入保留）`)
           }}
           onClose={() => setTbPicker(null)}
         />

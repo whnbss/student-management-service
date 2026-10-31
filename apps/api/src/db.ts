@@ -234,6 +234,24 @@ function migrateSchema() {
     created_at TEXT NOT NULL
   );
   `)
+  // C3：学情日志「下次课作业布置」（可选，学生端「日志」Tab 同步展示）
+  cols = db.prepare('PRAGMA table_info(study_logs)').all() as Array<{ name: string }>
+  if (!cols.some((c) => c.name === 'homework')) {
+    db.exec("ALTER TABLE study_logs ADD COLUMN homework TEXT NOT NULL DEFAULT ''")
+  }
+  // C4：老师讲义（阶段报告附件：docx/pdf 等，按学生隔离，学生端「报告」Tab 可下载）
+  db.exec(`
+  CREATE TABLE IF NOT EXISTS report_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT '',
+    filename TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL,
+    mime TEXT NOT NULL DEFAULT '',
+    size INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  `)
   // 存量题目一次性清洗：字面 \n → 真实换行、字面 \\ → \（只跑一次，标记在 settings）
   if (!getSetting('question_text_sanitized_v1')) {
     const rows = db.prepare('SELECT id, stem, answer, solution, pitfall FROM questions').all() as Array<{

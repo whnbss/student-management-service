@@ -5,7 +5,7 @@ import {Camera, Image} from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { get } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
-import { useAnalyzeStore } from '@/stores/analyze'
+import { useAnalyzeStore, type ImageRole } from '@/stores/analyze'
 import Katex from '@/components/Katex'
 import { specToSvg } from '@/lib/figure'
 import type { Student } from '@workbench/shared'
@@ -41,6 +41,8 @@ export default function Analyze() {
   const setStudentId = useAnalyzeStore((s) => s.setStudentId)
   const addFiles = useAnalyzeStore((s) => s.addFiles)
   const removeFile = useAnalyzeStore((s) => s.removeFile)
+  const roles = useAnalyzeStore((s) => s.roles)
+  const setRole = useAnalyzeStore((s) => s.setRole)
   const setDraft = useAnalyzeStore((s) => s.setDraft)
   const setMistakeChecked = useAnalyzeStore((s) => s.setMistakeChecked)
   const setLogType = useAnalyzeStore((s) => s.setLogType)
@@ -54,6 +56,9 @@ export default function Analyze() {
   const [viewIdx, setViewIdx] = useState<number | null>(null) // 全屏看图
   const cameraRef = useRef<HTMLInputElement>(null)
   const albumRef = useRef<HTMLInputElement>(null)
+  // C2：答题卡专用入口（相机/相册）
+  const sheetCameraRef = useRef<HTMLInputElement>(null)
+  const sheetAlbumRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     get<Student[]>('/api/students').then(setStudents).catch((e) => show(e.message || '加载失败'))
@@ -65,9 +70,9 @@ export default function Analyze() {
     if (Number.isFinite(n) && n > 0) setStudentId(n)
   }, [presetStudent, setStudentId])
 
-  const pick = (fl: FileList | null) => {
+  const pick = (fl: FileList | null, role: ImageRole = 'paper') => {
     if (!fl?.length) return
-    addFiles(Array.from(fl).filter((f) => f.type.startsWith('image/')))
+    addFiles(Array.from(fl).filter((f) => f.type.startsWith('image/')), role)
   }
 
   const updItem = (idx: number, patch: Partial<NonNullable<typeof draft>['items'][0]>) =>
@@ -92,21 +97,34 @@ export default function Analyze() {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <button className="btn-primary !py-6 text-base" onClick={() => cameraRef.current?.click()}><Camera className="w-4 h-4 inline-block align-[-2px]" /> 拍照</button>
-          <button className="btn-outline !py-6 text-base" onClick={() => albumRef.current?.click()}><Image className="w-4 h-4 inline-block align-[-2px]" /> 相册多选</button>
+          <button className="btn-primary !py-6 text-base" onClick={() => cameraRef.current?.click()}><Camera className="w-4 h-4 inline-block align-[-2px]" /> 拍试卷题目页</button>
+          <button className="btn-outline !py-6 text-base" onClick={() => albumRef.current?.click()}><Image className="w-4 h-4 inline-block align-[-2px]" /> 相册传试卷页</button>
         </div>
+        <div className="grid grid-cols-2 gap-3">
+          <button className="btn-primary !py-6 text-base" onClick={() => sheetCameraRef.current?.click()}><Camera className="w-4 h-4 inline-block align-[-2px]" /> 拍答题卡</button>
+          <button className="btn-outline !py-6 text-base" onClick={() => sheetAlbumRef.current?.click()}><Image className="w-4 h-4 inline-block align-[-2px]" /> 相册传答题卡</button>
+        </div>
+        <p className="text-xs text-slate-400">推荐「试卷题目页 + 答题卡」一起传：系统会先独立求解试卷得出标准答案，再读取答题卡上你的作答，逐题比对判对错（红叉只作校验线索）。只传答题卡也可以（按作答直接判）。</p>
         {/* HTTP 局域网下不能依赖 getUserMedia，用系统相机 input capture */}
-        <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { pick(e.target.files); e.target.value = '' }} />
-        <input ref={albumRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { pick(e.target.files); e.target.value = '' }} />
+        <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { pick(e.target.files, 'paper'); e.target.value = '' }} />
+        <input ref={albumRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { pick(e.target.files, 'paper'); e.target.value = '' }} />
+        <input ref={sheetCameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { pick(e.target.files, 'sheet'); e.target.value = '' }} />
+        <input ref={sheetAlbumRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { pick(e.target.files, 'sheet'); e.target.value = '' }} />
 
         {previews.length > 0 && (
           <div className="card p-4">
-            <h2 className="text-sm font-semibold mb-2">已选 {previews.length} 张（最多 9 张）</h2>
+            <h2 className="text-sm font-semibold mb-2">已选 {previews.length} 张（最多 9 张）· 点缩略图下方按钮可切换「试卷页/答题卡」</h2>
             <div className="grid grid-cols-3 gap-2">
               {previews.map((p, i) => (
                 <div key={i} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
                   <img src={p} className="w-full h-full object-cover" onClick={() => setViewIdx(i)} />
                   <button className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white text-xs" onClick={() => removeFile(i)}>×</button>
+                  <button
+                    className={`absolute bottom-1 left-1 right-1 text-[10px] py-0.5 rounded-md ${roles[i] === 'sheet' ? 'bg-amber-500/90 text-white' : 'bg-primary-600/90 text-white'}`}
+                    onClick={() => setRole(i, roles[i] === 'sheet' ? 'paper' : 'sheet')}
+                  >
+                    {roles[i] === 'sheet' ? '答题卡（点击改试卷页）' : '试卷页（点击改答题卡）'}
+                  </button>
                 </div>
               ))}
             </div>
@@ -206,7 +224,7 @@ export default function Analyze() {
                     <>
                       <textarea className="input !text-xs" rows={3} placeholder="原题题干全文（逐字核对，识别不清请清空并判「无法识别」）" value={it.stem} onChange={(e) => updItem(idx, { stem: e.target.value })} />
                       <textarea className="input !text-xs" rows={2} placeholder="选择题选项（每行一条：A. …），非选择题留空" value={it.options.join('\n')} onChange={(e) => updItem(idx, { options: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })} />
-                      <input className="input !text-xs" placeholder="参考答案（可见时填写）" value={it.reference_answer} onChange={(e) => updItem(idx, { reference_answer: e.target.value })} />
+                      <input className="input !text-xs" placeholder="标准答案（系统独立求解所得，可修正）" value={it.reference_answer} onChange={(e) => updItem(idx, { reference_answer: e.target.value })} />
                     </>
                   ) : (
                     <>
@@ -216,7 +234,7 @@ export default function Analyze() {
                           {it.options.map((o, i) => <p key={i}><Katex text={o} /></p>)}
                         </div>
                       )}
-                      {it.reference_answer && <p className="text-xs text-slate-500">参考答案：<Katex text={it.reference_answer} /></p>}
+                      {it.reference_answer && <p className="text-xs text-slate-500">标准答案（独立求解）：<Katex text={it.reference_answer} /></p>}
                     </>
                   )}
                   {it.figure_spec && (() => {
@@ -224,6 +242,29 @@ export default function Analyze() {
                     return svg ? <div className="bg-white dark:bg-slate-900 rounded-lg p-2" dangerouslySetInnerHTML={{ __html: svg }} /> : null
                   })()}
                   {it.figure_status === '图待补' && <p className="text-[11px] text-amber-500">原题有图但无法自动重绘——已保留作业原图，可在错题本中手动补图</p>}
+                </div>
+              )}
+              {/* C2：学生实际作答 vs 标准答案（逐题比对结论） */}
+              {(it.student_answer || it.sub_answers?.length) && (
+                <div className="rounded-lg bg-amber-50/60 dark:bg-amber-900/10 p-2.5 space-y-1">
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">学生作答（答题卡识别）</p>
+                  {it.sub_answers && it.sub_answers.length > 0 ? (
+                    <div className="space-y-1">
+                      {it.sub_answers.map((sa, si) => (
+                        <p key={si} className="text-xs">
+                          <span className="num text-slate-500">{sa.key}</span>{' '}
+                          <span className={sa.verdict === '对' ? 'text-green-600' : sa.verdict === '错' ? 'text-red-500 font-medium' : 'text-amber-500 font-medium'}>{sa.verdict}</span>
+                          {' · '}
+                          <span className="text-slate-600 dark:text-slate-300">学生：<Katex text={sa.student || '（空白）'} /></span>
+                          {' · '}
+                          <span className="text-slate-500">标准：<Katex text={sa.correct || '—'} /></span>
+                          {sa.note && <span className="text-slate-400"> · {sa.note}</span>}
+                        </p>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm"><Katex text={it.student_answer || '（未识别到作答）'} /></p>
+                  )}
                 </div>
               )}
               {editing ? (

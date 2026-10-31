@@ -138,12 +138,22 @@ export default async function studentRoutes(app: FastifyInstance) {
   })
 
   // 我的学情日志：学生只读，看到老师记录的每次课/作业流水（不含 ai_result 内部分析明细）
+  // C3：含「下次课作业布置」（homework，老师填了才下发内容；前端无该字段时显示为无作业）
   app.get('/api/student/logs', async (req, reply) => {
     const acc = requireReady(req, reply)
     if (!acc) return
     return db.prepare(`
-      SELECT id, date, type, content, images, next_class_key, created_at
+      SELECT id, date, type, content, images, next_class_key, homework, created_at
       FROM study_logs WHERE student_id = ? ORDER BY date DESC, id DESC LIMIT 100`).all(acc.student_id)
+  })
+
+  // C4：老师讲义列表（学生只能看到自己的；下载走带鉴权的静态路径 /uploads/reports/...）
+  app.get('/api/student/report-files', async (req, reply) => {
+    const acc = requireReady(req, reply)
+    if (!acc) return
+    return db.prepare(
+      'SELECT id, title, filename, path, mime, size, created_at FROM report_files WHERE student_id = ? ORDER BY id DESC'
+    ).all(acc.student_id)
   })
 
   // 我的报告：教师生成的阶段报告（分享链接同源数据），学生端只读

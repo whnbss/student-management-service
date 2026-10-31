@@ -92,6 +92,7 @@ export interface StudyLog {
   ai_result: string | null
   ai_generated: number
   next_class_key: string
+  homework: string // 下次课作业布置（C3，可选，学生端「日志」Tab 同步展示）
   created_at: string
   student_name?: string
 }
@@ -146,6 +147,9 @@ export interface AiAnalysisResult {
     reference_answer: string // 参考答案与解析（能从图中看出/常规答案时填写）
     figure_spec: { template: string; params: Record<string, number | string> } | null // 原题配图重绘规格
     figure_status: '已重绘' | '图待补' | '' // 原题有图但无法用模板重绘时标「图待补」
+    // ---- C2 两阶段批改：学生实际作答（答题卡识别结果，比对判定的依据） ----
+    student_answer: string
+    sub_answers?: SubAnswer[] // 多小问/多空逐项判定（12 题按空、13~16 按得分点）
   }>
   weak_points: Array<{ point: string; evidence: string; severity: '高' | '中' | '低' }>
   framework: Array<{ chapter: string; mastered: string[]; shaky: string[]; missing: string[] }>
@@ -426,6 +430,167 @@ export function analyzeUserPrompt(grade: string, textbook: string): string {
 请分析这批作业照片并按约定 JSON 结构输出。`
 }
 
+// ---------- C2 拍照识别准确率：两阶段批改流水线（试卷页 / 答题卡页分离） ----------
+// 旧单阶段「一坨图片直接判对错」识别不出答题卡红叉、也不解原题；
+// 新流水线：①视觉转录试卷完整原题 → ②文本模型独立求解得标准答案 → ③视觉读取答题卡学生作答
+// → ④文本逐题比对（标准答案 vs 学生作答）出判定与错因。红叉只作校验线索，不作结论。
+
+// C2 类型：试卷原题转录 / 独立求解 / 答题卡读取
+export interface PaperExtractItem {
+  no: string // 题号（如 "1"、"12(2)"、"15(3)"）
+  qtype: '选择' | '填空' | '实验' | '计算'
+  stem: string // 完整题干（逐字转录，公式 LaTeX，$...$ 包裹）
+  options: string[] // 选择题选项原文
+  sub_questions: string[] // 小问原文（(1)(2)(3) 或按空 (1)~(5)）
+  has_figure: boolean // 原题是否配图
+  figure_note: string // 配图内容一句话描述（无法重绘时保留说明）
+}
+export interface PaperSolvedItem {
+  no: string
+  answer: string // 标准答案（选择题字母；填空按空；计算最终值）
+  solution: string // 完整解析（分步，公式 LaTeX）
+  per_blank: Array<{ key: string; answer: string }> // 多空/多小问时逐空标准答案（单题单问可空）
+}
+export interface SheetReadItem {
+  no: string
+  student_answer: string // 学生实际作答（选择填涂字母；填空按空原文；计算抄关键结果）
+  per_blank: Array<{ key: string; answer: string }> // 多空/多小问时逐空学生作答
+  red_x: boolean // 卷面是否有红笔叉号（只作校验线索）
+  handwritten_note: string // 手写作答关键内容（计算题步骤/结果）
+}
+
+// ① 视觉：试卷页 → 逐题完整转录原题
+export const PAPER_EXTRACT_SYSTEM_PROMPT = `你是一名资深高中物理教师，正在把学生试卷照片**逐题逐字转录**成电子文本，供后续独立求解与批改。
+要求：
+1. 逐题完整转录：stem 逐字抄写题干全文（含公式写成 LaTeX，$...$ 包裹；严禁改写、缩写、概括、编造），选择题把 A/B/C/D 选项原文逐条放进 options，非选择题把每个小问/每个空的原文放进 sub_questions（保持 "(1)"、"(2)" 等编号）；
+2. qtype 从 选择/填空/实验/计算 中选（实验归「实验」，含图像/装置的计算大题归「计算」）；
+3. 图上若有学生手写作答，**忽略手写内容**，只转录印刷体原题（手写属于答题卡识别阶段的事）；
+4. has_figure：原题配有插图（电路图/受力图/装置图/函数图像等）填 true，并在 figure_note 用一句话描述图的内容；纯文字题填 false；
+5. 分辨不清的文字：在 unrecognized 中注明「第N题部分文字识别不清」，**严禁编造补全**；
+6. 严格输出 JSON，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
+
+输出 JSON 结构：
+{"paper_name": "试卷名称（卷头可见时）", "items": [{"no": "1", "qtype": "选择", "stem": "题干全文", "options": ["A. …", "B. …", "C. …", "D. …"], "sub_questions": [], "has_figure": false, "figure_note": ""}], "unrecognized": []}`
+
+export function paperExtractUserPrompt(grade: string, pageCount: number): string {
+  return `学生年级：${grade || '未知'}。这批照片共 ${pageCount} 张，都是**试卷题目页**（按拍摄顺序可能是卷面的连续页）。
+请逐题完整转录所有可见题目并按约定 JSON 结构输出。`
+}
+
+// ② 文本：独立求解试卷（不依赖学生作答，得出标准答案与解析）
+export const PAPER_SOLVE_SYSTEM_PROMPT = `你是一名资深高中物理命题与解题专家。给你一份**逐字转录的试卷原题**，请你作为「标准答案出品方」**独立求解每一道题**：
+1. 不依赖任何学生作答信息，只根据题干与你的物理知识求解，得出标准答案与解析；
+2. answer 写最终答案：选择题写选项字母+简要理由，填空题按空给值（(1)=…，(2)=…），计算题写最终数值与单位（关键中间式放 solution）；
+3. solution 分步给出规范解答（公式用 LaTeX，$...$ 包裹；公式里的中文用 \\text{} 包裹），必须是最终正确版本，严禁试错/疑问等过程文字；
+4. 多小问/多空题必须填 per_blank（key 用 "(1)"、"(2)" 或空序号，answer 为该空最终答案）；单题单问可给空数组；
+5. 求解后**自查一遍**：量纲、数量级、边界条件、多选/单选；若某题题干本身不完整（转录缺条件），在 note 中注明「第N题题干不完整，按最合理补全求解」并给出条件性答案；
+6. 可能附带试卷页原图：纸带读数、图像、电路与实验装置等数据**以图为准**（图中的手写痕迹是学生的演算，忽略其结论，自己独立算）；逐小问列式后代入数值复算一遍再定稿；
+7. 严格输出 JSON，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
+
+输出 JSON 结构：
+{"items": [{"no": "1", "answer": "D", "solution": "分步解析", "per_blank": []}], "note": ""}`
+
+export function paperSolveUserPrompt(grade: string, questions: PaperExtractItem[]): string {
+  const lines = questions.map((q) =>
+    `【第${q.no}题·${q.qtype}】${q.stem}${q.options.length ? '\n选项：' + q.options.join(' | ') : ''}${q.sub_questions.length ? '\n小问：' + q.sub_questions.join(' ') : ''}${q.has_figure ? `\n（原题配图：${q.figure_note || '见卷面'}）` : ''}`
+  ).join('\n\n')
+  return `学生年级：${grade || '未知'}。试卷原题逐字转录如下：
+${lines}
+请独立求解每道题并按约定 JSON 结构输出（items 与输入题号一一对应，一个不多一个不少）。`
+}
+
+// ③ 视觉：答题卡页 → 学生实际作答（红叉只记录为线索）
+export const SHEET_READ_SYSTEM_PROMPT = `你是一名阅卷助手，正在读取学生**答题卡照片**，逐题提取学生的实际作答。
+要求：
+1. 选择题：仔细识别每题 2B 铅笔填涂的选项框（涂黑的字母）；多题并排的框要按行仔细对应题号，严禁串行错位；
+2. 红笔批改痕迹（叉号 ✗、圈划）：逐题记录到 red_x（有红叉=true）与 mark_note（描述红笔位置，如「B 选项上有红叉」）。**红叉只是线索，不得直接当结论**——最终判定以「作答内容 vs 标准答案」比对为准；
+3. 填空题：逐空抄写学生手写的原文（公式照抄成 LaTeX，$...$ 包裹；看不清的空写「(字迹不清)」，严禁编造）；
+4. 计算题：把学生手写的关键步骤与最终结果抄到 handwritten_note（重要的方程与结果，照实转录，看不清标「(字迹不清)」），student_answer 填最终结果。**手写数字必须逐位照抄**（如卷面写 9.625 就抄 9.625，严禁四舍五入成 8.6、严禁凭感觉改写）；每个手写结果抄完再回看原图复核一遍位数与小数点；
+5. 空白未作答的题：student_answer 填「（空白）」，red_x 如实记录；
+6. 严格输出 JSON，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
+
+输出 JSON 结构：
+{"items": [{"no": "1", "student_answer": "A", "per_blank": [], "red_x": false, "mark_note": "", "handwritten_note": ""}], "unrecognized": []}`
+
+export function sheetReadUserPrompt(grade: string, pageCount: number): string {
+  return `学生年级：${grade || '未知'}。这批照片共 ${pageCount} 张，都是**答题卡**（含选择题填涂区与非选择题手写区，可能含红笔批改痕迹）。
+请逐题提取学生的实际作答并按约定 JSON 结构输出。`
+}
+
+// ④ 文本：标准答案 vs 学生作答 逐题比对 → 判定/错因/错题集
+export const COMPARE_SYSTEM_PROMPT = `你是一名资深高中物理教师，正在逐题比对「标准答案」与「学生实际作答」，输出批改结论。
+判定纪律（严格执行）：
+1. 结论只来自**作答内容 vs 标准答案**的比对：一致=「对」；不一致=「错」；多小问部分正确=「部分对」（并逐小问说明）；答题卡上该题无作答内容=「未作答」；作答内容看不清无法比对=「无法识别」；
+2. 红笔叉号（red_x）**只作交叉校验线索**：若比对结论为「对」但卷面有红叉，优先复核学生作答转录是否遗漏（如填涂识别错位），仍无法确定时判「无法识别」并放入 unrecognized，**不得仅凭红叉直接判错**；
+3. 计算/大题按**得分点**判定：用学生 handwritten_note 中的方程与结果，对照标准 solution 的关键步骤与小问分值，判定「对/部分对/错」，error_step 精确到失分的那一步（如「(3) 求拉力时漏乘 cosθ，得 3600J，正确为 3750J」）；
+4. error_type 只能从枚举中选：概念不清、公式/模型用错、计算失误、审题偏差、过程不规范、时间分配问题、其他；判定正确的题 error_type 留空；无学生作答信息的题（如只传了试卷页）该题判「无法识别」并写明原因；
+5. items 必须把**全部题目**逐一输出（与输入题号一致），stem 照抄输入的原题题干（不得缩写），options 照抄输入的选项，reference_answer 照抄输入的标准答案（可补充关键结论）；
+6. 薄弱点必须给出具体依据（题号+失分点）；next_class_questions 为下次课提问建议 3~5 条；总评客观+建设性，附一句鼓励语（放 overall_comment 末尾）；
+7. score_estimate：按卷面分值结构估算学生得分（可依据红叉/错题数量，但要写明这是估算）；
+8. 严格输出 JSON，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
+
+输出 JSON 结构：
+{"paper_meta": {"type": "试卷", "grade": "高三", "score_estimate": 0},
+ "items": [{"no": 1, "verdict": "对|错|部分对|未作答|无法识别", "error_step": "", "error_type": "", "knowledge_points": [], "comment": "", "stem": "照抄原题", "options": [], "reference_answer": "照抄标准答案", "figure_spec": null, "figure_status": "", "student_answer": "照抄学生作答", "sub_answers": [{"key": "(1)", "verdict": "对", "student": "…", "correct": "…", "note": ""}]}],
+ "weak_points": [{"point": "", "evidence": "", "severity": "高|中|低"}],
+ "framework": [{"chapter": "", "mastered": [], "shaky": [], "missing": []}],
+ "next_class_questions": [], "suggestions": [], "overall_comment": "", "unrecognized": []}`
+
+export interface SubAnswer { key: string; verdict: string; student: string; correct: string; note: string }
+
+export function compareUserPrompt(p: {
+  grade: string
+  hasSheet: boolean
+  questions: PaperExtractItem[]
+  solved: PaperSolvedItem[]
+  sheet: SheetReadItem[]
+  extraNote?: string
+}): string {
+  const std = p.solved.map((s) => `第${s.no}题：标准答案=${s.answer}${s.per_blank.length ? `（逐空：${s.per_blank.map((b) => `${b.key}=${b.answer}`).join('，')}）` : ''}\n  解析：${s.solution.slice(0, 400)}`).join('\n')
+  const stu = p.hasSheet
+    ? p.sheet.map((s) => `第${s.no}题：学生作答=${s.student_answer}${s.per_blank.length ? `（逐空：${s.per_blank.map((b) => `${b.key}=${b.answer}`).join('，')}）` : ''}${s.red_x ? '［卷面有红叉］' : ''}${s.handwritten_note ? `\n  手写作答：${s.handwritten_note.slice(0, 300)}` : ''}`).join('\n')
+    : '（本次未提供答题卡，无法比对学生作答——所有题目判「无法识别」并注明原因）'
+  const stems = p.questions.map((q) =>
+    `第${q.no}题（${q.qtype}）：${q.stem.slice(0, 300)}${q.options.length ? '\n  选项：' + q.options.join(' | ') : ''}${q.sub_questions.length ? '\n  小问：' + q.sub_questions.join(' ') : ''}`
+  ).join('\n')
+  return `学生年级：${p.grade || '未知'}。
+原题题干（照抄进输出，不得缩写）：
+${stems}
+
+标准答案（独立求解所得）：
+${std}
+
+学生实际作答（答题卡识别所得）：
+${stu}
+${p.extraNote ? `\n补充说明：${p.extraNote}` : ''}
+请逐题比对并按约定 JSON 结构输出。items 的 no 用数字（如 1、12、15，有小问的题用「15」为主编号，小问结论写进 sub_answers）。`
+}
+
+// ②′ 标准答案交叉复核（二审）：对独立求解结果再验一遍，修正错误答案
+export const SOLVE_REVIEW_SYSTEM_PROMPT = `你是一名资深高中物理阅卷组长，负责**复核**另一名老师给出的试卷标准答案。请你当作自己从没见过这份答案一样，逐题独立重算，再与给出的答案对照：
+1. 逐题独立重算（选择/填空/计算全部；多小问逐小问），然后与给出的「待复核答案」对照；
+2. 两者一致 → answer/keep 照抄；不一致 → 以你重算的结果为准修正（answer 给修正后的），changed=true 并在 reason 写明错在哪一步（如「动能比应为 k，原答案把质量比弄反」）；
+3. 计算题代数值时逐位复算；选择题注意单选唯一正确；填空注意有效数字与单位；
+4. 严禁把「待复核答案」当权威直接照抄——你必须真的重算；严禁试错/疑问等过程文字（solution 只给最终规范解答）；
+5. 严格输出 JSON，不要输出任何 JSON 以外的文字（不要 markdown 代码块标记）。
+
+输出 JSON 结构：
+{"items": [{"no": "1", "answer": "复核后的答案", "solution": "规范解析", "per_blank": [{"key": "(1)", "answer": "..."}], "changed": false, "reason": ""}], "note": ""}`
+
+export function solveReviewUserPrompt(p: { grade: string; questions: PaperExtractItem[]; solved: PaperSolvedItem[] }): string {
+  const q = p.questions.map((x) =>
+    `第${x.no}题（${x.qtype}）：${x.stem.slice(0, 280)}${x.options.length ? '\n  选项：' + x.options.join(' | ') : ''}${x.sub_questions.length ? '\n  小问：' + x.sub_questions.join(' ') : ''}`
+  ).join('\n')
+  const a = p.solved.map((s) => `第${s.no}题：答案=${s.answer}${s.per_blank.length ? `（逐空：${s.per_blank.map((b) => `${b.key}=${b.answer}`).join('，')}）` : ''}`).join('\n')
+  return `学生年级：${p.grade || '未知'}。
+原题题干：
+${q}
+
+待复核答案（另一名老师独立求解所得，可能有错）：
+${a}
+请逐题独立重算并复核，按约定 JSON 结构输出（items 与输入题号一一对应）。`
+}
+
 // 举一反三：同知识点变式题，难度 ±1 档
 export const VARIANT_SYSTEM_PROMPT = `你是一名高中物理命题专家。针对给定错题，出 2~3 道考查同一核心知识点（或近似知识点）的变式题：
 1. 变式题要改变情境/数据/设问角度，但考查本质相同；
@@ -444,19 +609,22 @@ ${FIGURE_TEMPLATE_DOCS}`
 
 // ---------- P1：AI 出题器 / 分层练习 / 家长阶段报告 ----------
 
-// 出题难度档 → 难度值区间（1~5）
+// 出题难度档 → 难度值区间（1~5）。C5：四档「基础 / 中档 / 稍难 / 压轴」（替换旧 基础/高考/竞赛）
 export const QUIZ_LEVELS = {
   '基础': [1, 2],
-  '高考': [3, 4],
-  '竞赛': [4, 5],
+  '中档': [3, 3],
+  '稍难': [4, 4],
+  '压轴': [5, 5],
 } as const
 export type QuizLevel = keyof typeof QUIZ_LEVELS
+// 旧档名兼容映射（历史脚本仍传 高考/竞赛）
+export const QUIZ_LEVEL_ALIASES: Record<string, QuizLevel> = { 高考: '中档', 竞赛: '压轴' }
 
 // AI 出题器（模仿 Eduaide Assessment Builder）：按知识点/题型/数量/难度档命题
 export const QUIZ_SYSTEM_PROMPT = `你是一名高中物理命题专家，正在为一线教师出练习题。
 要求：
 1. 每题紧扣给定的知识点与题型，情境真实、数据自洽、设问明确；
-2. 难度必须在指定档位区间内；答案必须物理正确、单位规范。难度定义：基础=单步代入或直接套公式（D1~2）；中档/高考=2~3 步综合计算（多对象或多过程，但套路常规，D3）；压轴/竞赛=3 步以上多过程综合、临界与图像分析或跨知识点拼合（D4~5）。压轴必须满足以下至少一条：跨章节知识综合、多对象耦合（如双星/板块/传送带两物体联动）、临界条件与图像叠加分析——单对象单章的常规多步计算（哪怕计算量较大）只能算中档 D3，严禁标为压轴；压轴题情境优先取「综合专题」类跨章综合；
+2. 难度必须在指定档位区间内；答案必须物理正确、单位规范。难度定义（C5 四档）：基础=单步代入或直接套公式（D1~2）；中档=2~3 步综合计算（多对象或多过程，但套路常规，D3）；稍难=含临界条件、图像分析、实验数据处理或双对象联动，步骤更多但主线单一（D4）；压轴=跨章节知识综合、多对象耦合（如双星/板块/传送带两物体联动）、多过程拼接（D5）。压轴必须满足以下至少一条：跨章节知识综合、多对象耦合、临界与图像叠加分析——单对象单章的常规多步计算（哪怕计算量较大）只能算中档 D3 或稍难 D4，严禁标为压轴；压轴题情境优先取「综合专题」类跨章综合；
 3. 每题必须附答案、详细解析（分步）、易错点提示；实验题必须按「实验目的 → 实验步骤（或装置与器材）→ 数据处理 → 误差分析」四段结构完整作答；
 4. 题干与解析中的公式用 LaTeX 语法（$...$ 包裹行内公式）；LaTeX 公式里的中文（含上下标，如物体甲的速度、电场力做的功）必须用 \text{} 包裹，写成 $v_{\text{甲}}$、$W_{\text{电}}$，严禁裸中文进数学模式；
 5. 选择题的选项写在题干内（A. B. C. D. 各占一行），答案写选项字母与理由；
@@ -474,13 +642,18 @@ export const QUIZ_SYSTEM_PROMPT = `你是一名高中物理命题专家，正在
 template 可选模板及 params 说明：
 ${FIGURE_TEMPLATE_DOCS}`
 
-export function quizUserPrompt(p: { kps: string[]; qtypes: string[]; count: number; level: QuizLevel; grade: string; hint?: string }): string {
+export function quizUserPrompt(p: { kps: string[]; qtypes: string[]; count: number; level: QuizLevel; grade: string; hint?: string; avoid?: string[]; seed?: string }): string {
   const [lo, hi] = QUIZ_LEVELS[p.level]
+  // C5 同参数去重：注入随机种子 + 上次题干摘要排除项，强制换情境/数值/设问
+  const avoidBlock = p.avoid && p.avoid.length
+    ? `\n- 避免重复：以下题目是刚刚生成过的（题干摘要），本次严禁再出与它们情境、数值或设问雷同的题，必须更换物理情境、更换数值、更换设问角度：\n${p.avoid.map((s, i) => `  ${i + 1}. ${s.slice(0, 80)}`).join('\n')}`
+    : ''
+  const seedBlock = p.seed ? `\n- 创作种子（本次命题多样性种子，用于启发不同的情境与数值组合）：${p.seed}` : ''
   return `请出 ${p.count} 道高中物理题：
 - 知识点：${p.kps.join('、')}
 - 题型：${p.qtypes.join('、')}（按题型分组输出：先输出全部选择题，再填空题、实验题，最后计算题；组内按难度从低到高）
 - 难度档：${p.level}（difficulty 取 ${lo}~${hi} 的整数）
-- 年级：${p.grade || '高一'}${p.hint ? `\n- 补充要求：${p.hint}` : ''}
+- 年级：${p.grade || '高一'}${seedBlock}${avoidBlock}${p.hint ? `\n- 补充要求：${p.hint}` : ''}
 请按约定 JSON 数组结构输出 ${p.count} 道题。`
 }
 
@@ -642,6 +815,123 @@ export function sanitizeLatexChinese(s: unknown): string {
   t = wrapChineseScript(t, '_')
   t = wrapChineseScript(t, '^')
   return t
+}
+
+// ---------- C1：裸 LaTeX 自动补定界（教案/分析文本中公式未包 $...$ 时按原文直出成乱码源码） ----------
+// 把「游离在数学定界符之外、但明显是 LaTeX/公式」的片段自动包上 $...$，
+// 使 KaTeX 渲染层（ Katex.tsx / texToMathml）对同一份文本口径一致。规则宁可少包不误包：
+//  - 只有出现 LaTeX 命令（\frac、\sqrt、\times…）或 ^/_ 上下标才算「公式信号」；
+//  - 从信号向两侧扩展数学字符（数字/字母/运算符/括号/空格），遇中文停（\text{...} 内除外）；
+//  - 行内 $ 个数为奇数（缺右定界）时把行尾悬空段补全。
+const KATEX_MATH_SEG = /\$\$[\s\S]+?\$\$|\\\[([\s\S]+?)\\\]|\$[^$\n]+?\$|\\\(([\s\S]+?)\\\)/g
+
+function isMathChar(c: string): boolean {
+  return /[A-Za-z0-9+\-*/×÷=·.,<>≤≥≠≈(){}\[\]^_\\°′″%'|~]/.test(c) || c === ' ' || c === '\t'
+}
+
+// 扩展一个公式片段：从种子区间向两侧扩展，返回 [start, end)
+function expandMathRun(line: string, seedStart: number, seedEnd: number): [number, number] {
+  let s = seedStart
+  let e = seedEnd
+  while (s > 0) {
+    const c = line[s - 1]
+    if (!isMathChar(c)) break
+    // \text{...} / \mathrm{...} 内的中文允许整体保留：命中 \text{ 时把 s 拉到该命令开头
+    const before = line.slice(Math.max(0, s - 6), s)
+    if (/\\(?:text|mathrm|mathbf|mbox)$/.test(before)) { s -= 6; continue }
+    s--
+  }
+  while (e < line.length) {
+    const c = line[e]
+    if (!isMathChar(c)) break
+    if (c === '\\') {
+      // \命令（如 \times、\text{中文}）整体吞入
+      const m = /^\\[a-zA-Z]+/.exec(line.slice(e))
+      if (m) { e += m[0].length; continue }
+      break
+    }
+    e++
+  }
+  // 去掉首尾悬空的空白与孤立运算符/逗号（如 "= "、"，"），避免包出空公式
+  const trimEnd = (str: string) => str.replace(/[\s.,=+×÷*/·\-]+$/, '')
+  const trimStart = (str: string) => str.replace(/^[\s.,=+×÷*/·\-]+/, '')
+  let txt = line.slice(s, e)
+  const cutL = txt.length - trimStart(txt).length
+  const cutR = txt.length - trimEnd(txt).length
+  s += cutL
+  e -= cutR
+  if (e <= s) return [seedStart, seedEnd]
+  return [s, e]
+}
+
+/** 把非数学段落中的裸 LaTeX 片段包上 $...$（已含定界符的段落原样保留） */
+export function wrapBareLatex(text: string): string {
+  const src = String(text ?? '')
+  // 含 $ 的文本也要进来（处理「缺右定界」）；完全无公式信号的才直接返回
+  if (!src || !/[\\^_$]/.test(src)) return src
+  const out: string[] = []
+  let last = 0
+  let m: RegExpExecArray | null
+  KATEX_MATH_SEG.lastIndex = 0
+  const processPlain = (plain: string) => {
+    // 逐行处理：行内公式很少跨行（$$ 块级已在切分时保护）
+    const lines = plain.split('\n').map((line) => {
+      // 缺失右 $ 的行（$ 数量为奇数）：把 $ 之后视为公式补右定界，公式主体截到第一个中文停
+      const dollars = (line.match(/\$/g) || []).length
+      let fixed = line
+      if (dollars % 2 === 1) {
+        fixed = line.replace(/\$([^$]*)$/, (_mm, inner: string) => {
+          const stop = inner.search(/[一-龥，。；：、（）]/)
+          return stop >= 0 ? `$${inner.slice(0, stop)}$${inner.slice(stop)}` : `$${inner}$`
+        })
+      }
+      if (!/[\\^_]/.test(fixed)) return fixed
+      // 收集公式信号种子
+      const seeds: Array<[number, number]> = []
+      for (const sm of fixed.matchAll(/\\[a-zA-Z]{2,}(?:\s*(?:\{[^{}]*\}|\[[^\[\]]*\]))*/g)) {
+        seeds.push([sm.index!, sm.index! + sm[0].length])
+      }
+      // ^ 上下标：变量/数字后接 ^（10^8、v^2 都是公式）
+      for (const sm of fixed.matchAll(/[A-Za-z0-9)\]]\s*\^\s*(?:\{[^{}\n]*\}|[-+\w一-龥.()]{1,12})/g)) {
+        seeds.push([sm.index!, sm.index! + sm[0].length])
+      }
+      // _ 下标：前面必须是字母/括号/右花括号（排除 2026_10_31.docx 这类文件名/日期的数字下划线）
+      for (const sm of fixed.matchAll(/[A-Za-z}\)]\s*_\s*(?:\{[^{}\n]*\}|[-+\w一-龥.()]{1,12})/g)) {
+        seeds.push([sm.index!, sm.index! + sm[0].length])
+      }
+      if (!seeds.length) return fixed
+      // 区间扩展 + 合并重叠
+      const runs = seeds.map(([a, b]) => expandMathRun(fixed, a, b)).sort((a, b) => a[0] - b[0])
+      const merged: Array<[number, number]> = []
+      for (const r of runs) {
+        const tail = merged[merged.length - 1]
+        if (tail && r[0] <= tail[1] + 1) tail[1] = Math.max(tail[1], r[1])
+        else merged.push([...r] as [number, number])
+      }
+      // 重组：区间之间夹的普通文字保留
+      let res = ''
+      let pos = 0
+      for (const [a, b] of merged) {
+        res += fixed.slice(pos, a) + '$' + fixed.slice(a, b) + '$'
+        pos = b
+      }
+      res += fixed.slice(pos)
+      return res
+    })
+    return lines.join('\n')
+  }
+  while ((m = KATEX_MATH_SEG.exec(src))) {
+    out.push(processPlain(src.slice(last, m.index)))
+    out.push(m[0])
+    last = m.index + m[0].length
+  }
+  out.push(processPlain(src.slice(last)))
+  return out.join('')
+}
+
+// C1 统一入口：清洗 AI 文本（字面 \n）→ 中文上下标包 \text{} → 裸 LaTeX 补 $ 定界
+export function sanitizeMathText(s: unknown): string {
+  return wrapBareLatex(sanitizeLatexChinese(sanitizeAiText(s)))
 }
 
 // ---------- 数值机器复核（验收 #12 根因修法：通用表达式求值） ----------

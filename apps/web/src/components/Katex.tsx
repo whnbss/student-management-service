@@ -1,7 +1,9 @@
 // LaTeX 公式渲染组件：支持 $...$ 行内、$$...$$ 块级、\(...\) 与 \[...\]
+// C1：渲染前对未包定界符的裸 LaTeX（\frac、^、_ 等）自动补 $...$，杜绝公式源码直出
 import { useMemo } from 'react'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
+import { wrapBareLatex } from '@workbench/shared'
 
 function render(tex: string, displayMode: boolean): string {
   try {
@@ -15,8 +17,9 @@ function render(tex: string, displayMode: boolean): string {
 export default function Katex({ text, className = '' }: { text: string; className?: string }) {
   const html = useMemo(() => {
     if (!text) return ''
-    // \[...\] 块级定界符先归一为 $$...$$（题库解析中使用 \[ \] 分行推导块时同样正确渲染）
-    const src = String(text).replace(/\\\[([\s\S]+?)\\\]/g, (_m, inner) => `$$${inner}$$`)
+    // C1：先把裸 LaTeX 片段补上 $...$ 定界（已含定界符的段落原样保留）
+    // \[...\] 块级定界符再归一为 $$...$$（题库解析中使用 \[ \] 分行推导块时同样正确渲染）
+    const src = wrapBareLatex(String(text)).replace(/\\\[([\s\S]+?)\\\]/g, (_m, inner) => `$$${inner}$$`)
     const parts: string[] = []
     // 先按 $$ 块级切，再按 $ 或 \( \) 行内切
     const blockRe = /\$\$([\s\S]+?)\$\$/g

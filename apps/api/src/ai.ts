@@ -11,7 +11,15 @@ import {
   REVIEW_SYSTEM_PROMPT, reviewUserPrompt,
   FIX_SYSTEM_PROMPT, fixUserPrompt,
   LESSON_DIAGNOSE_SYSTEM_PROMPT, LESSON_PLAN_SYSTEM_PROMPT,
-  sanitizeAiText, sanitizeLatexChinese, FIGURE_TEMPLATES,
+  PAPER_EXTRACT_SYSTEM_PROMPT, paperExtractUserPrompt,
+  PAPER_SOLVE_SYSTEM_PROMPT, paperSolveUserPrompt,
+  SHEET_READ_SYSTEM_PROMPT, sheetReadUserPrompt,
+  COMPARE_SYSTEM_PROMPT, compareUserPrompt,
+  SOLVE_REVIEW_SYSTEM_PROMPT, solveReviewUserPrompt,
+  sanitizeAiText, sanitizeLatexChinese, sanitizeMathText, FIGURE_TEMPLATES,
+} from '@workbench/shared'
+import type {
+  PaperExtractItem, PaperSolvedItem, SheetReadItem, SubAnswer,
 } from '@workbench/shared'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -164,8 +172,9 @@ export async function chat(provider: AiProvider, opts: ChatOptions): Promise<Cha
     { role: 'user', content },
   ]
 
-  // 统一超时：部分网关对大请求会长时间挂起（或 504），必须设上限，否则前端一直「分析中」
-  const TIMEOUT_MS = 180_000
+  // 统一超时：部分网关对大请求会长时间挂起（或 504），必须设上限，否则前端一直「分析中」；
+  // C2：求解/复核用 pro 级模型时整卷长输出可能 >3 分钟，放宽到 4 分钟
+  const TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS) || 240_000
 
   const doFetch = (url: string, stream: boolean, withThinking = true) =>
     undiciFetch(url, {
@@ -310,6 +319,17 @@ function validateAnalysis(obj: any): AiAnalysisResult {
           reference_answer: sanitizeLatexChinese(sanitizeAiText(it?.reference_answer)).trim(),
           figure_spec: sanitizeFigureSpec(it?.figure_spec),
           figure_status: it?.figure_status === '图待补' ? '图待补' : it?.figure_status === '已重绘' ? '已重绘' : '',
+          // ---- C2 两阶段批改：学生实际作答与逐小问判定 ----
+          student_answer: sanitizeLatexChinese(sanitizeAiText(it?.student_answer)).trim(),
+          sub_answers: Array.isArray(it?.sub_answers)
+            ? (it.sub_answers as any[]).map((sa: any) => ({
+                key: String(sa?.key || '').trim(),
+                verdict: ['对', '错', '部分对', '未作答', '无法识别'].includes(sa?.verdict) ? sa.verdict : '无法识别',
+                student: sanitizeLatexChinese(sanitizeAiText(sa?.student)).trim(),
+                correct: sanitizeLatexChinese(sanitizeAiText(sa?.correct)).trim(),
+                note: sanitizeAiText(sa?.note || '').trim(),
+              })).filter((sa: SubAnswer) => sa.key)
+            : [],
         }))
       : [],
     weak_points: Array.isArray(obj.weak_points)
@@ -408,9 +428,10 @@ export function validateQuizDrafts(arr: any, max = 30): QuizDraft[] {
 }
 
 // AI 出题器：按知识点/题型/数量/难度档命题，返回草稿（教师编辑确认后才入库）
+// C5：avoid=上次题干摘要（排除重复用），seed=多样性种子
 export async function generateQuiz(
   provider: AiProvider,
-  p: { kps: string[]; qtypes: string[]; count: number; level: QuizLevel; grade: string; hint?: string }
+  p: { kps: string[]; qtypes: string[]; count: number; level: QuizLevel; grade: string; hint?: string; avoid?: string[]; seed?: string }
 ): Promise<{ result: QuizDraft[]; usage: ReturnType<typeof recordUsage> }> {
   return chatJson(
     provider,
@@ -562,6 +583,190 @@ export async function analyzePaper(
   )
 }
 
+// ---------- 业务（C2）：两阶段批改流水线 ----------
+// ① 试卷页视觉转录原题 → ② 文本独立求解标准答案 → ③ 答题卡视觉读取学生作答 → ④ 文本逐题比对判定
+// 每步独立校验 + 失败重试（chatJson 内建 3 次尝试），红叉只作比对校验线索，严禁直接当结论
+
+type UsageAcc = { prompt_tokens: number; completion_tokens: number; cost: number }
+function addUsage(acc: UsageAcc, u: ReturnType<typeof recordUsage>) {
+  acc.prompt_tokens += u.prompt_tokens || 0
+  acc.completion_tokens += u.completion_tokens || 0
+  acc.cost += u.cost || 0
+}
+
+function validatePaperExtract(obj: any): { paper_name: string; items: PaperExtractItem[]; unrecognized: string[] } {
+  if (!obj || typeof obj !== 'object') throw new Error('试卷转录结果不是对象')
+  const items = Array.isArray(obj.items) ? obj.items : []
+  if (!items.length) throw new Error('试卷转录没有识别到任何题目')
+  return {
+    paper_name: sanitizeAiText(obj.paper_name || '').trim(),
+    items: items.map((it: any, i: number) => ({
+      no: sanitizeAiText(String(it?.no ?? i + 1)).trim(),
+      qtype: ['选择', '填空', '实验', '计算'].includes(it?.qtype) ? it.qtype : '计算',
+      stem: sanitizeLatexChinese(sanitizeAiText(it?.stem || '')).trim(),
+      options: txtArr(it?.options),
+      sub_questions: txtArr(it?.sub_questions),
+      has_figure: !!it?.has_figure,
+      figure_note: sanitizeAiText(it?.figure_note || '').trim(),
+    })).filter((q: PaperExtractItem) => q.stem),
+    unrecognized: txtArr(obj?.unrecognized),
+  }
+}
+
+export async function extractPaperQuestions(
+  provider: AiProvider,
+  images: string[],
+  meta: { grade: string }
+): Promise<{ result: { paper_name: string; items: PaperExtractItem[]; unrecognized: string[] }; usage: ReturnType<typeof recordUsage> }> {
+  if (!images.length) throw new Error('没有试卷页图片')
+  return chatJson(
+    provider,
+    {
+      model: provider.vision_model || provider.text_model,
+      system: PAPER_EXTRACT_SYSTEM_PROMPT,
+      user: paperExtractUserPrompt(meta.grade, images.length),
+      images,
+      temperature: 0.1,
+    },
+    validatePaperExtract,
+    'paper-extract'
+  )
+}
+
+function validateSolve(obj: any): { items: PaperSolvedItem[]; note: string } {
+  if (!obj || !Array.isArray(obj.items) || !obj.items.length) throw new Error('独立求解结果没有题目')
+  return {
+    items: obj.items.map((it: any, i: number) => ({
+      no: sanitizeAiText(String(it?.no ?? i + 1)).trim(),
+      answer: sanitizeLatexChinese(sanitizeAiText(it?.answer || '')).trim(),
+      solution: sanitizeLatexChinese(sanitizeAiText(it?.solution || '')).trim(),
+      per_blank: Array.isArray(it?.per_blank)
+        ? it.per_blank.map((b: any) => ({ key: String(b?.key || '').trim(), answer: sanitizeLatexChinese(sanitizeAiText(b?.answer || '')).trim() })).filter((b: any) => b.key)
+        : [],
+    })),
+    note: sanitizeAiText(obj.note || '').trim(),
+  }
+}
+
+// 独立求解：模型求解整卷（不依赖学生作答）。带试卷页原图 —— 纸带读数/电路/图像类题必须看图才能算对
+export async function solvePaper(
+  provider: AiProvider,
+  p: { grade: string; questions: PaperExtractItem[]; images?: string[] }
+): Promise<{ result: { items: PaperSolvedItem[]; note: string }; usage: ReturnType<typeof recordUsage> }> {
+  if (!p.questions.length) throw new Error('没有可求解的题目')
+  return chatJson(
+    provider,
+    {
+      model: provider.text_model || provider.vision_model,
+      system: PAPER_SOLVE_SYSTEM_PROMPT,
+      user: paperSolveUserPrompt(p.grade, p.questions),
+      images: p.images || [],
+      temperature: 0.2,
+    },
+    validateSolve,
+    'paper-solve'
+  )
+}
+
+function validateSheetRead(obj: any): { items: SheetReadItem[]; unrecognized: string[] } {
+  if (!obj || !Array.isArray(obj.items) || !obj.items.length) throw new Error('答题卡读取没有识别到任何作答')
+  return {
+    items: obj.items.map((it: any, i: number) => ({
+      no: sanitizeAiText(String(it?.no ?? i + 1)).trim(),
+      student_answer: sanitizeLatexChinese(sanitizeAiText(it?.student_answer || '')).trim(),
+      per_blank: Array.isArray(it?.per_blank)
+        ? it.per_blank.map((b: any) => ({ key: String(b?.key || '').trim(), answer: sanitizeLatexChinese(sanitizeAiText(b?.answer || '')).trim() })).filter((b: any) => b.key)
+        : [],
+      red_x: !!it?.red_x,
+      mark_note: sanitizeAiText(it?.mark_note || '').trim(),
+      handwritten_note: sanitizeLatexChinese(sanitizeAiText(it?.handwritten_note || '')).trim(),
+    })),
+    unrecognized: txtArr(obj?.unrecognized),
+  }
+}
+
+// 标准答案交叉复核（二审）：独立重算并修正求解结果；复核失败不阻塞（降级用原解）
+export async function reviewSolve(
+  provider: AiProvider,
+  p: { grade: string; questions: PaperExtractItem[]; solved: PaperSolvedItem[] }
+): Promise<{ result: { items: Array<PaperSolvedItem & { changed?: boolean; reason?: string }>; note: string }; usage: ReturnType<typeof recordUsage> }> {
+  const validate = (obj: any) => {
+    const base = validateSolve(obj)
+    const items = base.items.map((it, i) => {
+      const orig = obj.items?.[i] || {}
+      return { ...it, changed: !!orig?.changed, reason: sanitizeAiText(orig?.reason || '').trim().slice(0, 200) }
+    })
+    return { items, note: base.note }
+  }
+  return chatJson(
+    provider,
+    {
+      model: provider.text_model || provider.vision_model,
+      system: SOLVE_REVIEW_SYSTEM_PROMPT,
+      user: solveReviewUserPrompt(p),
+      temperature: 0.2,
+    },
+    validate,
+    'solve-review'
+  )
+}
+
+// 读取答题卡：学生实际作答 + 红叉线索
+export async function readAnswerSheet(
+  provider: AiProvider,
+  images: string[],
+  meta: { grade: string }
+): Promise<{ result: { items: SheetReadItem[]; unrecognized: string[] }; usage: ReturnType<typeof recordUsage> }> {
+  if (!images.length) throw new Error('没有答题卡图片')
+  return chatJson(
+    provider,
+    {
+      model: provider.vision_model || provider.text_model,
+      system: SHEET_READ_SYSTEM_PROMPT,
+      user: sheetReadUserPrompt(meta.grade, images.length),
+      images,
+      temperature: 0.1,
+    },
+    validateSheetRead,
+    'sheet-read'
+  )
+}
+
+// 逐题比对判定：输出与单阶段分析同构的 AiAnalysisResult（教师编辑页/入库逻辑零改动复用）
+export async function compareAndJudge(
+  provider: AiProvider,
+  p: {
+    grade: string
+    hasSheet: boolean
+    questions: PaperExtractItem[]
+    solved: PaperSolvedItem[]
+    sheet: SheetReadItem[]
+    extraNote?: string
+    images: string[] // 原题配图重绘需要看卷面时用（试卷页）
+  }
+): Promise<{ result: AiAnalysisResult; usage: ReturnType<typeof recordUsage> }> {
+  return chatJson(
+    provider,
+    {
+      model: provider.vision_model || provider.text_model,
+      system: COMPARE_SYSTEM_PROMPT,
+      user: compareUserPrompt({
+        grade: p.grade,
+        hasSheet: p.hasSheet,
+        questions: p.questions,
+        solved: p.solved,
+        sheet: p.sheet,
+        extraNote: p.extraNote,
+      }),
+      // 比对阶段带上试卷页原图：模型可核对图题（figure_spec 重绘）与题干转录
+      images: p.images.slice(0, 9),
+      temperature: 0.1,
+    },
+    validateAnalysis,
+    'compare-judge'
+  )
+}
+
 // ---------- 业务：错题举一反三 ----------
 export async function generateVariants(
   provider: AiProvider,
@@ -595,14 +800,14 @@ function validateDiagnosis(obj: any): LessonDiagnosis {
     items: items.map((it: any, i: number) => ({
       no: sanitizeAiText(String(it?.no ?? i + 1)).trim(),
       qtype: it?.qtype === '选择' ? '选择' : '非选择',
-      stem: sanitizeLatexChinese(sanitizeAiText(it?.stem || '')).trim(),
-      options: txtArr(it?.options),
+      stem: sanitizeMathText(it?.stem || '').trim(),
+      options: (txtArr(it?.options) as string[]).map(sanitizeMathText),
       context: sanitizeAiText(it?.context || '').trim(),
       kp: sanitizeAiText(it?.kp || '').trim(),
-      student_answer: sanitizeAiText(it?.student_answer || '').trim(),
-      correct_answer: sanitizeLatexChinese(sanitizeAiText(it?.correct_answer || '')).trim(),
-      solution: sanitizeLatexChinese(sanitizeAiText(it?.solution || '')).trim(),
-      gap: sanitizeAiText(it?.gap || '').trim(),
+      student_answer: sanitizeMathText(it?.student_answer || '').trim(),
+      correct_answer: sanitizeMathText(it?.correct_answer || '').trim(),
+      solution: sanitizeMathText(it?.solution || '').trim(),
+      gap: sanitizeMathText(it?.gap || '').trim(),
     })),
     note: sanitizeAiText(obj.note || '').trim(),
   }
@@ -612,48 +817,50 @@ function validateLessonPlan(obj: any): LessonPlan {
   if (!obj || typeof obj !== 'object') throw new Error('教案结果不是对象')
   const cover = obj.cover || {}
   const ov = obj.overview || {}
+  // C1：教案全部文本统一走 sanitizeMathText（字面 \n 清洗 + 中文上下标包 \text{} + 裸 LaTeX 补 $ 定界），
+  // 保证页面与打印里公式一律 KaTeX/MathML 渲染，不出现 \(、$、\frac 源码直出
   const table = (arr: any) =>
     (Array.isArray(arr) ? arr : []).map((r: any) => ({
-      no: sanitizeAiText(r?.no || ''),
-      context: sanitizeAiText(r?.context || ''),
-      kp: sanitizeAiText(r?.kp || ''),
-      answer: sanitizeLatexChinese(sanitizeAiText(r?.answer || '')),
-      correct: sanitizeLatexChinese(sanitizeAiText(r?.correct || '')),
-      gap: sanitizeAiText(r?.gap || ''),
+      no: sanitizeMathText(r?.no || ''),
+      context: sanitizeMathText(r?.context || ''),
+      kp: sanitizeMathText(r?.kp || ''),
+      answer: sanitizeMathText(r?.answer || ''),
+      correct: sanitizeMathText(r?.correct || ''),
+      gap: sanitizeMathText(r?.gap || ''),
     })).filter((r: any) => r.no)
   const frameworks = (Array.isArray(obj.frameworks) ? obj.frameworks : []).map((f: any) => ({
-    title: sanitizeAiText(f?.title || '').trim(),
-    targets: sanitizeAiText(f?.targets || '').trim(),
-    priority: sanitizeAiText(f?.priority || '').trim(),
-    content: txtArr(f?.content),
-    self_check: txtArr(f?.self_check),
+    title: sanitizeMathText(f?.title || '').trim(),
+    targets: sanitizeMathText(f?.targets || '').trim(),
+    priority: sanitizeMathText(f?.priority || '').trim(),
+    content: (txtArr(f?.content) as string[]).map(sanitizeMathText),
+    self_check: (txtArr(f?.self_check) as string[]).map(sanitizeMathText),
   })).filter((f: any) => f.title && f.content.length)
   const variants = (Array.isArray(obj.variants) ? obj.variants : []).map((v: any) => ({
-    ref: sanitizeAiText(v?.ref || '').trim(),
-    topic: sanitizeAiText(v?.topic || '').trim(),
-    stem: sanitizeLatexChinese(sanitizeAiText(v?.stem || '')).trim(),
-    solution: sanitizeLatexChinese(sanitizeAiText(v?.solution || '')).trim(),
-    insight: sanitizeAiText(v?.insight || '').trim(),
+    ref: sanitizeMathText(v?.ref || '').trim(),
+    topic: sanitizeMathText(v?.topic || '').trim(),
+    stem: sanitizeMathText(v?.stem || '').trim(),
+    solution: sanitizeMathText(v?.solution || '').trim(),
+    insight: sanitizeMathText(v?.insight || '').trim(),
   })).filter((v: any) => v.stem)
   const hw = obj.homework || {}
   const plan: LessonPlan = {
     cover: {
-      title: sanitizeAiText(cover.title || '').trim() || '物理错题讲义',
-      subtitle: sanitizeAiText(cover.subtitle || '').trim(),
-      source: sanitizeAiText(cover.source || '').trim(),
-      time: sanitizeAiText(cover.time || '').trim(),
-      composition: sanitizeAiText(cover.composition || '').trim(),
+      title: sanitizeMathText(cover.title || '').trim() || '物理错题讲义',
+      subtitle: sanitizeMathText(cover.subtitle || '').trim(),
+      source: sanitizeMathText(cover.source || '').trim(),
+      time: sanitizeMathText(cover.time || '').trim(),
+      composition: sanitizeMathText(cover.composition || '').trim(),
     },
     overview: {
-      text: sanitizeAiText(ov.text || '').trim(),
+      text: sanitizeMathText(ov.text || '').trim(),
       choice_table: table(ov.choice_table),
       nonchoice_table: table(ov.nonchoice_table),
-      mainlines: txtArr(ov.mainlines),
-      strengths: sanitizeAiText(ov.strengths || '').trim(),
+      mainlines: (txtArr(ov.mainlines) as string[]).map(sanitizeMathText),
+      strengths: sanitizeMathText(ov.strengths || '').trim(),
     },
     frameworks,
     variants,
-    homework: { text: sanitizeAiText(hw?.text || '').trim(), items: txtArr(hw?.items) },
+    homework: { text: sanitizeMathText(hw?.text || '').trim(), items: (txtArr(hw?.items) as string[]).map(sanitizeMathText) },
   }
   // 结构底线：诊断表与变式题是讲义的灵魂，缺失即失败（触发重试）
   if (!plan.overview.choice_table.length && !plan.overview.nonchoice_table.length) throw new Error('教案缺少失分诊断表')

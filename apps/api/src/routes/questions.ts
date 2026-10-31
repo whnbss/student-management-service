@@ -3,7 +3,7 @@
 import type { FastifyInstance } from 'fastify'
 import { db, nowISO, remainingHours } from '../db'
 import { pickProvider, generateQuiz, generateTiered, generateParentReport, validateQuizDrafts, reviewQuizDrafts, fixQuizDraft } from '../ai'
-import { sanitizeAiText, sanitizeLatexChinese, mergeSectionKps, daysAgo, checkSolutionArithmetic, checkAnswerTraceable, mentionsFigureStem, requiresFigure } from '@workbench/shared'
+import { sanitizeAiText, sanitizeLatexChinese, mergeSectionKps, daysAgo, checkSolutionArithmetic, checkAnswerTraceable, mentionsFigureStem, requiresFigure, QUIZ_LEVEL_ALIASES } from '@workbench/shared'
 import type { QuizDraft, QuizLevel, QuizReview } from '@workbench/shared'
 
 function kpOf(raw: string): string[] {
@@ -263,14 +263,20 @@ export default async function questionRoutes(app: FastifyInstance) {
   // ---------- AI 出题器：生成草稿 + 自动二审（不入库，前端确认后走 bulk） ----------
   // 出题按题型分批：按「选择→填空→实验→计算」固定顺序逐题型单独生成，保证输出顺序与试卷大题一致（双保险之一，前端另有稳定排序兜底）
   app.post('/api/quiz/generate', async (req, reply) => {
-    const b = (req.body || {}) as { kps?: unknown; qtypes?: unknown; count?: unknown; level?: unknown; grade?: unknown; hint?: unknown }
+    const b = (req.body || {}) as { kps?: unknown; qtypes?: unknown; count?: unknown; level?: unknown; grade?: unknown; hint?: unknown; avoid_stems?: unknown }
     const kps = Array.isArray(b.kps) ? b.kps.map(String).map((s) => s.trim()).filter(Boolean) : []
     if (!kps.length) { reply.code(400).send({ error: '请至少填写一个知识点' }); return }
     const qtypes = Array.isArray(b.qtypes) && b.qtypes.length ? b.qtypes.map(String) : ['计算']
     // 题量放宽为 1~20（界面仍提供 5/10/20 档，脚本按题型配比精确补题时可用任意数量）
     const rawCount = Number(b.count)
     const count = Number.isFinite(rawCount) ? Math.min(20, Math.max(1, Math.round(rawCount))) : 5
-    const level: QuizLevel = (['基础', '高考', '竞赛'] as const).includes(b.level as any) ? (b.level as QuizLevel) : '高考'
+    // C5：难度四档 基础/中档/稍难/压轴；旧档名（高考/竞赛）经别名映射保持兼容
+    const levelKey = String(b.level || '中档')
+    const level: QuizLevel = (levelKey in QUIZ_LEVEL_ALIASES ? QUIZ_LEVEL_ALIASES[levelKey] : (['基础', '中档', '稍难', '压轴'] as const).includes(levelKey as any) ? (levelKey as QuizLevel) : '中档')
+    // C5 同参数去重：前端传入上次生成的题干摘要（最多 30 条，各截前 80 字）
+    const avoidStems = Array.isArray(b.avoid_stems)
+      ? b.avoid_stems.map(String).map((s) => s.trim()).filter(Boolean).slice(0, 30)
+      : []
     const provider = pickProvider('text')
     if (!provider) { reply.code(400).send({ error: '尚未配置 AI 供应商 API Key，请到「我的 → AI 配置」填写' }); return }
     try {
@@ -280,13 +286,50 @@ export default async function questionRoutes(app: FastifyInstance) {
       let prompt_tokens = 0
       let completion_tokens = 0
       let cost = 0
+      // C5：多样性种子（每次调用随机，同参数再次生成不再产出相同题）
+      const seed = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       for (const { qtype, n } of batches) {
-        const { result: qs, usage } = await generateQuiz(provider, { kps, qtypes: [qtype], count: n, level, grade: String(b.grade || ''), hint: typeof b.hint === 'string' ? b.hint.slice(0, 500) : undefined })
+        const { result: qs, usage } = await generateQuiz(provider, {
+          kps, qtypes: [qtype], count: n, level, grade: String(b.grade || ''),
+          hint: typeof b.hint === 'string' ? b.hint.slice(0, 500) : undefined,
+          avoid: avoidStems.length ? avoidStems.map((s) => s.slice(0, 80)) : undefined,
+          seed,
+        })
         // 强制落本批题型（防止模型返回的 qtype 与批次不符），并把传入的节名原文注入知识点
         result.push(...qs.map((q) => ({ ...q, qtype, knowledge_points: mergeSectionKps(kps, q.knowledge_points) })))
         prompt_tokens += usage.prompt_tokens || 0
         completion_tokens += usage.completion_tokens || 0
         cost += usage.cost || 0
+      }
+      // C5 相似度去重（后端硬兜底）：与排除项/批内其它题做字符 3-gram Jaccard 相似度，
+      // ≥ 0.5 视为高度雷同 → 直接移除（附说明），保证「同参数再次生成必须出新题」
+      const dropSimilar = (drafts: QuizDraft[]): Array<{ q: QuizDraft; why: string }> => {
+        if (!avoidStems.length && drafts.length < 2) return []
+        const norm = (s: string) => s.replace(/[\s\\$，。、：；！？（）()【】\[\]{}"'’“]/g, '').slice(0, 200)
+        const grams = (s: string) => {
+          const t = norm(s)
+          const out = new Set<string>()
+          for (let i = 0; i < t.length - 2; i++) out.add(t.slice(i, i + 3))
+          return out
+        }
+        const jac = (a: Set<string>, b: Set<string>) => {
+          if (!a.size || !b.size) return 0
+          let inter = 0
+          for (const g of a) if (b.has(g)) inter++
+          return inter / (a.size + b.size - inter)
+        }
+        const avoidGrams = avoidStems.map(grams)
+        const kept: QuizDraft[] = []
+        const dropped: Array<{ q: QuizDraft; why: string }> = []
+        for (const q of drafts) {
+          const g = grams(q.stem)
+          const hitAvoid = avoidGrams.findIndex((ag) => jac(g, ag) >= 0.5)
+          if (hitAvoid >= 0) { dropped.push({ q, why: `与上次生成的题干高度雷同（已按去重规则移除：${avoidStems[hitAvoid].slice(0, 40)}…）` }); continue }
+          const hitBatch = kept.findIndex((k) => jac(g, grams(k.stem)) >= 0.6)
+          if (hitBatch >= 0) { dropped.push({ q, why: `与本批第 ${hitBatch + 1} 题高度雷同（已按去重规则移除）` }); continue }
+          kept.push(q)
+        }
+        return dropped
       }
       const usage = { prompt_tokens, completion_tokens, cost }
       // 自动二审：逐题挑错（数值自洽/情境几何/超纲/解析含试错/缺图）。二审失败不阻塞出题，降级为无审查结果
@@ -302,10 +345,15 @@ export default async function questionRoutes(app: FastifyInstance) {
       // 终稿闭环（用户验收口径）：草稿列表不允许出现「未解决」状态——
       // 二审/机器校验未过的题自动修复（2 次）→ 重生成（1 次）→ 仍失败弃置并计数；
       // 「如图」无图、答案与解析脱节都在机器硬校验里拦截
-      const { finals, discarded } = await closeTheLoop(provider, result, aiReview, {
+      const { finals: closed, discarded } = await closeTheLoop(provider, result, aiReview, {
         kps, level, grade: String(b.grade || ''), hint: typeof b.hint === 'string' ? b.hint.slice(0, 500) : undefined,
       })
       if (discarded.length) console.log(`[quiz] 终稿闭环弃置 ${discarded.length} 题:`, discarded.map((d) => d.reason).join(' | '))
+      // C5：终稿相似度去重（对修复/重生成后的终稿再兜底一次）
+      const simDropped = dropSimilar(closed)
+      const finals = closed.filter((q) => !simDropped.some((d) => d.q === q))
+      for (const d of simDropped) discarded.push({ reason: d.why })
+      if (simDropped.length) console.log(`[quiz] 相似度去重移除 ${simDropped.length} 题`)
       // review 字段保留兼容（backfill 脚本按 review.pass 过滤）：终稿全部通过硬校验
       const review: QuizReview[] = finals.map(() => ({ pass: true, issues: [], fixed: null }))
       return { ok: true, questions: finals, usage, review, review_usage, discarded }

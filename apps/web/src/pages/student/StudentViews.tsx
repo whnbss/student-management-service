@@ -1,9 +1,9 @@
 // 学生工作台三个视图：我的错题（重做）/ 我的课时 / 我的报告（只读）
 import { useCallback, useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { ChevronDown, CircleCheck } from 'lucide-react'
+import { ChevronDown, CircleCheck, FileText as FileTextIcon } from 'lucide-react'
 import { get, post } from '@/lib/api'
-import { useToastStore } from '@/stores/auth'
+import { useAuthStore, useToastStore } from '@/stores/auth'
 import Katex from '@/components/Katex'
 import QuestionFigure from '@/components/QuestionFigure'
 import { KpChips } from '@/components/Kp'
@@ -235,17 +235,57 @@ export function StudentReports() {
   const show = useToastStore((s) => s.show)
   const [rows, setRows] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  // C4：老师讲义（学生只能看到并下载自己的）
+  const [files, setFiles] = useState<any[]>([])
+  const token = useAuthStore((s) => s.token)
 
   useEffect(() => {
     get<any[]>('/api/student/reports')
       .then(setRows)
       .catch((e) => show(e.message || '加载失败'))
       .finally(() => setLoading(false))
+    get<any[]>('/api/student/report-files').then(setFiles).catch(() => { /* 无讲义静默 */ })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 讲义下载：带 token 取 blob → 临时链接下载（<a> 无法带 Authorization 头）
+  const downloadFile = async (f: any) => {
+    try {
+      const res = await fetch(f.path + `?token=${encodeURIComponent(token || '')}`)
+      if (!res.ok) throw new Error(res.status === 403 ? '无权限访问该讲义' : '下载失败')
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = f.filename || f.title || '讲义'
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e: any) {
+      show(e.message || '下载失败')
+    }
+  }
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">我的报告</h1>
+      {/* C4：老师讲义（docx/pdf 等，点击下载打开） */}
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold text-slate-500 px-1">老师讲义{files.length > 0 && `（${files.length}）`}</h2>
+        {files.length === 0 ? (
+          <div className="card p-4 text-center text-xs text-slate-400">老师还没有上传讲义</div>
+        ) : (
+          files.map((f) => (
+            <div key={f.id} className="card p-4 flex items-center gap-3">
+              <FileTextIcon className="w-5 h-5 text-primary-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{f.title}</p>
+                <p className="text-[11px] text-slate-400 num">{String(f.created_at).slice(0, 10)} · {f.filename}{f.size ? ` · ${(f.size / 1024).toFixed(0)} KB` : ''}</p>
+              </div>
+              <button className="btn-outline !px-3 !py-1.5 text-xs shrink-0" onClick={() => downloadFile(f)}>下载打开</button>
+            </div>
+          ))
+        )}
+      </section>
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold text-slate-500 px-1">阶段报告</h2>
       {loading ? (
         <div className="card p-8 animate-pulse"><div className="h-16 bg-slate-200 dark:bg-slate-800 rounded-xl" /></div>
       ) : rows.length === 0 ? (
@@ -293,6 +333,7 @@ export function StudentReports() {
           </div>
         ))
       )}
+      </section>
     </div>
   )
 }
@@ -304,7 +345,7 @@ function kpOf(m: Mistake): string[] {
 }
 
 // ---------------- 我的学情日志（老师记录的上课/作业流水，学生只读） ----------------
-interface StudentLog { id: number; date: string; type: string; content: string; images: string; next_class_key: string; created_at: string }
+interface StudentLog { id: number; date: string; type: string; content: string; images: string; next_class_key: string; homework: string; created_at: string }
 
 const LOG_TYPE_COLOR: Record<string, string> = {
   '上课': 'bg-primary-100 text-primary-600 dark:bg-primary-900/40 dark:text-primary-300',
@@ -355,6 +396,12 @@ export function StudentLogs() {
             {r.next_class_key && (
               <div className="rounded-xl px-3 py-2 text-xs bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300">
                 下次课重点：{r.next_class_key}
+              </div>
+            )}
+            {/* C3：老师布置的下次课作业（填了才显示） */}
+            {r.homework && (
+              <div className="rounded-xl px-3 py-2 text-xs bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300">
+                📝 下次课作业布置：{r.homework}
               </div>
             )}
           </div>

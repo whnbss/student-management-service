@@ -1,9 +1,10 @@
 // P1 内容生产组件：分层练习生成（模仿 Brisk Change Level）+ 家长阶段报告（模仿 MagicSchool Report Card）
 // 两者都走既有 AI 管线（/api/practice/tiered、/api/reports/parent），结果先草稿、教师终审后使用
-import { useState } from 'react'
-import {Printer, ClipboardCopy, Sprout, Wrench, CalendarDays, MessageCircle, Link2} from 'lucide-react'
-import { get, post } from '@/lib/api'
-import { useToastStore } from '@/stores/auth'
+// C4：报告弹层内置「老师讲义」上传/管理（docx/pdf 等，学生端「报告」Tab 可下载自己的）
+import { useCallback, useEffect, useState } from 'react'
+import {Printer, ClipboardCopy, Sprout, Wrench, CalendarDays, MessageCircle, Link2, Upload, Trash2, FileText} from 'lucide-react'
+import { get, post, del } from '@/lib/api'
+import { useAuthStore, useToastStore } from '@/stores/auth'
 import Katex from '@/components/Katex'
 import QuestionFigure from '@/components/QuestionFigure'
 import { printHtml, questionPrintHtml } from '@/lib/print'
@@ -192,6 +193,45 @@ export function ParentReportModal({ student, onClose }: { student: Student; onCl
   const [sharing, setSharing] = useState(false)
   const [shareUrl, setShareUrl] = useState('')
   const [expiresAt, setExpiresAt] = useState('')
+  // C4：老师讲义（docx/pdf 等，学生端「报告」Tab 只见自己的）
+  const [fileList, setFileList] = useState<Array<{ id: number; title: string; filename: string; path: string; size: number; created_at: string }>>([])
+  const [uploading, setUploading] = useState(false)
+
+  const loadFiles = useCallback(async () => {
+    try { setFileList(await get<any[]>(`/api/students/${student.id}/report-files`)) } catch { /* 静默 */ }
+  }, [student.id])
+  useEffect(() => { loadFiles() }, [loadFiles])
+
+  const uploadHandout = async (f: File) => {
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', f)
+      fd.append('title', f.name.replace(/\.[^.]+$/, ''))
+      const res = await fetch(`/api/students/${student.id}/report-files`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${useAuthStore.getState().token}` },
+        body: fd,
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.ok) throw new Error(data?.error || '上传失败')
+      show('讲义已上传，学生端「报告」Tab 可见')
+      loadFiles()
+    } catch (e: any) {
+      show(e.message || '上传失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const removeHandout = async (id: number) => {
+    if (!confirm('确定删除这份讲义？学生端将不再可见')) return
+    try {
+      await del(`/api/report-files/${id}`)
+      show('已删除')
+      loadFiles()
+    } catch (e: any) { show(e.message || '删除失败') }
+  }
 
   const applyPreset = (p: '2w' | '1m' | 'custom') => {
     setPreset(p)
@@ -284,6 +324,41 @@ export function ParentReportModal({ student, onClose }: { student: Student; onCl
 
   return (
     <ModalShell title="生成阶段报告（家长版）" onClose={onClose}>
+      {/* C4：老师讲义上传与管理（与报告生成相互独立） */}
+      <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold">老师讲义</h3>
+          <span className="flex-1" />
+          <label className="btn-outline !px-3 !py-1.5 text-xs cursor-pointer">
+            {uploading ? '上传中…' : <><Upload className="w-4 h-4 inline-block align-[-2px]" /> 上传讲义（docx/pdf 等）</>}
+            <input
+              type="file"
+              className="hidden"
+              disabled={uploading}
+              accept=".docx,.doc,.pdf,.pptx,.xlsx,.md,.txt,image/*"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadHandout(f); e.currentTarget.value = '' }}
+            />
+          </label>
+        </div>
+        {fileList.length === 0 ? (
+          <p className="text-[11px] text-slate-400">还没有讲义。上传后学生端「报告」Tab 会出现「老师讲义」列表（学生只能下载自己的）。</p>
+        ) : (
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {fileList.map((f) => (
+              <div key={f.id} className="flex items-center gap-2 py-1.5 text-sm">
+                <FileText className="w-4 h-4 text-primary-500 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="truncate text-xs font-medium">{f.title}</p>
+                  <p className="text-[10px] text-slate-400 num">{String(f.created_at).slice(0, 10)} · {f.filename} · {(f.size / 1024).toFixed(0)} KB</p>
+                </div>
+                <a className="text-xs text-primary-600 hover:underline shrink-0" href={`${f.path}?token=${encodeURIComponent(useAuthStore.getState().token || '')}`} target="_blank" rel="noreferrer">打开</a>
+                <button className="text-slate-400 hover:text-red-500 shrink-0" onClick={() => removeHandout(f.id)}><Trash2 className="w-4 h-4" /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2 text-sm">
           {([['2w', '近 2 周'], ['1m', '近 1 月'], ['custom', '自定义']] as const).map(([k, label]) => (
