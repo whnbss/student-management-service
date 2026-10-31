@@ -85,6 +85,37 @@ for (const r of rows) {
 if (tmplBad.length) { hardFail++; console.log(`✗ 模板强标记：${tmplBad.length} 题知识点非电磁类但图内含「匀强场区/+q」电场模板标记 → ${tmplBad.join(' ')}`) }
 else console.log('✓ 模板强标记：0 题（非电磁类知识点无「匀强场区/+q」残留）')
 
+// ---------- 2d. 弹簧标签守卫（验收 #38 P1-20：spring 模板「压缩量 x=…」与题干语境错配） ----------
+// ① 方向词错配：图标「压缩量」而题干是拉伸/悬挂语境（钩码→弹簧必拉伸）→ 硬失败
+// ② 幻数值：图标「压缩量/伸长量 x=数值」的数值必须可从题干/答案/解析溯源（字面数值或 mm/cm 等价换算），
+//    纯符号题不得出现幻数值（#783/#848 教训）；「振幅/形变量/示意」等标注豁免
+const SPRING_MIS = /拉伸|伸长|钩码|悬挂/
+const sprBad: string[] = []
+for (const r of rows) {
+  let fig: any = null
+  try { fig = JSON.parse(String(r.figure || 'null')) } catch { continue }
+  if (!fig || fig.kind !== 'svg') continue
+  const texts = [...String(fig.data).matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1])
+  const stem = String(r.stem || '')
+  // 溯源数字池：题干/答案/解析中全部数值 token（归一化尾零，0.10 与 0.1 视为同值）
+  const poolNums = new Set<number>()
+  for (const src of [r.stem, r.answer, r.solution]) {
+    for (const m of String(src ?? '').matchAll(/\d+(?:\.\d+)?/g)) poolNums.add(parseFloat(m[0]))
+  }
+  for (const t of texts) {
+    if (/压缩量/.test(t) && SPRING_MIS.test(stem)) { sprBad.push(`#${r.id}(${t.trim()}↔题干拉伸语境)`); break }
+    const m = t.match(/[压缩伸长量]{3}\s*x=([0-9.]+)m/)
+    if (m) {
+      // 溯源：该数值（或 mm/cm 等价换算）须在题干/答案/解析数值池中
+      const v = parseFloat(m[1])
+      const cands = [v, v * 100, v * 1000].map((x) => Math.round(x * 1e9) / 1e9)
+      if (!cands.some((c) => poolNums.has(c))) { sprBad.push(`#${r.id}(${t.trim()} 数值不可溯源)`); break }
+    }
+  }
+}
+if (sprBad.length) { hardFail++; console.log(`✗ 弹簧标签：${sprBad.length} 题图标「压缩量/伸长量 x=…」与题干错配或数值不可溯源 → ${sprBad.join(' ')}`) }
+else console.log('✓ 弹簧标签：「压缩量/伸长量 x=…」标签与题干方向一致且数值均可溯源')
+
 // ---------- 3. 字面 \n（后非字母） ----------
 const litIds: string[] = []
 let litTotal = 0
