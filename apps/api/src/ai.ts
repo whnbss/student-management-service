@@ -759,14 +759,14 @@ export async function readAnswerSheet(
 // ②″ 第二次独立求解（纯文本、逐选项排除纪律）——与第一次结果做三票表决
 export async function solvePaperPass2(
   provider: AiProvider,
-  p: { grade: string; questions: PaperExtractItem[] }
+  p: { grade: string; questions: PaperExtractItem[]; temperature?: number }
 ): Promise<{ result: { items: PaperSolvedItem[]; note: string }; usage: ReturnType<typeof recordUsage> }> {
   if (!p.questions.length) throw new Error('没有可求解的题目')
   const opts = {
     model: provider.text_model || provider.vision_model,
     system: SOLVE_PASS2_SYSTEM_PROMPT,
     user: solvePass2UserPrompt(p.grade, p.questions),
-    temperature: 0.6,
+    temperature: p.temperature ?? 0.6,
   }
   const override = solveModelOverride()
   if (override && override !== opts.model) {
