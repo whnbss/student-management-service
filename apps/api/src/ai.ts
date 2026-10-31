@@ -393,6 +393,9 @@ async function chatJson<T>(provider: AiProvider, opts: ChatOptions, validate: (o
     } catch (e: any) {
       lastErr = e
       console.error(`[ai] ${kind} 第 ${attempt + 1} 次尝试失败:`, e.message)
+      // 网络类错误打印底层 cause 与堆栈首行，便于定位代理/网关问题（UND_ERR_INVALID_ARG 等）
+      const cause = (e as any)?.cause
+      if (cause) console.error(`[ai]   cause: ${cause.code || ''} ${cause.message || ''} | ${String(e.stack || '').split('\n')[1] || ''}`)
     }
   }
   throw lastErr ? new Error(friendlyAiError(lastErr)) : new Error('AI 调用失败')

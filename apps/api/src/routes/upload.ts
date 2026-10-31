@@ -3,6 +3,7 @@
 // C4：老师讲义（docx/pdf 等）存 data/uploads/reports/<学生ID>/，走带鉴权的访问控制（见 auth.ts 钩子）
 import type { FastifyInstance } from 'fastify'
 import multipart from '@fastify/multipart'
+import type { MultipartFile } from '@fastify/multipart'
 import path from 'node:path'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
@@ -24,19 +25,24 @@ export default async function uploadRoutes(app: FastifyInstance) {
   })
 
   app.post('/api/upload', async (req, reply) => {
-    // P2-73：字段顺序无关——req.parts() 遍历全部 part 先收集字段再取文件。
+    // P2-73：字段顺序无关——req.parts() 遍历全部 part，文件流在遍历中即消费（toBuffer 挂起流），
+    // 字段可能出现在文件之后，遍历结束后再决定归档位置。
     // 旧实现 req.file() 只读第一个 part，其 fields 仅含文件**之前**的字段；前端先 append file
     // 时 student_id/folder 全部丢失，作业图被堆到 /uploads/0/（按学生清理链路断裂）
-    let file: any = null
+    let file: MultipartFile | null = null
+    let fileBuf: Buffer | null = null
     const fields: Record<string, string> = {}
     for await (const part of req.parts()) {
-      if ((part as any).type === 'file') {
-        if (!file) file = part
+      if (part.type === 'file') {
+        if (!file) {
+          file = part
+          fileBuf = await part.toBuffer()
+        }
       } else {
-        fields[(part as any).fieldname] = String((part as any).value ?? '')
+        fields[part.fieldname] = String((part as any).value ?? '')
       }
     }
-    if (!file) { reply.code(400).send({ error: '未收到文件' }); return }
+    if (!file || !fileBuf) { reply.code(400).send({ error: '未收到文件' }); return }
     const folder = fields.folder || ''
     // 只允许图片类型
     if (!/^image\//.test(file.mimetype)) { reply.code(400).send({ error: '只支持图片文件' }); return }
@@ -47,7 +53,7 @@ export default async function uploadRoutes(app: FastifyInstance) {
     if (folder === 'questions') {
       const dir = path.join(UPLOADS_DIR, 'questions')
       fs.mkdirSync(dir, { recursive: true })
-      await fs.promises.writeFile(path.join(dir, name), await file.toBuffer())
+      await fs.promises.writeFile(path.join(dir, name), fileBuf)
       return { ok: true, path: `/uploads/questions/${name}` }
     }
     // 默认：学生作业图片，按 学生ID/日期/ 归档
@@ -56,7 +62,7 @@ export default async function uploadRoutes(app: FastifyInstance) {
     const dir = path.join(UPLOADS_DIR, String(studentId), date)
     fs.mkdirSync(dir, { recursive: true })
     const filepath = path.join(dir, name)
-    await fs.promises.writeFile(filepath, await file.toBuffer())
+    await fs.promises.writeFile(filepath, fileBuf)
     // 返回相对路径，前端拼接后端地址或直接走代理
     return { ok: true, path: `/uploads/${String(studentId)}/${date}/${name}` }
   })
@@ -68,17 +74,21 @@ export default async function uploadRoutes(app: FastifyInstance) {
     const sid = Number(id)
     const student = db.prepare('SELECT id, name FROM students WHERE id = ?').get(sid) as any
     if (!student) { reply.code(404).send({ error: '学生不存在' }); return }
-    // P2-73：字段顺序无关（title 在 file 之后提交也能收到）
-    let file: any = null
+    // P2-73：字段顺序无关（title 在 file 之后提交也能收到；文件流在遍历中即消费防挂起）
+    let file: MultipartFile | null = null
+    let fileBuf: Buffer | null = null
     const fields: Record<string, string> = {}
     for await (const part of req.parts()) {
-      if ((part as any).type === 'file') {
-        if (!file) file = part
+      if (part.type === 'file') {
+        if (!file) {
+          file = part
+          fileBuf = await part.toBuffer()
+        }
       } else {
-        fields[(part as any).fieldname] = String((part as any).value ?? '')
+        fields[part.fieldname] = String((part as any).value ?? '')
       }
     }
-    if (!file) { reply.code(400).send({ error: '未收到文件' }); return }
+    if (!file || !fileBuf) { reply.code(400).send({ error: '未收到文件' }); return }
     const ext = path.extname(file.filename || '').toLowerCase()
     if (!REPORT_EXTS.includes(ext)) {
       reply.code(400).send({ error: '只支持 ' + REPORT_EXTS.join(' / ') + ' 格式' }); return
@@ -87,11 +97,10 @@ export default async function uploadRoutes(app: FastifyInstance) {
     const dir = path.join(UPLOADS_DIR, 'reports', String(sid))
     fs.mkdirSync(dir, { recursive: true })
     const name = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`
-    const buf = await file.toBuffer()
-    await fs.promises.writeFile(path.join(dir, name), buf)
+    await fs.promises.writeFile(path.join(dir, name), fileBuf)
     const r = db.prepare(
       'INSERT INTO report_files(student_id, title, filename, path, mime, size, created_at) VALUES(?,?,?,?,?,?,?)'
-    ).run(sid, title, String(file.filename || name).slice(0, 200), `/uploads/reports/${sid}/${name}`, String(file.mimetype || ''), buf.length, nowISO())
+    ).run(sid, title, String(file.filename || name).slice(0, 200), `/uploads/reports/${sid}/${name}`, String(file.mimetype || ''), fileBuf.length, nowISO())
     return { ok: true, id: Number(r.lastInsertRowid), path: `/uploads/reports/${sid}/${name}` }
   })
 

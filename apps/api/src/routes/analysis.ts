@@ -173,13 +173,14 @@ export default async function analysisRoutes(app: FastifyInstance) {
               console.error(`[analyze] 复解票${ti + 1}失败（跳过）:`, e.message)
             }
           }
-          // 表决：按答案一致性分组，取「严格多数」（超过可用票数一半）组；无多数 → 待确认
-          const votesOf = (no: string) => votes.map((vm) => vm.get(no)).filter(Boolean) as PaperSolvedItem[]
+          // 表决：按答案一致性分组，取「严格多数」（超过可用票数一半）组；无多数 → 待确认。
+          // 空答案的票不计入（复解对复杂计算题可能只给解题过程没给 answer——那属于该票弃权，不算分歧票）
+          const votesOf = (no: string) => votes.map((vm) => vm.get(no)).filter((v): v is PaperSolvedItem => !!v && !!String(v.answer || '').trim())
           const final = new Map<string, PaperSolvedItem>()
           for (const q of extracted.items) {
             const no = String(Number(q.no))
             const vs = votesOf(no)
-            votesMemo.set(no, votes.map((vm, i) => vm.get(no) && `票${i}=${vm.get(no)!.answer.slice(0, 60)}`).filter(Boolean) as string[])
+            votesMemo.set(no, votes.map((vm, i) => vm.get(no) && String(vm.get(no)!.answer || '').trim() && `票${i}=${vm.get(no)!.answer.slice(0, 60)}`).filter(Boolean) as string[])
             if (q.qtype === '选择') {
               console.log(`[analyze] 第${no}题五票：${votes.map((vm, i) => `票${i}=${vm.get(no)?.answer || '—'}`).join(' / ')}`)
             }
