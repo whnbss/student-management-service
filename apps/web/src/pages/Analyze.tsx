@@ -241,7 +241,7 @@ export default function Analyze() {
                     const svg = specToSvg(it.figure_spec)
                     return svg ? <div className="bg-white dark:bg-slate-900 rounded-lg p-2" dangerouslySetInnerHTML={{ __html: svg }} /> : null
                   })()}
-                  {it.figure_status === '图待补' && <p className="text-[11px] text-amber-500">原题有图但无法自动重绘——已保留作业原图，可在错题本中手动补图</p>}
+                  {it.figure_status === '图待补' && <p className="text-[11px] text-amber-500">{it.figure_note || '原题有图但无法自动重绘——已保留作业原图，可在错题本中手动补图'}</p>}
                 </div>
               )}
               {/* C2：学生实际作答 vs 标准答案（逐题比对结论） */}

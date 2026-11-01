@@ -258,3 +258,25 @@ export function solveBlanksMismatch(expected: number, solvedItem: { answer?: str
   }
   return []
 }
+
+// ---------- P2-92（验收#51）：重绘失败缺图标注 ----------
+// 重绘失败分支机器兜底声明：不依赖比对模型自觉（#49/#50 靠模型在 unrecognized 里复述，
+// #51 轮 figure_note 全空教师看不到缺图清单）。内容 =「原图待补」声明 + 转录层图形描述（不编造）
+export function missingFigureNoteOf(q?: { figure_note?: string }): string {
+  const desc = String(q?.figure_note || '').trim()
+  return `原图待补：原题配有插图但模板库无法忠实重绘，已保留作业原图，可对照人工核对补图${desc ? `；原卷图描述：${desc}` : ''}`
+}
+
+// 缺图清单补进 unrecognized（「第N题原图待补」），去重——已有同题号标注（模型输出或前次补写）不重复
+export function ensureMissingFigureNotes(unrecognized: string[], items: Array<{ no: number; figure_status: string }>): number {
+  const arr = Array.isArray(unrecognized) ? unrecognized : []
+  let added = 0
+  for (const it of items) {
+    if (it.figure_status !== '图待补') continue
+    const re = new RegExp(`第\s*${it.no}\s*题原图待补`)
+    if (arr.some((u) => re.test(String(u)))) continue
+    arr.push(`第${it.no}题原图待补（重绘失败，已保留作业原图）`)
+    added++
+  }
+  return added
+}

@@ -147,6 +147,7 @@ export interface AiAnalysisResult {
     reference_answer: string // 参考答案与解析（能从图中看出/常规答案时填写）
     figure_spec: { template: string; params: Record<string, number | string> } | null // 原题配图重绘规格
     figure_status: '已重绘' | '图待补' | '' // 原题有图但无法用模板重绘时标「图待补」
+    figure_note?: string // 配图状态说明（P2-92：重绘失败时机器补「原图待补」声明 + 转录层图形描述，教师可见缺图清单）
     // ---- C2 两阶段批改：学生实际作答（答题卡识别结果，比对判定的依据） ----
     student_answer: string
     sub_answers?: SubAnswer[] // 多小问/多空逐项判定（12 题按空、13~16 按得分点）

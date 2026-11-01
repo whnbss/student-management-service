@@ -325,6 +325,7 @@ function validateAnalysis(obj: any): AiAnalysisResult {
           reference_answer: sanitizeLatexChinese(sanitizeAiText(it?.reference_answer)).trim(),
           figure_spec: sanitizeFigureSpec(it?.figure_spec),
           figure_status: it?.figure_status === '图待补' ? '图待补' : it?.figure_status === '已重绘' ? '已重绘' : '',
+          figure_note: sanitizeAiText(it?.figure_note || '').trim(),
           // ---- C2 两阶段批改：学生实际作答与逐小问判定 ----
           student_answer: sanitizeLatexChinese(sanitizeAiText(it?.student_answer)).trim(),
           sub_answers: Array.isArray(it?.sub_answers)

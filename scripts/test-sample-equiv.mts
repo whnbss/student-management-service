@@ -1,6 +1,6 @@
 // P1-81/P1-82/P2-80/P1-84 单测：数值抽样等价判定 + 判定文案机器校正启发式 + 展示层/判定层交叉校验（验收 #45/#46/#47 实测案例）
 import { sampleEquivalent as eq, isEquivClaim, hasJudgeContradiction } from '../packages/shared/src/index.ts'
-import { answersClearlyDisagree as dis, subBlanksMisaligned as mis, scrubSpeculation as scrub, answersAgree as agree, splitParts, expectedBlankCountOf, solveBlanksMismatch } from '../apps/api/src/answerMatch.ts'
+import { answersClearlyDisagree as dis, subBlanksMisaligned as mis, scrubSpeculation as scrub, answersAgree as agree, splitParts, expectedBlankCountOf, solveBlanksMismatch, missingFigureNoteOf, ensureMissingFigureNotes } from '../apps/api/src/answerMatch.ts'
 
 let fail = 0
 function chk(name: string, got: unknown, expect: unknown) {
@@ -118,5 +118,24 @@ chk('求解层 per_blank 4 条 vs 期望 5 → 需重解', solveBlanksMismatch(5
 chk('求解层空数齐 → 不重解', solveBlanksMismatch(5, { answer: '', per_blank: ['(1)', '(2)', '(3)', '(4)', '(5)'].map((k) => ({ key: k })) }).length, 0)
 chk('期望 <2 空（单问）→ 不重解', solveBlanksMismatch(1, { answer: '2.4', per_blank: [] }).length, 0)
 chk('answer 段数兜底（per_blank 空但 answer 5 段）→ 不重解', solveBlanksMismatch(5, { answer: '(1)a；(2)b；(3)c；(4)d；(5)e', per_blank: [] }).length, 0)
+
+// ---- P2-92（验收#51）：重绘失败缺图标注机器兜底 ----
+{
+  const note = missingFigureNoteOf({ figure_note: '图(b) v-t 图：0~1s 匀加速' })
+  chk('缺图声明含「原图待补」前缀', note.startsWith('原图待补：'), true)
+  chk('缺图声明带转录层图形描述（不编造）', note.includes('原卷图描述：图(b) v-t 图：0~1s 匀加速'), true)
+  chk('缺图声明：转录层无描述时只有声明', missingFigureNoteOf({}).includes('原卷图描述'), false)
+  const items = [
+    { no: 2, figure_status: '图待补' },
+    { no: 12, figure_status: '已重绘' },
+    { no: 5, figure_status: '图待补' },
+    { no: 3, figure_status: '' },
+  ]
+  const ur: string[] = []
+  chk('缺图清单：仅图待补题入 unrecognized（2条）', ensureMissingFigureNotes(ur, items), 2)
+  chk('缺图清单内容含题号', ur.every((u) => /原图待补/.test(u)) && ur.some((u) => u.includes('第2题')) && ur.some((u) => u.includes('第5题')), true)
+  chk('缺图清单：已有标注去重不重复补', ensureMissingFigureNotes(ur, items), 0)
+  chk('缺图清单：非数组入参兜底', ensureMissingFigureNotes(undefined as any, [{ no: 8, figure_status: '图待补' }]), 1)
+}
 
 process.exit(fail ? 1 : 0)

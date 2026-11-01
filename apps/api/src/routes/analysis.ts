@@ -13,7 +13,7 @@ import { UPLOADS_DIR, db, getSetting } from '../db'
 import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper, redrawFigures, resolveBlanks } from '../ai'
 import type { SheetReadItem, PaperExtractItem, PaperSolvedItem } from '@workbench/shared'
 import { sampleEquivalent, isEquivClaim, hasJudgeContradiction } from '@workbench/shared'
-import { letterSetOf, canonAnswer, splitParts, numsOf, answersAgree, answersClearlyDisagree, subBlanksMisaligned, scrubSpeculation, expectedBlankCountOf, solveBlanksMismatch, solvedBlankCountOf, stripParseTail } from '../answerMatch'
+import { letterSetOf, canonAnswer, splitParts, numsOf, answersAgree, answersClearlyDisagree, subBlanksMisaligned, scrubSpeculation, expectedBlankCountOf, solveBlanksMismatch, solvedBlankCountOf, stripParseTail, missingFigureNoteOf, ensureMissingFigureNotes } from '../answerMatch'
 
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif',
@@ -559,14 +559,20 @@ export default async function analysisRoutes(app: FastifyInstance) {
           if (misaligned) console.log(`[analyze] ${misaligned} 题空位不齐 → 已标待确认`)
         }
         // ④‴ 配图落标：重绘成功的题把 figure_spec 写进分析结果（figure_status=已重绘）；
-        // 原题有图但模板不能还原/重绘失败的标「图待补」，不编造
+        // 原题有图但模板不能还原/重绘失败的标「图待补」，不编造。
+        // P2-92（验收#51）：图待补必须机器兜底写 figure_note 声明（重绘整个调用失败/模型漏报时，
+        // 教师在编辑页与「第N题原图待补」清单里仍能看到缺图清单，不再依赖模型自觉复述）
         for (const it of analysis.items) {
           const q = stemOf(it.no)
           if (!q || !(q.has_figure || /如图/.test(q.stem))) continue
           const spec = figureSpecMap.get(String(Number(it.no)))
           if (spec) { it.figure_spec = spec; it.figure_status = '已重绘' }
-          else if (!it.figure_spec) it.figure_status = '图待补'
+          else if (!it.figure_spec) {
+            it.figure_status = '图待补'
+            it.figure_note = missingFigureNoteOf(q)
+          }
         }
+        ensureMissingFigureNotes(analysis.unrecognized, analysis.items)
         analysis.items = analysis.items.filter((it) => it.stem)
         const usage = {
           prompt_tokens: u1.prompt_tokens + u2.prompt_tokens + u2x.prompt_tokens + u2b.prompt_tokens + u2d.prompt_tokens + u3.prompt_tokens + u4.prompt_tokens,
