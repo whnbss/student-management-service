@@ -1556,12 +1556,16 @@ function tBoatRiver(p: FigureSpec['params']): string {
 
 // 两车同向行驶（追及/相遇，专项④，验收#55）：公路+两辆车（前/后）+各自速度/加速度箭头+初始间距标注
 // 追及相遇类题（#164/#166）统一用本模板；从同一位置出发的题不传 gap（不画间距标注，不编造 x₀）
+// P1-97（验收#55）：题干符号系统（v₁/v₂ 对应 甲/乙）可能与「前/后车」位置冲突，
+// 提供 label_front/label_rear 直接指定完整箭头标注文字（含题干原下标），优先于 v1/v2/a2 自动拼装
 function tTwoCars(p: FigureSpec['params']): string {
   const l1 = str(p.label1, '甲') // 前车
   const l2 = str(p.label2, '乙') // 后车
   const v1 = str(p.v1, '')
   const v2 = str(p.v2, '')
   const a2 = str(p.a2, '') // 后车加速度标注（如 "2m/s²"，画 a₂ 箭头；从静止加速的题用这个，勿冒充 v₂）
+  const labFront = str(p.label_front, '') // 前车箭头完整标注（如 "v₂=4m/s"），下标跟随题干
+  const labRear = str(p.label_rear, '') // 后车箭头完整标注（如 "v₁=10m/s" 或 "a=2m/s²"）
   const gap = str(p.gap, '') // 初始间距标注，如 "x₀=20m"；不传则不画间距线（同地出发/未给间距）
   const roadY = 170
   const car = (cx: number) =>
@@ -1575,11 +1579,11 @@ function tTwoCars(p: FigureSpec['params']): string {
     [50, 110, 170, 230, 290, 350].map((x) => `<line x1="${x}" y1="${roadY + 4}" x2="${x + 18}" y2="${roadY + 4}" stroke="#94a3b8" stroke-width="1.5"/>`).join('')
   // 前车（右侧）与后车（左侧），速度箭头在车上方向右
   inner += car(270) + car(120) +
-    arrow(255, roadY - 44, 292, roadY - 44, ACCENT, 2.2) + txt(302, roadY - 40, v1 ? `v₁=${v1}` : l1, 13, ACCENT, 'start') +
-    arrow(105, roadY - 44, 142, roadY - 44, ACCENT, 2.2) + txt(152, roadY - 40, v2 ? `v₂=${v2}` : a2 ? `a₂=${a2}` : l2, 13, ACCENT, 'start')
+    arrow(255, roadY - 44, 292, roadY - 44, ACCENT, 2.2) + txt(302, roadY - 40, labFront || (v1 ? `v₁=${v1}` : l1), 13, ACCENT, 'start') +
+    arrow(105, roadY - 44, 142, roadY - 44, ACCENT, 2.2) + txt(152, roadY - 40, labRear || (v2 ? `v₂=${v2}` : a2 ? `a₂=${a2}` : l2), 13, ACCENT, 'start')
   // 车名标注（箭头未带名时显示在车下）
-  if (v1) inner += txt(270, roadY + 26, l1, 13)
-  if (v2 || a2) inner += txt(120, roadY + 26, l2, 13)
+  if (v1 || labFront) inner += txt(270, roadY + 26, l1, 13)
+  if (v2 || a2 || labRear) inner += txt(120, roadY + 26, l2, 13)
   // 初始间距标注（两车之间，地面上方双端短线；仅题干给出初始间距时才画，严禁编造 x₀）
   if (gap) inner += `<line x1="152" y1="${roadY + 14}" x2="240" y2="${roadY + 14}" stroke="#64748b" stroke-width="1.3"/>` +
     `<line x1="152" y1="${roadY + 9}" x2="152" y2="${roadY + 19}" stroke="#64748b" stroke-width="1.3"/>` +

@@ -347,7 +347,7 @@ export const FIGURE_TEMPLATE_DOCS = `- incline：斜面滑块（angle 斜面倾�
 - coil_flux：线圈在磁场中（kind 填 static（线圈平放在磁场中）或 rotate（线圈绕竖直轴在磁场中匀速转动）、B 磁场标注、label 线圈标注）
 - magnet_coil：条形磁铁竖直插入线圈+电流计（楞次定律/电磁感应；pole 填 N 或 S（插入端磁极，默认 N）、label_coil 线圈标注（默认 "A"）、v 可选插入速度标注）
 - boat_river：小船渡河（两岸+河宽+船头方向+水流速度；d 河宽标注（如 "100m"）、v_boat 船在静水中速度标注、v_water 水流速度标注、heading 可选填 perp（垂直河岸，默认）/upstream（偏向上游）/downstream（偏向下游）、label 船标注可选）
-- two_cars：两车同向行驶（追及/相遇；label1 前车标注（默认 "甲"）、label2 后车标注（默认 "乙"）、v1 前车速度标注（如 "10m/s"，填了才显示 v₁=… 箭头标注）、v2 后车速度标注（后车匀速时才填）、a2 后车加速度标注（后车从静止/匀加速追赶时用这个，如 "2m/s²"，勿把加速度填进 v2）、gap 初始间距标注（如 "x₀=20m"；题干未给初始间距/同地出发则不填，此时不画间距线））
+- two_cars：两车同向行驶（追及/相遇；label1 前车标注（默认 "甲"）、label2 后车标注（默认 "乙"）、v1 前车速度标注（如 "10m/s"，填了才显示 v₁=… 箭头标注）、v2 后车速度标注（后车匀速时才填）、a2 后车加速度标注（后车从静止/匀加速追赶时用这个，如 "2m/s²"，勿把加速度填进 v2）、label_front/label_rear 可选：前/后车箭头的完整标注文字（含题干原下标——题干符号系统与「前/后车」位置冲突时必用，如题干定义 v₁=10 为后车甲、v₂=4 为前车乙，则 label_rear="v₁=10m/s"+label_front="v₂=4m/s"）、gap 初始间距标注（如 "x₀=20m"；题干未给初始间距/同地出发则不填，此时不画间距线））
 - orbit：卫星/行星绕中心天体（kind 填 circle（圆轨道）或 ellipse（椭圆轨道）、R 可选轨道半径、label 卫星标注、center 中心天体标注如 "地球"）
 - energy_levels：氢原子能级图（max_n 能级数（默认4）、from/to 跃迁箭头起止能级、E1 基态能量标注）
 - double_slit：双缝干涉（d 双缝间距（mm）、L 双缝到屏距离（m）、lambda 波长标注可选）
