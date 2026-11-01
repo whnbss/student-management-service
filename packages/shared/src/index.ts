@@ -287,6 +287,7 @@ export const FIGURE_TEMPLATES = [
   'wire_bfield', // 通电导线/运动电荷在磁场中（安培力/洛伦兹力）
   'photoelectric', // 光电效应（光照金属板逸出光电子）
   'coil_flux', // 线圈在磁场中（磁通量/感应电动势）
+  'magnet_coil', // 条形磁铁插入线圈 + 电流计（楞次定律/电磁感应）
   'orbit', // 卫星/行星轨道（圆/椭圆 + 中心天体）
   'energy_levels', // 氢原子能级图（跃迁箭头）
   'double_slit', // 双缝干涉（双缝+波前+屏上条纹）
@@ -342,6 +343,7 @@ export const FIGURE_TEMPLATE_DOCS = `- incline：斜面滑块（angle 斜面倾�
 - wire_bfield：通电导线/运动电荷在磁场中（kind 填 wire（水平直导线，I 电流方向箭头）或 charge（运动电荷）、B 磁场标注如 "B（⊗垂直纸面向里）"、F 可选受力标注、label）
 - photoelectric：光电效应（nu 入射光频率/波长标注、Ek 可选光电子最大初动能、W 可选逸出功标注、label 金属标注）
 - coil_flux：线圈在磁场中（kind 填 static（线圈平放在磁场中）或 rotate（线圈绕竖直轴在磁场中匀速转动）、B 磁场标注、label 线圈标注）
+- magnet_coil：条形磁铁竖直插入线圈+电流计（楞次定律/电磁感应；pole 填 N 或 S（插入端磁极，默认 N）、label_coil 线圈标注（默认 "A"）、v 可选插入速度标注）
 - orbit：卫星/行星绕中心天体（kind 填 circle（圆轨道）或 ellipse（椭圆轨道）、R 可选轨道半径、label 卫星标注、center 中心天体标注如 "地球"）
 - energy_levels：氢原子能级图（max_n 能级数（默认4）、from/to 跃迁箭头起止能级、E1 基态能量标注）
 - double_slit：双缝干涉（d 双缝间距（mm）、L 双缝到屏距离（m）、lambda 波长标注可选）

@@ -1483,6 +1483,35 @@ function tMultimeter(p: FigureSpec['params']): string {
   return wrap(inner)
 }
 
+// 条形磁铁竖直插入线圈 + 电流计（楞次定律/电磁感应经典情境）
+// pole=插入端磁极（N 下红 / S 灰）、label_coil 线圈标注、v 可选插入速度标注
+function tMagnetCoil(p: FigureSpec['params']): string {
+  const pole = str(p.pole, 'N').toUpperCase() === 'S' ? 'S' : 'N'
+  const labelCoil = str(p.label_coil, 'A')
+  const v = str(p.v)
+  const cx = 130, cy = 180 // 线圈中心
+  const inner =
+    // 线圈（3 匝同心椭圆，平放于桌面）
+    [62, 54, 46].map((rx) => `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="14" fill="none" stroke="${INK}" stroke-width="2"/>`).join('') +
+    txt(cx, 222, `线圈 ${labelCoil}`, 12) +
+    // 引线：线圈右端 → 上折 → 电流计左端；电流计下端 → 绕回线圈左端（闭合回路）
+    `<polyline points="192,180 240,180 240,120 270,120" fill="none" stroke="${INK}" stroke-width="1.8"/>` +
+    `<circle cx="296" cy="120" r="26" fill="#fff" stroke="${INK}" stroke-width="2"/>` +
+    txt(296, 126, 'G', 15) +
+    `<polyline points="296,146 296,206 ${cx - 62},206 ${cx - 62},180" fill="none" stroke="${INK}" stroke-width="1.8"/>` +
+    txt(296, 92, '电流计', 11, '#64748b') +
+    // 条形磁铁：竖直置于线圈正上方，插入端在下半段（pole）
+    `<rect x="${cx - 13}" y="36" width="26" height="52" fill="#e2e8f0" stroke="${INK}" stroke-width="2"/>` +
+    `<rect x="${cx - 13}" y="88" width="26" height="52" fill="#fecaca" stroke="${INK}" stroke-width="2"/>` +
+    txt(cx, 68, pole === 'N' ? 'S' : 'N', 14, pole === 'N' ? '#64748b' : RED) +
+    txt(cx, 120, pole === 'N' ? 'N' : 'S', 14, pole === 'N' ? RED : '#64748b') +
+    // 插入运动箭头（磁铁右侧）
+    arrow(168, 60, 168, 104, ACCENT, 2.5) +
+    txt(182, 86, v || 'v', 14, ACCENT) +
+    txt(230, 66, '插入', 11, '#64748b')
+  return wrap(inner)
+}
+
 const TEMPLATES: Record<string, (p: FigureSpec['params']) => string> = {
   incline: tIncline,
   flatblock: tFlatblock,
@@ -1527,6 +1556,7 @@ const TEMPLATES: Record<string, (p: FigureSpec['params']) => string> = {
   wire_bfield: tWireBfield,
   photoelectric: tPhotoelectric,
   coil_flux: tCoilFlux,
+  magnet_coil: tMagnetCoil,
   orbit: tOrbit,
   energy_levels: tEnergyLevels,
   double_slit: tDoubleSlit,

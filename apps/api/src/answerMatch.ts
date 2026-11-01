@@ -273,7 +273,7 @@ export function ensureMissingFigureNotes(unrecognized: string[], items: Array<{ 
   let added = 0
   for (const it of items) {
     if (it.figure_status !== '图待补') continue
-    const re = new RegExp(`第\s*${it.no}\s*题原图待补`)
+    const re = new RegExp(`第\\s*${it.no}\\s*题原图待补`)
     if (arr.some((u) => re.test(String(u)))) continue
     arr.push(`第${it.no}题原图待补（重绘失败，已保留作业原图）`)
     added++

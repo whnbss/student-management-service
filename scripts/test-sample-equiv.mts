@@ -136,6 +136,11 @@ chk('answer 段数兜底（per_blank 空但 answer 5 段）→ 不重解', solve
   chk('缺图清单内容含题号', ur.every((u) => /原图待补/.test(u)) && ur.some((u) => u.includes('第2题')) && ur.some((u) => u.includes('第5题')), true)
   chk('缺图清单：已有标注去重不重复补', ensureMissingFigureNotes(ur, items), 0)
   chk('缺图清单：非数组入参兜底', ensureMissingFigureNotes(undefined as any, [{ no: 8, figure_status: '图待补' }]), 1)
+  // P3-96（验收#52）：模型手写含空格变体「第 15 题原图待补」也要去重（\s 必须真正生效）
+  const ur2 = ['第 15 题原图待补（模型已标注）']
+  chk('缺图清单：含空格变体「第 15 题」→ 去重不再补', ensureMissingFigureNotes(ur2, [{ no: 15, figure_status: '图待补' }]), 0)
+  const ur3 = ['第15题原图待补（无空格）']
+  chk('缺图清单：无空格串照常去重', ensureMissingFigureNotes(ur3, [{ no: 15, figure_status: '图待补' }]), 0)
 }
 
 process.exit(fail ? 1 : 0)
