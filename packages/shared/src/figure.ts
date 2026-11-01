@@ -907,6 +907,11 @@ function tWave(p: FigureSpec['params']): string {
 function tVibrate(p: FigureSpec['params']): string {
   const T = num(p.T, 2)
   const A = num(p.A, 0.2)
+  // 可自定义轴/标注单位：画交流电 e-t、电流 i-t 等正弦图时按物理量改写（默认仍是位移 y-t）
+  const xlabel = str(p.xlabel, 't/s')
+  const ylabel = str(p.ylabel, 'y/m')
+  const tlabel = str(p.tlabel, `T=${T}s`)
+  const alabel = str(p.alabel, `A=${A}m`)
   const ox = 50, oy = 120
   const w = 320, halfA = 60
   const periodPx = 160
@@ -919,17 +924,17 @@ function tVibrate(p: FigureSpec['params']): string {
   const inner =
     `<line x1="${ox}" y1="${oy + halfA + 26}" x2="${ox + w + 20}" y2="${oy + halfA + 26}" stroke="${INK}" stroke-width="1.8"/>` +
     `<line x1="${ox}" y1="${oy + halfA + 26}" x2="${ox}" y2="${oy - halfA - 14}" stroke="${INK}" stroke-width="1.8"/>` +
-    txt(ox + w + 6, oy + halfA + 42, 't/s', 12) +
-    txt(ox - 10, oy - halfA - 4, 'y/m', 12) +
+    txt(ox + w + 6, oy + halfA + 42, xlabel, 12) +
+    txt(ox - 10, oy - halfA - 4, ylabel, 12) +
     `<line x1="${ox}" y1="${oy}" x2="${ox + w}" y2="${oy}" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 4"/>` +
     `<polyline points="${pts.join(' ')}" fill="none" stroke="${ACCENT}" stroke-width="2.5"/>` +
     // T 标注（相邻两峰）
     `<line x1="${p1}" y1="${oy + halfA + 12}" x2="${p2}" y2="${oy + halfA + 12}" stroke="${RED}" stroke-width="1.5"/>` +
     `<line x1="${p1}" y1="${oy + halfA + 6}" x2="${p1}" y2="${oy + halfA + 18}" stroke="${RED}" stroke-width="1.5"/>` +
     `<line x1="${p2}" y1="${oy + halfA + 6}" x2="${p2}" y2="${oy + halfA + 18}" stroke="${RED}" stroke-width="1.5"/>` +
-    txt((p1 + p2) / 2, oy + halfA + 24 + 12, `T=${T}s`, 13, RED) +
+    txt((p1 + p2) / 2, oy + halfA + 24 + 12, tlabel, 13, RED) +
     arrow(ox + 12, oy, ox + 12, oy - halfA, '#64748b', 1.6) +
-    txt(ox + 22, oy - halfA / 2, `A=${A}m`, 12, '#64748b', 'start')
+    txt(ox + 22, oy - halfA / 2, alabel, 12, '#64748b', 'start')
   return wrap(inner)
 }
 
