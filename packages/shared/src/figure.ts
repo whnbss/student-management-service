@@ -1512,6 +1512,82 @@ function tMagnetCoil(p: FigureSpec['params']): string {
   return wrap(inner)
 }
 
+// 小船渡河（专项④，验收#55）：两岸+河宽 d+小船（船头方向 heading）+水流速度箭头——
+// 渡河类题（#294/#296/#676/#677）统一用本模板，勿用 car_road 硬套
+function tBoatRiver(p: FigureSpec['params']): string {
+  const d = str(p.d, '')
+  const vb = str(p.v_boat, 'v船')
+  const vw = str(p.v_water, 'v水')
+  const heading = str(p.heading, 'perp').toLowerCase() // perp（垂直河岸）| upstream（偏向上游）| downstream（偏向下游）
+  const label = str(p.label, '船')
+  const yTop = 62, yBot = 188
+  // 两岸 + 水面
+  let inner =
+    `<rect x="30" y="${yTop}" width="340" height="${yBot - yTop}" fill="#dbeafe" stroke="none"/>` +
+    `<line x1="30" y1="${yTop}" x2="370" y2="${yTop}" stroke="${INK}" stroke-width="2"/>` +
+    `<line x1="30" y1="${yBot}" x2="370" y2="${yBot}" stroke="${INK}" stroke-width="2"/>` +
+    // 波纹（水面示意）
+    [90, 170, 250, 330].map((x) => `<line x1="${x}" y1="${yTop + 34}" x2="${x + 24}" y2="${yTop + 34}" stroke="#93c5fd" stroke-width="1.5"/>`).join('') +
+    [130, 210, 290].map((x) => `<line x1="${x}" y1="${yBot - 30}" x2="${x + 24}" y2="${yBot - 30}" stroke="#93c5fd" stroke-width="1.5"/>`).join('') +
+    txt(62, yTop - 8, '对岸', 12, '#64748b') +
+    txt(62, yBot + 20, '此岸', 12, '#64748b')
+  // 河宽标注（左侧竖直带双端箭头的标注线）
+  inner += `<line x1="52" y1="${yTop}" x2="52" y2="${yBot}" stroke="#64748b" stroke-width="1.3"/>` +
+    `<line x1="46" y1="${yTop}" x2="58" y2="${yTop}" stroke="#64748b" stroke-width="1.3"/>` +
+    `<line x1="46" y1="${yBot}" x2="58" y2="${yBot}" stroke="#64748b" stroke-width="1.3"/>` +
+    txt(62, (yTop + yBot) / 2 + 4, d ? `d=${d}` : 'd', 12, '#64748b', 'start')
+  // 小船（ hull 三角）+ 船头速度箭头（heading 决定方向：perp 竖直向上，upstream 偏左 30°，downstream 偏右 30°）
+  const bx = 200, by = 128
+  const ang = heading === 'upstream' ? -Math.PI / 6 : heading === 'downstream' ? Math.PI / 6 : 0 // 相对竖直方向的偏角
+  const headLen = 52
+  const hx = bx + headLen * Math.sin(ang), hy = by - 30 - headLen * Math.cos(ang) + 30 // 船头箭头从船位指出
+  inner += `<polygon points="${bx},${by - 12} ${bx - 16},${by + 10} ${bx + 16},${by + 10}" fill="#c7d2fe" stroke="${INK}" stroke-width="2"/>` +
+    txt(bx + 24, by + 6, label, 13) +
+    arrow(bx, by, hx, hy, ACCENT, 2.5) +
+    txt(hx + 10 * Math.sign(Math.sin(ang) || 1), hy - 6, vb, 14, ACCENT)
+  // 水流速度箭头（河中右侧水平向右）
+  inner += arrow(268, yBot - 56, 330, yBot - 56, INK, 2) +
+    txt(300, yBot - 62, vw, 13)
+  // 船头方向说明（非垂直河岸时消歧）
+  if (heading === 'upstream') inner += txt(200, yBot + 20, '船头偏向上游', 11, '#64748b')
+  if (heading === 'downstream') inner += txt(200, yBot + 20, '船头偏向下游', 11, '#64748b')
+  return wrap(inner)
+}
+
+// 两车同向行驶（追及/相遇，专项④，验收#55）：公路+两辆车（前/后）+各自速度/加速度箭头+初始间距标注
+// 追及相遇类题（#164/#166）统一用本模板；从同一位置出发的题不传 gap（不画间距标注，不编造 x₀）
+function tTwoCars(p: FigureSpec['params']): string {
+  const l1 = str(p.label1, '甲') // 前车
+  const l2 = str(p.label2, '乙') // 后车
+  const v1 = str(p.v1, '')
+  const v2 = str(p.v2, '')
+  const a2 = str(p.a2, '') // 后车加速度标注（如 "2m/s²"，画 a₂ 箭头；从静止加速的题用这个，勿冒充 v₂）
+  const gap = str(p.gap, '') // 初始间距标注，如 "x₀=20m"；不传则不画间距线（同地出发/未给间距）
+  const roadY = 170
+  const car = (cx: number) =>
+    `<rect x="${cx - 30}" y="${roadY - 30}" width="60" height="22" rx="5" fill="#c7d2fe" stroke="${INK}" stroke-width="2"/>` +
+    `<circle cx="${cx - 17}" cy="${roadY - 6}" r="7" fill="#fff" stroke="${INK}" stroke-width="2"/>` +
+    `<circle cx="${cx + 17}" cy="${roadY - 6}" r="7" fill="#fff" stroke="${INK}" stroke-width="2"/>`
+  let inner =
+    // 公路（双线+中线虚线）
+    `<line x1="24" y1="${roadY}" x2="376" y2="${roadY}" stroke="${INK}" stroke-width="2"/>` +
+    `<line x1="24" y1="${roadY + 8}" x2="376" y2="${roadY + 8}" stroke="${INK}" stroke-width="1.5"/>` +
+    [50, 110, 170, 230, 290, 350].map((x) => `<line x1="${x}" y1="${roadY + 4}" x2="${x + 18}" y2="${roadY + 4}" stroke="#94a3b8" stroke-width="1.5"/>`).join('')
+  // 前车（右侧）与后车（左侧），速度箭头在车上方向右
+  inner += car(270) + car(120) +
+    arrow(255, roadY - 44, 292, roadY - 44, ACCENT, 2.2) + txt(302, roadY - 40, v1 ? `v₁=${v1}` : l1, 13, ACCENT, 'start') +
+    arrow(105, roadY - 44, 142, roadY - 44, ACCENT, 2.2) + txt(152, roadY - 40, v2 ? `v₂=${v2}` : a2 ? `a₂=${a2}` : l2, 13, ACCENT, 'start')
+  // 车名标注（箭头未带名时显示在车下）
+  if (v1) inner += txt(270, roadY + 26, l1, 13)
+  if (v2 || a2) inner += txt(120, roadY + 26, l2, 13)
+  // 初始间距标注（两车之间，地面上方双端短线；仅题干给出初始间距时才画，严禁编造 x₀）
+  if (gap) inner += `<line x1="152" y1="${roadY + 14}" x2="240" y2="${roadY + 14}" stroke="#64748b" stroke-width="1.3"/>` +
+    `<line x1="152" y1="${roadY + 9}" x2="152" y2="${roadY + 19}" stroke="#64748b" stroke-width="1.3"/>` +
+    `<line x1="240" y1="${roadY + 9}" x2="240" y2="${roadY + 19}" stroke="#64748b" stroke-width="1.3"/>` +
+    txt(196, roadY + 32, gap, 12, '#64748b')
+  return wrap(inner)
+}
+
 const TEMPLATES: Record<string, (p: FigureSpec['params']) => string> = {
   incline: tIncline,
   flatblock: tFlatblock,
@@ -1557,6 +1633,8 @@ const TEMPLATES: Record<string, (p: FigureSpec['params']) => string> = {
   photoelectric: tPhotoelectric,
   coil_flux: tCoilFlux,
   magnet_coil: tMagnetCoil,
+  boat_river: tBoatRiver,
+  two_cars: tTwoCars,
   orbit: tOrbit,
   energy_levels: tEnergyLevels,
   double_slit: tDoubleSlit,

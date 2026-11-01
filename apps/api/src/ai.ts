@@ -13,6 +13,8 @@ import {
   LESSON_DIAGNOSE_SYSTEM_PROMPT, LESSON_PLAN_SYSTEM_PROMPT,
   PAPER_EXTRACT_SYSTEM_PROMPT, paperExtractUserPrompt,
   REDRAW_FIGURES_SYSTEM_PROMPT, redrawFiguresUserPrompt,
+  FIGURE_SELF_CHECK_SYSTEM_PROMPT, figureSelfCheckUserPrompt,
+  type FigureSelfCheckItem,
   PAPER_SOLVE_SYSTEM_PROMPT, paperSolveUserPrompt,
   SOLVE_BLANKS_SYSTEM_PROMPT, solveBlanksUserPrompt,
   SHEET_READ_SYSTEM_PROMPT, sheetReadUserPrompt,
@@ -22,7 +24,7 @@ import {
   ADJUDICATE_SYSTEM_PROMPT, adjudicateUserPrompt,
   SHEET_VERIFY_SYSTEM_PROMPT, sheetVerifyUserPrompt,
   SHEET_VERIFY_FULL_SYSTEM_PROMPT,
-  sanitizeAiText, sanitizeLatexChinese, sanitizeMathText, FIGURE_TEMPLATES,
+  sanitizeAiText, sanitizeLatexChinese, sanitizeMathText, FIGURE_TEMPLATES, FIGURE_TEMPLATE_DOCS,
 } from '@workbench/shared'
 import type {
   PaperExtractItem, PaperSolvedItem, SheetReadItem, SubAnswer, PaperFigureItem,
@@ -851,6 +853,48 @@ export async function redrawFigures(
     },
     validateFigureRedraw,
     'figure-redraw'
+  )
+}
+
+// ①″ 重绘结果自检（P2-93/P2-94，验收#55）：对「已重绘」的题做模板要素 vs 题干要素一致性复核，
+// 缺关键要素的降级「图待补」。纯文本调用（题干+模板说明+参数，不发图），单次批量，自检失败
+// 不阻塞批改（降级是安全网，不是关口）
+function validateFigureSelfCheck(obj: any): { items: FigureSelfCheckItem[] } {
+  if (!obj || !Array.isArray(obj.items)) throw new Error('配图自检结果没有题目')
+  return {
+    items: obj.items
+      .map((it: any) => ({
+        no: sanitizeAiText(String(it?.no ?? '')).trim(),
+        verdict: it?.verdict === '不一致' ? '不一致' as const : '一致' as const,
+        missing: sanitizeAiText(String(it?.missing ?? '')).trim(),
+      }))
+      .filter((x: FigureSelfCheckItem) => x.no),
+  }
+}
+
+export async function selfCheckFigures(
+  provider: AiProvider,
+  p: { grade: string; items: Array<{ no: string; stem: string; options: string[]; figure_note?: string; template: string; params: Record<string, number | string> }> }
+): Promise<{ result: { items: FigureSelfCheckItem[] }; usage: ReturnType<typeof recordUsage> }> {
+  if (!p.items.length) throw new Error('没有待自检的重绘结果')
+  // 只给用到的模板的要素说明，控制上下文长度
+  const docsFor = (t: string) => {
+    const line = FIGURE_TEMPLATE_DOCS.split('\n').find((l) => l.startsWith(`- ${t}：`) || l.startsWith(`- ${t}:`))
+    return line || `- ${t}：（模板说明缺失）`
+  }
+  const lines = p.items.map((q) =>
+    `【第${q.no}题】题干：${q.stem}${q.options.length ? '\n选项：' + q.options.join(' | ') : ''}${q.figure_note ? `\n原卷图描述：${q.figure_note}` : ''}\n重绘模板：${q.template}\n模板要素：${docsFor(q.template).replace(/^- [^：:]+：/, '')}\n参数：${JSON.stringify(q.params)}`
+  ).join('\n\n')
+  return chatJson(
+    provider,
+    {
+      model: provider.text_model || provider.vision_model,
+      system: FIGURE_SELF_CHECK_SYSTEM_PROMPT,
+      user: `${figureSelfCheckUserPrompt(p.grade, p.items.length)}\n\n${lines}`,
+      temperature: 0.1,
+    },
+    validateFigureSelfCheck,
+    'figure-selfcheck'
   )
 }
 

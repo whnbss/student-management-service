@@ -10,7 +10,7 @@ import type { FastifyInstance } from 'fastify'
 import path from 'node:path'
 import fs from 'node:fs'
 import { UPLOADS_DIR, db, getSetting } from '../db'
-import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper, redrawFigures, resolveBlanks } from '../ai'
+import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper, redrawFigures, selfCheckFigures, resolveBlanks } from '../ai'
 import type { SheetReadItem, PaperExtractItem, PaperSolvedItem } from '@workbench/shared'
 import { sampleEquivalent, isEquivClaim, hasJudgeContradiction } from '@workbench/shared'
 import { letterSetOf, canonAnswer, splitParts, numsOf, answersAgree, answersClearlyDisagree, subBlanksMisaligned, scrubSpeculation, expectedBlankCountOf, solveBlanksMismatch, solvedBlankCountOf, stripParseTail, missingFigureNoteOf, ensureMissingFigureNotes } from '../answerMatch'
@@ -99,17 +99,52 @@ export default async function analysisRoutes(app: FastifyInstance) {
         const figureItems = extracted.items.filter((q) => q.has_figure || /如图/.test(q.stem))
         const figureSpecMap = new Map<string, { template: string; params: Record<string, number | string> }>()
         if (figureItems.length) {
-          try {
-            const rf = await redrawFigures(provider, { grade: meta.grade, items: figureItems, images: paperUrls })
+          // P2-94（验收#55）：重绘整次调用成败波动大（同代码同图 #53 轮 11 题 → #54 轮 0 题），
+          // 失败自动重试 1 次，两次都失败才走「图待补」兜底
+          let rf: Awaited<ReturnType<typeof redrawFigures>> | null = null
+          let lastErr = ''
+          for (let attempt = 1; attempt <= 2 && !rf; attempt++) {
+            try {
+              rf = await redrawFigures(provider, { grade: meta.grade, items: figureItems, images: paperUrls })
+            } catch (e: any) {
+              lastErr = e.message
+              console.error(`[analyze] 配图重绘第 ${attempt} 次失败${attempt === 1 ? '，重试 1 次' : '（跳过，不影响批改）'}:`, e.message)
+            }
+          }
+          if (rf) {
             u1.prompt_tokens += rf.usage.prompt_tokens || 0
             u1.completion_tokens += rf.usage.completion_tokens || 0
             u1.cost += rf.usage.cost || 0
             for (const f of rf.result.items) {
               if (f.status === '已重绘' && f.template) figureSpecMap.set(String(Number(f.no)), { template: f.template, params: f.params })
             }
-            console.log(`[analyze] 配图重绘：${figureItems.length} 题有插图，成功重绘 ${figureSpecMap.size} 题`)
-          } catch (e: any) {
-            console.error('[analyze] 配图重绘失败（跳过，不影响批改）:', e.message)
+            console.log(`[analyze] 配图重绘：${figureItems.length} 题有插图，成功重绘 ${figureSpecMap.size} 题${lastErr ? '（经重试）' : ''}`)
+            // P2-93（验收#55）：重绘成功 ≠ 忠实还原——模板硬套但漏画关键要素（如题干提到电流计
+            // 模板画不出）会误导学生。成功结果做「模板要素 vs 题干要素」自检（纯文本批量单次调用），
+            // 不一致的降级「图待补」；自检本身失败不阻塞（保持重绘结果，降级是安全网不是关口）
+            if (figureSpecMap.size) {
+              try {
+                const checkItems = figureItems
+                  .filter((q) => figureSpecMap.has(String(Number(q.no))))
+                  .map((q) => ({ no: String(Number(q.no)), stem: q.stem, options: q.options || [], figure_note: q.figure_note, ...(figureSpecMap.get(String(Number(q.no))) as { template: string; params: Record<string, number | string> }) }))
+                const sc = await selfCheckFigures(provider, { grade: meta.grade, items: checkItems })
+                u1.prompt_tokens += sc.usage.prompt_tokens || 0
+                u1.completion_tokens += sc.usage.completion_tokens || 0
+                u1.cost += sc.usage.cost || 0
+                let downgraded = 0
+                for (const c of sc.result.items) {
+                  if (c.verdict !== '不一致') continue
+                  if (!figureSpecMap.delete(c.no)) continue
+                  downgraded++
+                  const q = figureItems.find((x) => String(Number(x.no)) === c.no)
+                  if (q) q.figure_note = [q.figure_note, `重绘自检未过：${c.missing || '模板要素与题干不符'}`].filter(Boolean).join('；')
+                  console.log(`[analyze] 第${c.no}题重绘自检未过 → 降级图待补（${c.missing}）`)
+                }
+                if (downgraded) console.log(`[analyze] 配图自检：${downgraded} 题不一致降级图待补`)
+              } catch (e: any) {
+                console.error('[analyze] 配图自检失败（保持重绘结果，不影响批改）:', e.message)
+              }
+            }
           }
         }
         // ② 独立求解标准答案（带试卷页原图：纸带读数/图像/装置必须看图）

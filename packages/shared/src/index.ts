@@ -288,6 +288,8 @@ export const FIGURE_TEMPLATES = [
   'photoelectric', // 光电效应（光照金属板逸出光电子）
   'coil_flux', // 线圈在磁场中（磁通量/感应电动势）
   'magnet_coil', // 条形磁铁插入线圈 + 电流计（楞次定律/电磁感应）
+  'boat_river', // 小船渡河（两岸+河宽+船头方向+水流速度）
+  'two_cars', // 两车同向行驶（追及/相遇：前车+后车+速度箭头+初始间距）
   'orbit', // 卫星/行星轨道（圆/椭圆 + 中心天体）
   'energy_levels', // 氢原子能级图（跃迁箭头）
   'double_slit', // 双缝干涉（双缝+波前+屏上条纹）
@@ -344,6 +346,8 @@ export const FIGURE_TEMPLATE_DOCS = `- incline：斜面滑块（angle 斜面倾�
 - photoelectric：光电效应（nu 入射光频率/波长标注、Ek 可选光电子最大初动能、W 可选逸出功标注、label 金属标注）
 - coil_flux：线圈在磁场中（kind 填 static（线圈平放在磁场中）或 rotate（线圈绕竖直轴在磁场中匀速转动）、B 磁场标注、label 线圈标注）
 - magnet_coil：条形磁铁竖直插入线圈+电流计（楞次定律/电磁感应；pole 填 N 或 S（插入端磁极，默认 N）、label_coil 线圈标注（默认 "A"）、v 可选插入速度标注）
+- boat_river：小船渡河（两岸+河宽+船头方向+水流速度；d 河宽标注（如 "100m"）、v_boat 船在静水中速度标注、v_water 水流速度标注、heading 可选填 perp（垂直河岸，默认）/upstream（偏向上游）/downstream（偏向下游）、label 船标注可选）
+- two_cars：两车同向行驶（追及/相遇；label1 前车标注（默认 "甲"）、label2 后车标注（默认 "乙"）、v1 前车速度标注（如 "10m/s"，填了才显示 v₁=… 箭头标注）、v2 后车速度标注（后车匀速时才填）、a2 后车加速度标注（后车从静止/匀加速追赶时用这个，如 "2m/s²"，勿把加速度填进 v2）、gap 初始间距标注（如 "x₀=20m"；题干未给初始间距/同地出发则不填，此时不画间距线））
 - orbit：卫星/行星绕中心天体（kind 填 circle（圆轨道）或 ellipse（椭圆轨道）、R 可选轨道半径、label 卫星标注、center 中心天体标注如 "地球"）
 - energy_levels：氢原子能级图（max_n 能级数（默认4）、from/to 跃迁箭头起止能级、E1 基态能量标注）
 - double_slit：双缝干涉（d 双缝间距（mm）、L 双缝到屏距离（m）、lambda 波长标注可选）
@@ -501,6 +505,27 @@ ${FIGURE_TEMPLATE_DOCS}
 
 export function redrawFiguresUserPrompt(grade: string, count: number): string {
   return `学生年级：${grade || '未知'}。本次共 ${count} 道有插图的题，请对照原图逐题给出 figure_spec（no/template/params/status）。`
+}
+
+// ①″ 配图重绘自检（P2-93/P2-94，验收#55）：重绘成功后做「模板要素 vs 题干要素」一致性复核——
+// 模型重绘有「硬套模板但漏画关键要素」的倾向（P2-93），且重绘整次调用成败波动大（P2-94，
+// 同代码同图 11→0），故成功结果也要复核：缺关键要素的降级「图待补」，宁缺勿编
+export interface FigureSelfCheckItem {
+  no: string
+  verdict: '一致' | '不一致'
+  missing: string // 不一致时列出缺失/错误的要素
+}
+export const FIGURE_SELF_CHECK_SYSTEM_PROMPT = `你是一名严谨的高中物理教师，正在复核「AI 按模板重绘的题图」是否忠实还原了原题插图。
+给你每道题的：题干（含选项与原卷图描述 figure_note）、所选模板名、该模板的图形要素说明、给出的参数。
+请逐题判断：按该模板与参数渲染出的图形，是否涵盖原题插图的关键要素（装置/对象数量/标注文字/方向箭头/数值/电表磁极等）？
+- 关键要素都能体现 → verdict 填「一致」，missing 填空字符串；
+- 缺关键要素或要素画错（如题干提到电流计/多物块/方向而模板体现不出、参数与题干数值不一致）→ verdict 填「不一致」，missing 列出缺失或错误的要素；
+- 只依据「题干/figure_note 描述 vs 模板要素」判断，宁严勿松：拿不准算「不一致」（宁可退回「图待补」由教师补图，不可留一张缺要素的图误导学生）。
+严格输出 JSON（不要输出任何 JSON 以外的文字，不要 markdown 代码块标记）：
+{"items":[{"no":"1","verdict":"一致","missing":""}]}`
+
+export function figureSelfCheckUserPrompt(grade: string, count: number): string {
+  return `学生年级：${grade || '未知'}。本次共 ${count} 道重绘结果待复核，请逐题输出 no/verdict/missing（items 题号与输入一一对应）。`
 }
 
 // ② 文本：独立求解试卷（不依赖学生作答，得出标准答案与解析）
