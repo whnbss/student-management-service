@@ -1,6 +1,6 @@
 // P1-81/P1-82/P2-80/P1-84 单测：数值抽样等价判定 + 判定文案机器校正启发式 + 展示层/判定层交叉校验（验收 #45/#46/#47 实测案例）
 import { sampleEquivalent as eq, isEquivClaim, hasJudgeContradiction } from '../packages/shared/src/index.ts'
-import { answersClearlyDisagree as dis } from '../apps/api/src/answerMatch.ts'
+import { answersClearlyDisagree as dis, subBlanksMisaligned as mis, scrubSpeculation as scrub, answersAgree as agree, splitParts } from '../apps/api/src/answerMatch.ts'
 
 let fail = 0
 function chk(name: string, got: unknown, expect: unknown) {
@@ -63,5 +63,39 @@ chk('文字带「答案：」前缀归一化', dis('答案：大于', '大于', 
 chk('单侧空 → 不表态', dis('', '3750', '其它', eq), false)
 chk('单侧无数值 → 保守不表态', dis('见解析', '3750J', '其它', eq), false)
 chk('单位不对称 2.4 m/s vs 2.4 → 保守不表态', dis('2.4 m/s', '2.4', '其它', eq), false)
+
+
+// ---- P1-88 空位对齐校验（subBlanksMisaligned，验收#48 12(4)(5) 两空合并实测）----
+const std5 = ['(1)','(2)','(3)','(4)','(5)'].map((k) => ({ key: k, answer: '' }))
+chk('12(4)(5) 合并：比对层 4 空 vs 标准 5 空 → 不齐', mis(std5, ['(1)','(2)','(3)','(4)'].map((k) => ({ key: k }))), '比对层4空 vs 标准5空')
+chk('逐空齐 5 空 → 不表态', mis(std5, ['(1)','(2)','(3)','(4)','(5)'].map((k) => ({ key: k }))), '')
+chk('空数同但空位不齐 (6) → 不齐', mis(std5, ['(1)','(2)','(3)','(4)','(6)'].map((k) => ({ key: k }))), '比对层空位（1/2/3/4/6）与标准空位（1/2/3/4/5）不齐')
+chk('标准单空题不校验', mis([{ key: '(1)', answer: '' }], [{ key: '(1)' }]), '')
+chk('比对层没给逐空且读卡也没读出多空 → 不表态', mis(std5, [], []), '')
+chk('比对层没给逐空但读卡 4 空 vs 标准 5 空 → 不齐', mis(std5, [], ['(1)','(2)','(3)','(4)'].map((k) => ({ key: k }))), '读卡层4空 vs 标准5空（比对层未给逐空判定）')
+chk('比对层没给逐空但读卡 5 空 = 标准 5 空 → 不表态', mis(std5, [], ['(1)','(2)','(3)','(4)','(5)'].map((k) => ({ key: k }))), '')
+chk('key 无数字条目被忽略（(字迹不清)）', mis(std5, [{ key: '(字迹不清)' }, { key: '(1)' }, { key: '(2)' }, { key: '(3)' }, { key: '(4)' }, { key: '(5)' }]), '')
+chk('key 无数字条目忽略后剩 4 空 → 不齐', mis(std5, [{ key: '(字迹不清)' }, { key: '(1)' }, { key: '(2)' }, { key: '(3)' }, { key: '(4)' }]), '比对层4空 vs 标准5空')
+
+// ---- P3-86 臆测禁令清洗（scrubSpeculation）----
+chk('臆测：填空错位改写', scrub('学生第12题填空错位，(4)(5)内容串行'), '学生第12题空位对应存疑（待人工核对），(4)(5)空位对应存疑（待人工核对）')
+chk('臆测：抄错行改写', scrub('疑似抄错行'), '疑似空位对应存疑（待人工核对）')
+chk('臆测：看错题号改写', scrub('可能看错题号'), '可能空位对应存疑（待人工核对）')
+chk('正常 note 不改写', scrub('学生作答与标准答案数值一致'), '学生作答与标准答案数值一致')
+chk('系统自书「空位对齐失败」不被误洗', scrub('空位对齐失败（比对层4空 vs 标准5空）'), '空位对齐失败（比对层4空 vs 标准5空）')
+
+
+// ---- P1-88 续（验收#48 C2 实测）：表决票前导等号噪声拆散多数组 —— splitParts 剥离前导 = 后应一致
+const v1 = '(1)=AD；(2)=2.4；(3)=mgh，大于；(4)=(g/2k−1/2)'
+const v2 = '(1)AD；(2)2.4；(3)mgh，大于；(4)(g/2k−1/2)'
+chk('票内 (1)=AD vs (1)AD 前导等号噪声 → agree', agree(v1, v2, '填空'), true)
+chk('前导等号噪声 splitParts 剥离', JSON.stringify(splitParts(v1)), JSON.stringify(['ad','2.4','mgh,大于','(g/2k−1/2)']))
+chk('真分歧仍不一致（等号修复不放宽）', agree('(1)=AD；(2)=2.4', '(1)AC；(2)=2.4', '填空'), false)
+
+
+// ---- P1-88 续：表决分组支持数值抽样等价（g/2k−1/2 ≡ (g−k)/2k 不拆散多数组，验收#48 Q12 五票实测）
+chk('等价票分组：g/2k−1/2 vs (g−k)/2k → agree', agree('g/2k−1/2', '(g−k)/2k', '填空', eq), true)
+chk('真分歧不分组：g/2k−1/2 vs g/k−1/2', agree('g/2k−1/2', 'g/k−1/2', '填空', eq), false)
+chk('多问内逐空等价救回', agree('(1)=AD；(2)=2.4；(4)=g/2k−1/2', '(1)AD；(2)=2.4；(4)=(g−k)/2k', '填空', eq), true)
 
 process.exit(fail ? 1 : 0)

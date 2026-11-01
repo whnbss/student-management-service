@@ -13,7 +13,7 @@ import { UPLOADS_DIR, db, getSetting } from '../db'
 import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper, redrawFigures } from '../ai'
 import type { SheetReadItem, PaperExtractItem, PaperSolvedItem } from '@workbench/shared'
 import { sampleEquivalent, isEquivClaim, hasJudgeContradiction } from '@workbench/shared'
-import { letterSetOf, canonAnswer, splitParts, numsOf, answersAgree, answersClearlyDisagree } from '../answerMatch'
+import { letterSetOf, canonAnswer, splitParts, numsOf, answersAgree, answersClearlyDisagree, subBlanksMisaligned, scrubSpeculation } from '../answerMatch'
 
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif',
@@ -175,7 +175,7 @@ export default async function analysisRoutes(app: FastifyInstance) {
             if (vs.length) {
               const groups: Array<{ rep: PaperSolvedItem; members: PaperSolvedItem[] }> = []
               for (const v of vs) {
-                const g = groups.find((g) => answersAgree(g.rep.answer, v.answer, q.qtype))
+                const g = groups.find((g) => answersAgree(g.rep.answer, v.answer, q.qtype, sampleEquivalent))
                 if (g) g.members.push(v)
                 else groups.push({ rep: v, members: [v] })
               }
@@ -288,6 +288,25 @@ export default async function analysisRoutes(app: FastifyInstance) {
           extraNote: [extracted.unrecognized.length ? `试卷页识别说明：${extracted.unrecognized.join('；')}` : '', sheet.unrecognized.length ? `答题卡识别说明：${sheet.unrecognized.join('；')}` : '', solved.note ? `求解说明：${solved.note}` : '', pendingNos.size ? `第${[...pendingNos].join('、')}题标准答案存在多解分歧已标待确认——这些题一律输出 verdict=「无法识别」并在 comment 注明「标准答案待确认」，不得自行判定对错` : ''].filter(Boolean).join(' '),
           images: paperUrls,
         })
+        // ④′⁻ 臆测禁令清洗（P3-86，验收#48）：比对模型偶发写出「填空错位/串行/抄错行」类
+        // 未经核实的归因，会被教案/讲评原样引用误导教师——统一改写为「待人工核对」，
+        // 再进入后续判定校正（校正读取 note 文本，先清洗避免臆测词干扰）
+        {
+          let scrubbed = 0
+          const scrubText = (s: string) => {
+            const t = scrubSpeculation(s)
+            if (t !== s) scrubbed++
+            return t
+          }
+          for (const it of analysis.items) {
+            it.comment = scrubText(String(it.comment || ''))
+            it.error_step = scrubText(String(it.error_step || ''))
+            for (const sa of Array.isArray(it.sub_answers) ? it.sub_answers : []) {
+              if (sa?.note) sa.note = scrubText(String(sa.note))
+            }
+          }
+          if (scrubbed) console.log(`[analyze] 臆测禁令清洗：${scrubbed} 处臆测性归因已改写为待人工核对`)
+        }
         // ④′ 选择题判定机器裁定：标准答案字母集合 vs 学生填涂字母集合直接比对（不受模型比对偶发影响）；
         // 判「对」但卷面有红叉 → targeted 放大重读后再裁一次
         {
@@ -476,6 +495,34 @@ export default async function analysisRoutes(app: FastifyInstance) {
             }
           }
           if (crossFlagged) console.log(`[analyze] ${crossFlagged} 题展示层/判定层不一致 → 已标待确认`)
+        }
+        // ④⁵ 空位对齐校验（P1-88，验收#48）：比对层 sub_answers 必须与标准答案逐空一一对应。
+        // 读卡/比对层把两空内容合并成一条（#48 的 12(4)(5)）或漏空时，逐空判定不可信：
+        // 某空判定行丢失、P1-82 等价救回失效、note 臆测连锁发生（P3-86 同象）。
+        // 发现空数/空位不符 → 整题转待确认，不静默采信错位的逐空判定
+        {
+          const stdOf = new Map(solved.items.map((s) => [String(Number(s.no)), s]))
+          const sheetOf = new Map(sheet.items.map((s) => [String(Number(s.no)), s]))
+          let misaligned = 0
+          for (const it of analysis.items) {
+            const no = String(Number(it.no))
+            if (it.verdict === '无法识别' || pendingNos.has(no)) continue
+            const s = stdOf.get(no)
+            if (!s) continue
+            const why = subBlanksMisaligned(s.per_blank || [], Array.isArray(it.sub_answers) ? it.sub_answers : [], sheetOf.get(no)?.per_blank)
+            if (!why) continue
+            const stdText = (s.per_blank || []).map((b) => `${b.key}=${b.answer}`).join('，')
+            it.verdict = '无法识别'
+            it.sub_answers = []
+            it.error_step = ''
+            it.error_type = ''
+            it.comment = `空位对齐失败（${why}），逐空判定不可信，已转待确认，请人工核对卷面（标准逐空：${stdText.slice(0, 120)}）`
+            it.reference_answer = `待确认（标准逐空：${stdText.slice(0, 120)}）`
+            analysis.unrecognized.push(`第${it.no}题：${why}，逐空判定不可信，待人工确认`)
+            misaligned++
+            console.log(`[analyze] 第${it.no}题${why} → 改待确认`)
+          }
+          if (misaligned) console.log(`[analyze] ${misaligned} 题空位不齐 → 已标待确认`)
         }
         // ④‴ 配图落标：重绘成功的题把 figure_spec 写进分析结果（figure_status=已重绘）；
         // 原题有图但模板不能还原/重绘失败的标「图待补」，不编造

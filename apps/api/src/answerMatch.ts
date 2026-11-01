@@ -41,7 +41,7 @@ export function splitParts(s: string): string[] | null {
   for (let i = 0; i < marks.length; i++) {
     const start = (marks[i].index || 0) + marks[i][0].length
     const end = i + 1 < marks.length ? marks[i + 1].index || t.length : t.length
-    parts.push(t.slice(start, end).replace(/^,+|,+$/g, ''))
+    parts.push(t.slice(start, end).replace(/^,+|,+$/g, '').replace(/^[:：=]+/, ''))
   }
   return parts
 }
@@ -59,7 +59,7 @@ export function numsOf(s: string): number[] {
   }
   return out
 }
-export function answersAgree(a: string, b: string, qtype: string): boolean {
+export function answersAgree(a: string, b: string, qtype: string, equiv?: (x: string, y: string) => boolean | null): boolean {
   const na = String(a || '').trim(); const nb = String(b || '').trim()
   if (!na || !nb) return false
   if (qtype === '选择') {
@@ -69,7 +69,7 @@ export function answersAgree(a: string, b: string, qtype: string): boolean {
   // P1-76：多问结构逐问比对（(1)…(2)…，问数一致且逐问一致才算一致）
   const pa = splitParts(na); const pb = splitParts(nb)
   if (pa && pb && pa.length === pb.length) {
-    return pa.every((p, i) => answersAgree(p, pb[i], '其它'))
+    return pa.every((p, i) => answersAgree(p, pb[i], '其它', equiv))
   }
   const xs = numsOf(na); const ys = numsOf(nb)
   if (xs.length && ys.length && xs.length === ys.length) {
@@ -84,6 +84,9 @@ export function answersAgree(a: string, b: string, qtype: string): boolean {
     // 数值集合不一致不直接判分歧：可能是 \frac12→"12" 之类的写法噪声（P1-76），
     // 交给归一化字符串比对兜底；真分歧（数值实质不同）归一化后必然不同
   }
+  // 验收#48 实测：等价但写法不同的票（g/2k−1/2 vs (g−k)/2k）不该拆散多数组——
+  // 调用方传入数值抽样等价求值器（P1-82）时，证实等价即一致（真分歧求值器不会证实）
+  if (equiv && equiv(na, nb) === true) return true
   return canonAnswer(na) === canonAnswer(nb)
 }
 
@@ -126,4 +129,47 @@ export function answersClearlyDisagree(a: string, b: string, qtype: string, samp
   // 双侧均无法解析成数值（大于/小于/有/无类文字答案）：归一化文本不同才视为不一致
   if (eq === null && !xs.length && !ys.length) return canonAnswer(na) !== canonAnswer(nb)
   return false // 解析口径不齐（数值个数不同/单侧有数值）——保守不表态
+}
+
+// P1-88（验收#48）：空位对齐校验 —— 比对层 sub_answers 必须与标准答案逐空一一对应。
+// 读卡/比对层把两空内容合并成一条（#48 的 12(4)(5)）或漏空时，逐空判定不可信：
+// 某空判定行丢失、P1-82 等价救回失效、note 臆测连锁发生。空数/空位不符 → 整题转待确认。
+// 保守边界：标准答案没有逐空（<2 空）不校验；比对层没给逐空判定时，仅当读卡层确实读出了
+// 多空且空数与标准不符才判不齐（比对层整体判定可能仍可信，不强行作废）。
+export function blankKeyDigits(key: string): string {
+  return String(key || '').replace(/[^0-9]/g, '')
+}
+export function subBlanksMisaligned(
+  stdPerBlank: Array<{ key: string; answer?: string }>,
+  studentSubs: Array<{ key: string }>,
+  sheetPerBlank?: Array<{ key: string; answer?: string }>
+): string {
+  const stdKeys = (stdPerBlank || []).map((b) => blankKeyDigits(b.key)).filter(Boolean)
+  if (stdKeys.length < 2) return '' // 单空/单问题无需对齐
+  const subKeys = (studentSubs || []).map((b) => blankKeyDigits(b.key)).filter(Boolean)
+  if (subKeys.length) {
+    if (subKeys.length !== stdKeys.length) return `比对层${subKeys.length}空 vs 标准${stdKeys.length}空`
+    const stdSet = new Set(stdKeys)
+    if (stdKeys.some((k) => !subKeys.includes(k)) || subKeys.some((k) => !stdSet.has(k))) {
+      return `比对层空位（${subKeys.join('/')}）与标准空位（${stdKeys.join('/')}）不齐`
+    }
+    return ''
+  }
+  // 比对层没给逐空判定：读卡层读出了多空且空数与标准不符 → 同样视为不齐（读卡合并/漏空的实证）
+  const sheetKeys = (sheetPerBlank || []).map((b) => blankKeyDigits(b.key)).filter(Boolean)
+  if (sheetKeys.length && sheetKeys.length !== stdKeys.length) {
+    return `读卡层${sheetKeys.length}空 vs 标准${stdKeys.length}空（比对层未给逐空判定）`
+  }
+  return ''
+}
+
+// P3-86（验收#48）：臆测禁令的机器侧清洗 —— 比对模型偶发写出「填空错位/串行/抄错行」类
+// 未经核实的归因，会被教案/讲评原样引用误导教师。命中臆测词的片段统一改写为「待人工核对」，
+// 不改写其它内容（只做词级替换，不动句子结构）。
+const SPECULATION_RE = /填空错位|答案错位|空位错位|错位作答|两空错位|内容串行|作答串行|串行作答|抄错行|看错行|看错题号|两空互串|填涂错位/g
+export function scrubSpeculation(text: string): string {
+  const t = String(text || '')
+  if (!SPECULATION_RE.test(t)) return t
+  SPECULATION_RE.lastIndex = 0
+  return t.replace(SPECULATION_RE, '空位对应存疑（待人工核对）')
 }
