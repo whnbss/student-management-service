@@ -311,7 +311,7 @@ export const FIGURE_TEMPLATE_DOCS = `- incline：斜面滑块（angle 斜面倾�
 - projectile：桌边平抛（h 桌高（m）、label）
 - container2balls：圆柱容器内两球（默认并排贴底；label1、label2、R 容器半径可选、r 球半径可选；liquid 画液体）
 - spring：墙面弹簧连滑块（label、x 压缩量（m））
-- spring_vertical：竖直悬挂弹簧（天花板固定+竖直弹簧+下端钩码/物块；label 默认 "钩码"、l0 可选原长如 "10.0cm"、l 可选现长如 "14.0cm"；竖直悬挂/钩码拉伸实验一律用本模板，勿用水平 spring）
+- spring_vertical：竖直悬挂弹簧（天花板固定+竖直弹簧+下端钩码/物块；label 默认 "钩码"、l0 可选原长如 "10.0cm"、l 可选现长如 "14.0cm"；竖直悬挂/钩码拉伸实验一律用本模板，勿用水平 spring；wheel 真值=电动机+偏心轮驱动情境（受迫振动：天花板下电动机→偏心轮→偏心销挂弹簧→物块，轮旁旋转箭头标 freq 默认 "f"），题干含「偏心轮/电动机驱动」时必用，缺偏心轮即要素缺失）
 - bridge：桥上的车（kind 填 convex（拱桥）或 concave（凹桥）、R 半径（m）、label）
 - field_region：匀强场区/点电荷（kind 填 uniform 或 point、charge 可选 +q/-q、label）
 - bowl：光滑半球形碗（angle 球与碗心连线偏离竖直方向角（度）、R 半径（m）、label）
@@ -343,13 +343,13 @@ export const FIGURE_TEMPLATE_DOCS = `- incline：斜面滑块（angle 斜面倾�
 - freefall：竖直下落/上抛（kind 填 down（下落）或 up（上抛）、h 高度（m）、v0 可选初速度标注、label）
 - accel_plates：平行板电场加速/偏转（kind 填 accel（加速：粒子穿过带孔双板）或 deflect（偏转：粒子平行于板射入板间）、U 板间电压、d 可选板间距、charge 如 -e、label）
 - wire_bfield：通电导线/运动电荷在磁场中（kind 填 wire（水平直导线，I 电流方向箭头）或 charge（运动电荷）、B 磁场标注如 "B（⊗垂直纸面向里）"、F 可选受力标注、label）
-- photoelectric：光电效应（nu 入射光频率/波长标注、Ek 可选光电子最大初动能、W 可选逸出功标注、label 金属标注）
+- photoelectric：光电效应（nu 入射光频率/波长标注、Ek 可选光电子最大初动能、W 可选逸出功标注、label 金属标注；emit 填 0 不画逸出光电子——题干只问光子能量/能量子假说、未涉及电子逸出时必用，防编造）
 - coil_flux：线圈在磁场中（kind 填 static（线圈平放在磁场中）或 rotate（线圈绕竖直轴在磁场中匀速转动）、B 磁场标注、label 线圈标注）
 - magnet_coil：条形磁铁竖直插入线圈+电流计（楞次定律/电磁感应；pole 填 N 或 S（插入端磁极，默认 N）、label_coil 线圈标注（默认 "A"）、v 可选插入速度标注）
 - boat_river：小船渡河（两岸+河宽+船头方向+水流速度；d 河宽标注（如 "100m"）、v_boat 船在静水中速度标注、v_water 水流速度标注、heading 可选填 perp（垂直河岸，默认）/upstream（偏向上游）/downstream（偏向下游）、label 船标注可选）
 - two_cars：两车同向行驶（追及/相遇；label1 前车标注（默认 "甲"）、label2 后车标注（默认 "乙"）、v1 前车速度标注（如 "10m/s"，填了才显示 v₁=… 箭头标注）、v2 后车速度标注（后车匀速时才填）、a2 后车加速度标注（后车从静止/匀加速追赶时用这个，如 "2m/s²"，勿把加速度填进 v2）、label_front/label_rear 可选：前/后车箭头的完整标注文字（含题干原下标——题干符号系统与「前/后车」位置冲突时必用，如题干定义 v₁=10 为后车甲、v₂=4 为前车乙，则 label_rear="v₁=10m/s"+label_front="v₂=4m/s"）、gap 初始间距标注（如 "x₀=20m"；题干未给初始间距/同地出发则不填，此时不画间距线））
 - orbit：卫星/行星绕中心天体（kind 填 circle（圆轨道）或 ellipse（椭圆轨道）、R 可选轨道半径、label 卫星标注、center 中心天体标注如 "地球"）
-- energy_levels：氢原子能级图（max_n 能级数（默认4）、from/to 跃迁箭头起止能级、E1 基态能量标注）
+- energy_levels：氢原子能级图（max_n 能级数（默认4）、from/to 跃迁箭头起止能级、E1 基态能量标注；trans 填 0 只画能级不画跃迁箭头——「最多辐射几种光子」类只需能级图的题用）
 - double_slit：双缝干涉（d 双缝间距（mm）、L 双缝到屏距离（m）、lambda 波长标注可选）
 - oil_film：油膜法估测分子大小（label 油膜标注）
 - multimeter：多用电表欧姆挡测电阻（ohm 倍率如 "×100"、label 待测电阻标注）

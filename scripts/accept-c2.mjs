@@ -28,7 +28,15 @@ const BASELINE = {
   ],
 }
 
-const BASE = process.env.SMOKE_BASE || 'http://127.0.0.1:3210'
+// ⚠️ 守卫（监督者 #56 教训）：本脚本会真实上传图片并触发 AI 分析（--save 还会落库），
+// 早期默认打 3210 生产库，曾有误跑事故。必须先起隔离实例并显式指定 SMOKE_BASE 才能运行，例如：
+//   生产 VACUUM INTO 快照 → 隔离实例起 3299 → SMOKE_BASE=http://127.0.0.1:3299 node scripts/accept-c2.mjs
+if (!process.env.SMOKE_BASE) {
+  console.error('[守卫] 拒绝运行：未设置 SMOKE_BASE。本脚本会真实写入后端（上传图片 + 触发 AI 分析，--save 还会落库），默认 3210 是生产库。')
+  console.error('请先起隔离实例（生产 VACUUM INTO 快照 → 3299 等），再执行：SMOKE_BASE=http://127.0.0.1:3299 node scripts/accept-c2.mjs [--save] [--baseline]')
+  process.exit(1)
+}
+const BASE = process.env.SMOKE_BASE
 // 两阶段批改（pro 级求解 + 复核）可能 >5 分钟：放宽脚本侧响应头超时
 //（网关慢轮次单票超时重试可烧 ~8min，#50 实测 900s 不够）
 const lazyDispatcher = new Agent({ headersTimeout: 1_800_000, bodyTimeout: 1_800_000 })

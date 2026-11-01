@@ -259,24 +259,67 @@ function tSpring(p: FigureSpec['params']): string {
 }
 
 // 竖直悬挂弹簧：天花板固定 + 竖直弹簧 + 下端钩码/物块；l0（原长，如 "10.0cm"）、l（现长，如 "14.0cm"）可选标注
+// wheel 真值时改为「电动机 + 偏心轮驱动」情境（受迫振动）：天花板下装电动机，偏心轮上的偏心销挂弹簧，
+// 轮旁画旋转箭头并标驱动频率符号 freq（默认 "f"）
 function tSpringVertical(p: FigureSpec['params']): string {
   const label = str(p.label, '钩码')
   const l0 = str(p.l0)
   const l = str(p.l)
+  const hasWheel = !!str(p.wheel).trim() || p.wheel === 1
   const topY = 40
-  const botY = 152
+  const botY = hasWheel ? 172 : 152
   const cx = 150
   // 天花板（固定端在上）
   let hatch = ''
   for (let x = 112; x <= 288; x += 24) hatch += `<line x1="${x}" y1="${topY}" x2="${x - 12}" y2="${topY - 12}" stroke="#94a3b8" stroke-width="1.5"/>`
   const ceiling = `<line x1="90" y1="${topY}" x2="310" y2="${topY}" stroke="${INK}" stroke-width="3"/>` + hatch
-  // 竖直弹簧锯齿
-  let zig = `M ${cx} ${topY} `
-  for (let i = 1; i <= 8; i++) zig += `L ${cx + (i % 2 ? 14 : -14)} ${topY + i * 13} `
-  zig += `L ${cx} ${botY}`
   // 下端钩码/物块
   const block = `<rect x="${cx - 26}" y="${botY}" width="52" height="36" rx="4" fill="#c7d2fe" stroke="${INK}" stroke-width="2"/>` +
     txt(cx, botY + 23, label, 14)
+  // 电动机 + 偏心轮驱动（受迫振动情境）：弹簧改挂在偏心轮的偏心销上
+  let wheelSvg = ''
+  let zigStart = { x: cx, y: topY }
+  if (hasWheel) {
+    const mTop = topY + 8 // 电动机顶边
+    const mH = 26, mW = 72
+    const wr = 22
+    const wy = mTop + mH + 10 + wr // 偏心轮圆心（电机底 + 轴 10 + 轮半径）
+    // 偏心销：取在轮缘附近（偏离轮心 ≈ r）
+    const pinA = (38 * Math.PI) / 180
+    const px = cx + wr * Math.cos(pinA), py = wy + wr * Math.sin(pinA)
+    zigStart = { x: px, y: py + 5 }
+    wheelSvg =
+      // 电动机（矩形 + 标注）
+      `<rect x="${cx - mW / 2}" y="${mTop}" width="${mW}" height="${mH}" rx="4" fill="#e0e7ff" stroke="${INK}" stroke-width="2"/>` +
+      txt(cx, mTop + 18, '电动机', 12) +
+      // 轴
+      `<line x1="${cx}" y1="${mTop + mH}" x2="${cx}" y2="${wy - wr}" stroke="${INK}" stroke-width="3"/>` +
+      // 偏心轮（圆 + 轮心 + 轮心到偏心销的半径线 + 偏心销）
+      `<circle cx="${cx}" cy="${wy}" r="${wr}" fill="none" stroke="${INK}" stroke-width="2"/>` +
+      `<circle cx="${cx}" cy="${wy}" r="2.5" fill="${INK}"/>` +
+      `<line x1="${cx}" y1="${wy}" x2="${px.toFixed(1)}" y2="${py.toFixed(1)}" stroke="${INK}" stroke-width="1.5"/>` +
+      `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="4" fill="#fff" stroke="${INK}" stroke-width="2"/>` +
+      txt(cx + wr + 8, wy + 8, '偏心轮', 12, INK, 'start') +
+      // 旋转箭头（圆弧 + 端部箭头）+ 驱动频率标注
+      (() => {
+        const r = wr + 8
+        const a1 = (-150 * Math.PI) / 180, a2 = (-30 * Math.PI) / 180
+        const sx = cx + r * Math.cos(a1), sy = wy + r * Math.sin(a1)
+        const ex = cx + r * Math.cos(a2), ey = wy + r * Math.sin(a2)
+        return `<path d="M ${sx.toFixed(1)} ${sy.toFixed(1)} A ${r} ${r} 0 0 1 ${ex.toFixed(1)} ${ey.toFixed(1)}" fill="none" stroke="${ACCENT}" stroke-width="1.8"/>` +
+          arrow(ex - 5 * Math.cos(a2 + Math.PI / 2), ey - 5 * Math.sin(a2 + Math.PI / 2), ex, ey, ACCENT, 1.8) +
+          txt(cx + r + 20, wy - 14, str(p.freq, 'f'), 14, ACCENT, 'start')
+      })()
+  }
+  // 竖直弹簧锯齿
+  let zig = `M ${zigStart.x} ${zigStart.y} `
+  const nSeg = hasWheel ? 6 : 8
+  const amp = hasWheel ? 12 : 14
+  for (let i = 1; i <= nSeg; i++) {
+    const t = i / nSeg
+    zig += `L ${(zigStart.x + (cx - zigStart.x) * t + (i % 2 ? amp : -amp)).toFixed(1)} ${(zigStart.y + (botY - zigStart.y) * t).toFixed(1)} `
+  }
+  zig += `L ${cx} ${botY}`
   // 右侧尺寸线标现长 L；左侧按 l0/l 比例画原长虚线参考 + 尺寸线标 L₀
   let dims = ''
   if (l) {
@@ -294,7 +337,7 @@ function tSpringVertical(p: FigureSpec['params']): string {
         txt(78, (topY + y0) / 2 + 4, `L₀=${l0}`, 13, '#64748b', 'end')
     }
   }
-  const inner = ceiling + `<path d="${zig}" fill="none" stroke="${INK}" stroke-width="2"/>` + block + dims
+  const inner = ceiling + wheelSvg + `<path d="${zig}" fill="none" stroke="${INK}" stroke-width="2"/>` + block + dims
   return wrap(inner)
 }
 
@@ -1308,15 +1351,17 @@ function tPhotoelectric(p: FigureSpec['params']): string {
   const Ek = str(p.Ek)
   const W = str(p.W)
   const label = str(p.label, '金属')
+  // emit 填 0 时不画逸出光电子（题干只涉及光子能量/能量子假说、未涉及电子逸出时必用，防编造）
+  const noEmit = str(p.emit) === '0' || p.emit === 0
   const inner =
     `<rect x="250" y="60" width="26" height="150" fill="#e2e8f0" stroke="${INK}" stroke-width="2"/>` +
     txt(263, 232, label, 12) +
     `<path d="M 60 110 Q 90 90 120 110 T 180 110 T 240 110" fill="none" stroke="${RED}" stroke-width="2"/>` +
     arrow(240, 110, 252, 118, RED, 2.2) +
     txt(120, 92, `光 ${nu}`, 13, RED) +
-    arrow(248, 96, 196, 60, ACCENT, 2.2) +
-    `<circle cx="190" cy="56" r="6" fill="#fde68a" stroke="${INK}" stroke-width="1.6"/>` +
-    txt(168, 48, 'e', 12, ACCENT, 'start') +
+    (noEmit ? '' : arrow(248, 96, 196, 60, ACCENT, 2.2) +
+      `<circle cx="190" cy="56" r="6" fill="#fde68a" stroke="${INK}" stroke-width="1.6"/>` +
+      txt(168, 48, 'e', 12, ACCENT, 'start')) +
     (Ek ? txt(120, 150, `Ek=${Ek}`, 12, ACCENT, 'start') : '') +
     (W ? txt(300, 140, `W=${W}`, 12, '#64748b', 'start') : '')
   return wrap(inner)
@@ -1376,11 +1421,13 @@ function tOrbit(p: FigureSpec['params']): string {
 }
 
 
-// 氢原子能级图：max_n 能级数（默认 4）、from→to 跃迁箭头、E1 基态能量标注
+// 氢原子能级图：max_n 能级数（默认 4）、from→to 跃迁箭头、E1 基态能量标注；
+// trans 填 0 时只画能级不画跃迁箭头（用于「最多辐射几种光子」类只需能级图的题）
 function tEnergyLevels(p: FigureSpec['params']): string {
   const maxN = Math.min(6, Math.max(3, num(p.max_n, 4)))
   const from = Math.min(maxN, Math.max(2, num(p.from, 4)))
   const to = Math.min(maxN, Math.max(1, num(p.to, 2)))
+  const noTrans = str(p.trans) === '0' || p.trans === 0
   const e1 = str(p.E1, '-13.6')
   const levels = []
   for (let n = 1; n <= maxN; n++) {
@@ -1394,9 +1441,9 @@ function tEnergyLevels(p: FigureSpec['params']): string {
       `<text x="306" y="${yOf(n) + 4}" font-size="12" fill="${INK}" text-anchor="start" ${FONT}>n=${n}</text>` +
       (n === 1 ? `<text x="134" y="${yOf(n) + 4}" font-size="11" fill="#64748b" text-anchor="end" ${FONT}>E1=${e1}eV</text>` : ''))
   }
-  // 跃迁箭头（from → to，向下）
+  // 跃迁箭头（from → to，向下；trans=0 时不画）
   const fy = yOf(from), ty = yOf(to)
-  const trans = arrow(160, fy - 4, 160, ty + 4, RED, 2) +
+  const trans = noTrans ? '' : arrow(160, fy - 4, 160, ty + 4, RED, 2) +
     `<text x="168" y="${(fy + ty) / 2 + 4}" font-size="11" fill="${RED}" text-anchor="start" ${FONT}>${from}→${to} 发出光子</text>`
   const inner =
     txt(200, 24, '氢原子能级图', 12, '#64748b') +
