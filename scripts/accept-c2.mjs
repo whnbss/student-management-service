@@ -30,7 +30,8 @@ const BASELINE = {
 
 const BASE = process.env.SMOKE_BASE || 'http://127.0.0.1:3210'
 // 两阶段批改（pro 级求解 + 复核）可能 >5 分钟：放宽脚本侧响应头超时
-const lazyDispatcher = new Agent({ headersTimeout: 900_000, bodyTimeout: 900_000 })
+//（网关慢轮次单票超时重试可烧 ~8min，#50 实测 900s 不够）
+const lazyDispatcher = new Agent({ headersTimeout: 1_800_000, bodyTimeout: 1_800_000 })
 void lazyDispatcher
 // node fetch 全局 dispatcher（脚本只打 localhost，不涉代理）
 const { setGlobalDispatcher } = await import('undici')

@@ -10,10 +10,10 @@ import type { FastifyInstance } from 'fastify'
 import path from 'node:path'
 import fs from 'node:fs'
 import { UPLOADS_DIR, db, getSetting } from '../db'
-import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper, redrawFigures } from '../ai'
+import { getProviders, pickProvider, extractPaperQuestions, solvePaper, solvePaperPass2, readAnswerSheet, rereadSheetQuestions, verifyAnswerSheetFull, compareAndJudge, analyzePaper, redrawFigures, resolveBlanks } from '../ai'
 import type { SheetReadItem, PaperExtractItem, PaperSolvedItem } from '@workbench/shared'
 import { sampleEquivalent, isEquivClaim, hasJudgeContradiction } from '@workbench/shared'
-import { letterSetOf, canonAnswer, splitParts, numsOf, answersAgree, answersClearlyDisagree, subBlanksMisaligned, scrubSpeculation } from '../answerMatch'
+import { letterSetOf, canonAnswer, splitParts, numsOf, answersAgree, answersClearlyDisagree, subBlanksMisaligned, scrubSpeculation, expectedBlankCountOf, solveBlanksMismatch, solvedBlankCountOf, stripParseTail } from '../answerMatch'
 
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif',
@@ -196,6 +196,33 @@ export default async function analysisRoutes(app: FastifyInstance) {
           solved = {
             items: extracted.items.map((q) => final.get(String(Number(q.no)))).filter(Boolean) as PaperSolvedItem[],
             note: [solved0.note, `标准答案经五票表决（初解/复解一~四，不同温度独立复解），无多数分歧的题标「待确认」不强行判定`].filter(Boolean).join(' '),
+          }
+        }
+        // ②‴ targeted 按空重解（P2-90，验收#50）：求解层把 5 问输出成 4 段（(3) 的表达式后混入
+        // (4) 的「大于」）时逐空比对整题错位——prompt 纪律（#48 已加）仍复发，机器兜底：
+        // 从转录层数出期望空数，与求解层实际空数不符时对该题单独重解、强制逐空独立输出；
+        // 重解失败不阻塞（交给 ④⁵ 空位对齐校验兜底转待确认）
+        {
+          const solvedBy = new Map(solved.items.map((s) => [String(Number(s.no)), s]))
+          for (const q of extracted.items) {
+            const no = String(Number(q.no))
+            const s = solvedBy.get(no)
+            if (!s || q.qtype === '选择') continue
+            const expected = expectedBlankCountOf([q.stem, ...q.sub_questions])
+            const blankKeys = solveBlanksMismatch(expected, s)
+            if (!blankKeys.length) continue
+            try {
+              console.log(`[analyze] 第${no}题求解层空数（${solvedBlankCountOf(s)}）少于卷面（${blankKeys.length} 空）→ targeted 按空重解`)
+              const rb = await resolveBlanks(provider, { grade: meta.grade, question: q, blankKeys })
+              u2.prompt_tokens += rb.usage.prompt_tokens || 0
+              u2.completion_tokens += rb.usage.completion_tokens || 0
+              u2.cost += rb.usage.cost || 0
+              const idx = solved.items.indexOf(s)
+              if (idx >= 0) solved.items[idx] = { ...rb.result, no: s.no }
+              console.log(`[analyze] 第${no}题按空重解完成（${blankKeys.length} 空独立输出）`)
+            } catch (e: any) {
+              console.error(`[analyze] 第${no}题按空重解失败（保持原解，空位对齐校验兜底）:`, e.message)
+            }
           }
         }
         // ③ 读取答题卡学生作答（有答题卡页才调用；逐页读取提高识别保真度）
@@ -443,7 +470,8 @@ export default async function analysisRoutes(app: FastifyInstance) {
             if (!it.stem) { it.stem = ''; it.verdict = '无法识别' }
           }
           const s = ansOf(it.no)
-          if (s && (!it.reference_answer || /题干缺失|无法比对/.test(it.reference_answer))) it.reference_answer = s.answer + (s.solution ? `（解析：${s.solution.slice(0, 200)}）` : '')
+          // P2-91（验收#50）：reference_answer 只留答案本身——解析文本不再混进标准答案列（教师端冗长）
+          if (s && (!it.reference_answer || /题干缺失|无法比对/.test(it.reference_answer))) it.reference_answer = s.answer
         }
         // ④″ 待确认题强制落标（P0-71）：标准答案五票无多数的题——无论比对模型给了什么判定，
         // 一律改「无法识别」+ comment 注明分歧候选，进待确认清单，不强行判定（严禁硬给可能错的标准答案）
@@ -490,11 +518,17 @@ export default async function analysisRoutes(app: FastifyInstance) {
               crossFlagged++
               console.log(`[analyze] 第${it.no}题展示层/判定层答案不一致 → 改待确认（展示=${clip(shown)}，判定=${clip(voted)}）`)
             } else {
-              // 同源：展示层改写为判定实际采用的表决答案（解析尾巴照旧回填）
-              it.reference_answer = voted + (s.solution ? `（解析：${s.solution.slice(0, 200)}）` : '')
+              // 同源：展示层改写为判定实际采用的表决答案（P2-91：解析文本不再混入标准答案列）
+              it.reference_answer = voted
             }
           }
           if (crossFlagged) console.log(`[analyze] ${crossFlagged} 题展示层/判定层不一致 → 已标待确认`)
+        }
+        // ④⁗′ reference_answer 净化（P2-91，验收#50）：比对模型偶发把完整解析文本混进
+        // reference_answer（如「C（解析：A 错：…」）——统一切割解析尾巴，标准答案列只留答案本身
+        for (const it of analysis.items) {
+          const cut = stripParseTail(String(it.reference_answer || ''))
+          if (cut !== String(it.reference_answer || '')) it.reference_answer = cut
         }
         // ④⁵ 空位对齐校验（P1-88，验收#48）：比对层 sub_answers 必须与标准答案逐空一一对应。
         // 读卡/比对层把两空内容合并成一条（#48 的 12(4)(5)）或漏空时，逐空判定不可信：

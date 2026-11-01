@@ -1,5 +1,5 @@
 // 每日自动备份：SQLite 一致性快照（VACUUM INTO，WAL 下安全）+ uploads（视体积）打 zip 到 data/backups/
-// 保留最近 8 份自动轮转；zip 与 backups 目录均在 .gitignore 的 data/ 覆盖范围内，绝不入库
+// 保留最近 14 份自动轮转（KEEP_COUNT）；zip 与 backups 目录均在 .gitignore 的 data/ 覆盖范围内，绝不入库
 // 另：学生数据重建（purge）等危险操作执行前会额外强制快照一次（见 routes/students.ts）
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'

@@ -1,6 +1,6 @@
 // P1-81/P1-82/P2-80/P1-84 单测：数值抽样等价判定 + 判定文案机器校正启发式 + 展示层/判定层交叉校验（验收 #45/#46/#47 实测案例）
 import { sampleEquivalent as eq, isEquivClaim, hasJudgeContradiction } from '../packages/shared/src/index.ts'
-import { answersClearlyDisagree as dis, subBlanksMisaligned as mis, scrubSpeculation as scrub, answersAgree as agree, splitParts } from '../apps/api/src/answerMatch.ts'
+import { answersClearlyDisagree as dis, subBlanksMisaligned as mis, scrubSpeculation as scrub, answersAgree as agree, splitParts, expectedBlankCountOf, solveBlanksMismatch } from '../apps/api/src/answerMatch.ts'
 
 let fail = 0
 function chk(name: string, got: unknown, expect: unknown) {
@@ -97,5 +97,26 @@ chk('真分歧仍不一致（等号修复不放宽）', agree('(1)=AD；(2)=2.4'
 chk('等价票分组：g/2k−1/2 vs (g−k)/2k → agree', agree('g/2k−1/2', '(g−k)/2k', '填空', eq), true)
 chk('真分歧不分组：g/2k−1/2 vs g/k−1/2', agree('g/2k−1/2', 'g/k−1/2', '填空', eq), false)
 chk('多问内逐空等价救回', agree('(1)=AD；(2)=2.4；(4)=g/2k−1/2', '(1)AD；(2)=2.4；(4)=(g−k)/2k', '填空', eq), true)
+
+// ---- P1-84 漏网（验收#50）：带单位数值形态的展示层/判定层不一致检测 ----
+chk('14(2) 带单位 0.8kg vs 0.3kg → 不一致（#50 漏网主案例）', dis('0.8kg', '0.3kg', '计算', eq), true)
+chk('带单位一致 0.8kg vs 0.8 kg → 一致', dis('0.8kg', '0.8 kg', '计算', eq), false)
+chk('题号前缀噪声 14(2) 0.8kg vs 0.3kg → 不一致', dis('14(2) 0.8kg', '0.3kg', '计算', eq), true)
+chk('多问段数不齐但单位可配对 → 不一致', dis('(1)7.5m/s；(2)0.8kg；(3)大于', '(1)7.5m/s；(2)0.3kg', '计算', eq), true)
+chk('多问段数不齐但同单位全等 → 不误标', dis('(1)7.5m/s；(2)0.8kg；(3)大于', '(1)7.5m/s；(2)0.8kg', '计算', eq), false)
+chk('代数等价优先于单位配对（不误标）', dis('(g−k)/(2k)', 'g/(2k)−1/2', '计算', eq), false)
+chk('带单位表达式两侧一致 → 不误标', dis('2.4m/s（解析：v=…）', '2.4m/s', '计算', eq), false)
+chk('单侧有单位 → 保守不表态', dis('3750J', '3750', '计算', eq), false)
+
+// ---- P2-90（验收#50）：求解层逐空对齐检测（expectedBlankCountOf / solveBlanksMismatch）----
+chk('期望空数：5 问 → 5', expectedBlankCountOf(['第12题…(1)…(2)…(3)…(4)…(5)…']), 5)
+chk('期望空数：题干+小问合并数出 → 3', expectedBlankCountOf(['题干…', '(1)求速度 (2)求加速度 (3)求时间']), 3)
+chk('期望空数：非连续编号 (1)(2)(4) → 不表态 0', expectedBlankCountOf(['(1)…(2)…(4)…']), 0)
+chk('期望空数：无编号 → 0', expectedBlankCountOf(['单空题无编号']), 0)
+chk('求解层 5 问输出 4 段（#50 实测）→ 需重解', solveBlanksMismatch(5, { answer: '(1)=AD；(2)=2.4；(3)=mgh，大于；(4)=(g/2k−1/2)', per_blank: [] }).length, 5)
+chk('求解层 per_blank 4 条 vs 期望 5 → 需重解', solveBlanksMismatch(5, { answer: '', per_blank: ['(1)', '(2)', '(3)', '(4)'].map((k) => ({ key: k })) }).length, 5)
+chk('求解层空数齐 → 不重解', solveBlanksMismatch(5, { answer: '', per_blank: ['(1)', '(2)', '(3)', '(4)', '(5)'].map((k) => ({ key: k })) }).length, 0)
+chk('期望 <2 空（单问）→ 不重解', solveBlanksMismatch(1, { answer: '2.4', per_blank: [] }).length, 0)
+chk('answer 段数兜底（per_blank 空但 answer 5 段）→ 不重解', solveBlanksMismatch(5, { answer: '(1)a；(2)b；(3)c；(4)d；(5)e', per_blank: [] }).length, 0)
 
 process.exit(fail ? 1 : 0)

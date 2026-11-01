@@ -14,6 +14,7 @@ import {
   PAPER_EXTRACT_SYSTEM_PROMPT, paperExtractUserPrompt,
   REDRAW_FIGURES_SYSTEM_PROMPT, redrawFiguresUserPrompt,
   PAPER_SOLVE_SYSTEM_PROMPT, paperSolveUserPrompt,
+  SOLVE_BLANKS_SYSTEM_PROMPT, solveBlanksUserPrompt,
   SHEET_READ_SYSTEM_PROMPT, sheetReadUserPrompt,
   COMPARE_SYSTEM_PROMPT, compareUserPrompt,
   SOLVE_REVIEW_SYSTEM_PROMPT, solveReviewUserPrompt,
@@ -789,6 +790,32 @@ export async function solvePaperPass2(
 }
 
 // ①′ 原卷配图重绘（验收#43 ②）：转录后对有插图的题按模板库补 figure_spec——
+// 模板能忠实还原才给规格；不能还原如实标「图待补」，严禁硬套模板编造图形内容
+// ②‴ targeted 按空重解（P2-90，验收#50）：求解层把 5 问输出成 4 段时，对该题单独重解，
+// 强制 (1)~(N) 每空独立输出（一空一条）；失败不阻塞（交给比对层空位对齐校验兜底）
+export async function resolveBlanks(
+  provider: AiProvider,
+  p: { grade: string; question: PaperExtractItem; blankKeys: string[] }
+): Promise<{ result: PaperSolvedItem; usage: ReturnType<typeof recordUsage> }> {
+  const validate = (obj: any): PaperSolvedItem => {
+    const base = validateSolve({ items: [obj], note: '' })
+    if (!base.items.length || !base.items[0].per_blank.length) throw new Error('按空重解没有逐空结果')
+    return base.items[0]
+  }
+  return chatJson(
+    provider,
+    {
+      model: provider.text_model || provider.vision_model,
+      system: SOLVE_BLANKS_SYSTEM_PROMPT,
+      user: solveBlanksUserPrompt(p.grade, p.question, p.blankKeys),
+      temperature: 0.2,
+    },
+    validate,
+    'solve-blanks'
+  )
+}
+
+// 原卷配图重绘（验收#43 ②）：转录后对有插图的题按模板库补 figure_spec——
 // 模板能忠实还原才给规格；不能还原如实标「图待补」，严禁硬套模板编造图形内容
 function validateFigureRedraw(obj: any): { items: PaperFigureItem[] } {
   if (!obj || !Array.isArray(obj.items)) throw new Error('配图重绘结果没有题目')

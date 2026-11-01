@@ -99,6 +99,30 @@ export function answersAgree(a: string, b: string, qtype: string, equiv?: (x: st
 export function stripParseTail(s: string): string {
   return String(s || '').replace(/[（(]解析[：:][\s\S]*$/, '').trim()
 }
+// P1-84 漏网（验收#50）：带单位数值形态——「0.8kg vs 0.3kg」这类答案在多问串/题号前缀
+//（如「14(2) 0.8kg」）或两侧问数不齐时，裸数值个数对不上会落进保守分支漏拦。
+// 提取「数值+单位」配对（单位相同且两侧各恰好一个值才比对），同单位 1v1 且相差超 2% → 确证不一致。
+// 单位表按长度优先匹配（m/s^2 先于 m/s 先于 m）；canonAnswer 已统一全角/空白/大小写/上标
+// 只收多字符单位：单字母（m/s/t/g/k…）与物理变量名冲突，会误伤代数表达式（保守）
+const UNIT_TOKENS = [
+  'm/s^2', 'm/s', 'km/h', 'r/min', 'kw', 'kpa', 'kn', 'kj', 'kwh', 'km', 'khz', 'kg',
+  'mm', 'cm', 'ml', 'ms', 'ma', 'mv', 'mf', 'mh', 'mt', 'mj', 'mev', 'min', 'mol',
+  'pa', 'nm', 'hz', 'ev', 'db', 'wb', '°c',
+]
+const UNIT_PAIR_RE = new RegExp(`(-?\\d+(?:\\.\\d+)?)(?:e(-?\\d+))?\\s*(${UNIT_TOKENS.sort((a, b) => b.length - a.length).join('|')})(?![a-z^])`, 'g')
+export function unitPairsOf(s: string): Array<{ v: number; u: string }> {
+  const t = canonAnswer(stripParseTail(s))
+  const out: Array<{ v: number; u: string }> = []
+  let m: RegExpExecArray | null
+  UNIT_PAIR_RE.lastIndex = 0
+  while ((m = UNIT_PAIR_RE.exec(t))) {
+    const v = parseFloat(m[1]) * (m[2] ? Math.pow(10, parseInt(m[2])) : 1)
+    if (isFinite(v)) out.push({ v, u: m[3] })
+    if (out.length > 12) break
+  }
+  return out
+}
+
 export function answersClearlyDisagree(a: string, b: string, qtype: string, sampleEquivalent: (x: string, y: string) => boolean | null): boolean {
   const na = stripParseTail(a); const nb = stripParseTail(b)
   if (!na || !nb) return false
@@ -115,6 +139,20 @@ export function answersClearlyDisagree(a: string, b: string, qtype: string, samp
   // 数值抽样等价（P1-82 求值器）证实等价 → 必然一致（(g−k)/(2k) ≡ g/(2k)−1/2 这类不再误标）
   const eq = sampleEquivalent(na, nb)
   if (eq === true) return false
+  // P1-84 漏网（验收#50）：带单位数值按单位配对比对——同单位两侧各恰好一个值且差超 2% → 确证不一致。
+  // 放在裸数值分支前：题号前缀/问数不齐会把裸数值个数弄乱，单位配对不受影响
+  {
+    const ua = unitPairsOf(na); const ub = unitPairsOf(nb)
+    if (ua.length && ub.length) {
+      for (const p of ua) {
+        const hitsB = ub.filter((x) => x.u === p.u)
+        const hitsA = ua.filter((x) => x.u === p.u)
+        if (hitsB.length === 1 && hitsA.length === 1 && Math.abs(p.v - hitsB[0].v) > 0.02 * Math.max(Math.abs(p.v), Math.abs(hitsB[0].v), 1e-9)) {
+          return true
+        }
+      }
+    }
+  }
   const xs = numsOf(na); const ys = numsOf(nb)
   if (xs.length && ys.length && xs.length === ys.length) {
     const used = new Set<number>()
@@ -172,4 +210,51 @@ export function scrubSpeculation(text: string): string {
   if (!SPECULATION_RE.test(t)) return t
   SPECULATION_RE.lastIndex = 0
   return t.replace(SPECULATION_RE, '空位对应存疑（待人工核对）')
+}
+
+// ---------- P2-90（验收#50）：求解层逐空对齐 ----------
+// #50 实测：12 题卷面 5 问，求解层把 5 问输出成 4 段（(3) 的表达式后混入 (4) 的「大于」），
+// 逐空比对整题错位。prompt 纪律（PAPER_SOLVE/COMPARE）在 #48 已加但仍复发 → 机器侧兜底：
+// 从转录层（小问+题干）数出期望空数，与求解层实际空数不符时对该题 targeted 按空重解。
+
+// 期望空数：从题干与小问文本里的 (1)~(n) 标记数出（需从 1 连续编号才可信，否则返回 0 不表态）。
+// 全角括号（1）同样计入（转录层偶发全角）；小问条目数 ≥2 时也作为期望空数的依据（取较大者）
+export function expectedBlankCountOf(texts: string[]): number {
+  const norm = texts.join('\n').replace(/[（]/g, '(').replace(/[）]/g, ')')
+  const marks = [...new Set((norm.match(/\((\d{1,2})\)/g) || []).map((s) => Number(s.slice(1, -1))))].sort((a, b) => a - b)
+  let n = 0
+  if (marks.length && marks[0] === 1) {
+    n = 1
+    while (marks.includes(n + 1)) n++
+    if (!marks.every((m) => m >= 1 && m <= n)) n = 0 // (7) 无 (6) 之类不连续形态不表态
+  }
+  return n
+}
+
+// 求解层某题实际输出的空数：per_blank 条目数；per_blank 为空时退回 answer 的多问段数
+export function solvedBlankCountOf(item: { answer?: string; per_blank?: Array<{ key: string }> }): number {
+  const blanks = (item.per_blank || []).map((b) => blankKeyDigits(b.key)).filter(Boolean).length
+  if (blanks) return blanks
+  return splitParts(String(item.answer || ''))?.length || 0
+}
+
+// 求解层与卷面空位不符（漏空/合并）→ 返回期望空位 key 列表（供 targeted 按空重解），否则返回空数组。
+// 两级检测：
+//   数量级——求解层空数 < 期望空数（#50 的 5 问输出成 4 段）；
+//   内容级——空数够了但某空内容里混入了**更靠后空位的编号**（如 (3) 的表达式末尾跟着 (4) 的
+//   「大于」被写成一段，或 (3) 里出现 (4)= 字样），逐空比对必然串位
+export function solveBlanksMismatch(expected: number, solvedItem: { answer?: string; per_blank?: Array<{ key: string; answer?: string }> }): string[] {
+  if (expected < 2) return []
+  const keys = Array.from({ length: expected }, (_, i) => `(${i + 1})`)
+  const blanks = solvedItem.per_blank || []
+  const got = blanks.map((b) => blankKeyDigits(b.key)).filter(Boolean).length || splitParts(String(solvedItem.answer || ''))?.length || 0
+  if (got < expected) return keys
+  // 内容级：per_blank 某空的内容引用了更靠后的空位编号 → 合并/串位
+  for (const b of blanks) {
+    const k = Number(blankKeyDigits(b.key))
+    if (!k) continue
+    const inner = [...String(b.answer || '').replace(/[（]/g, '(').replace(/[）]/g, ')').matchAll(/\((\d{1,2})\)/g)].map((m) => Number(m[1]))
+    if (inner.some((x) => x > k)) return keys
+  }
+  return []
 }
