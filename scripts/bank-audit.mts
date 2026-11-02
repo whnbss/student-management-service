@@ -116,6 +116,46 @@ for (const r of rows) {
 if (sprBad.length) { hardFail++; console.log(`✗ 弹簧标签：${sprBad.length} 题图标「压缩量/伸长量 x=…」与题干错配或数值不可溯源 → ${sprBad.join(' ')}`) }
 else console.log('✓ 弹簧标签：「压缩量/伸长量 x=…」标签与题干方向一致且数值均可溯源')
 
+// ---------- 2e. 图内箭头方向 / 双体结构守卫（验收 #71 P1-118：13 题同族坏模板——题干「向右」箭头朝左、板块题缺板/缺块） ----------
+// 移植监督者 sup71-sweep2.mjs 例行维度，零 AI 纯几何：
+// ① 题干断言「向右」（且不含「向左」）而图内全部水平箭头均朝左 → 硬失败
+// ② 板块双体题（题干同时含 木板/长板 与 物块/滑块 且提「地面」）图内可见矩形 <2 → 硬失败
+function parseArrowDirs(svg: string): string[] {
+  const out: string[] = []
+  const re = /<polygon points="([-\d.,\s]+)" fill="(#[0-9a-f]{6})"\s*\/>/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(svg))) {
+    const pts = m[1].trim().split(/\s+/).map((p) => p.split(',').map(Number))
+    if (pts.length !== 3) continue
+    const mid = [(pts[1][0] + pts[2][0]) / 2, (pts[1][1] + pts[2][1]) / 2]
+    let tip = pts[0], best = -1
+    for (const p of pts) { const d = Math.hypot(p[0] - mid[0], p[1] - mid[1]); if (d > best) { best = d; tip = p } }
+    const dx = tip[0] - mid[0], dy = tip[1] - mid[1]
+    if (Math.abs(dx) > Math.abs(dy) * 1.05) out.push(dx > 0 ? 'R' : 'L')
+    else if (Math.abs(dy) > Math.abs(dx) * 1.05) out.push(dy < 0 ? 'U' : 'D')
+  }
+  return out
+}
+const dirBad: string[] = []
+for (const r of rows) {
+  let fig: any = null
+  try { fig = JSON.parse(String(r.figure || 'null')) } catch { continue }
+  if (!fig || fig.kind !== 'svg') continue
+  const svg = String(fig.data).replace(/\\"/g, '"')
+  const stem = String(r.stem || '')
+  const dirs = parseArrowDirs(svg)
+  const horiz = dirs.filter((d) => d === 'R' || d === 'L')
+  if (/向右/.test(stem) && !/向左/.test(stem) && horiz.length && horiz.every((d) => d === 'L')) {
+    dirBad.push(`#${r.id}(题干向右,${horiz.length}支箭头全朝左)`)
+  }
+  if (/木板|长板|薄板/.test(stem) && /滑块|物块|小物块|小滑块|金属块|黏块/.test(stem) && /地面/.test(stem)) {
+    const vr = [...svg.matchAll(/<rect ([^>]+)\/>/g)].filter((m) => !/fill="none"/.test(m[1])).length
+    if (vr < 2) dirBad.push(`#${r.id}(板块双体,图内仅${vr}矩形)`)
+  }
+}
+if (dirBad.length) { hardFail++; console.log(`✗ 箭头方向/双体结构：${dirBad.length} 题图与题干不符（P1-118 家族口径）→ ${dirBad.join(' ')}`) }
+else console.log('✓ 箭头方向/双体结构：全部带图题箭头方向与题干「向右/向左」一致、板块双体题结构完整')
+
 // ---------- 3. 字面 \n（后非字母） ----------
 const litIds: string[] = []
 let litTotal = 0
