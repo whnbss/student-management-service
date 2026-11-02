@@ -697,9 +697,9 @@ function validateSheetRead(obj: any): { items: SheetReadItem[]; unrecognized: st
   }
 }
 
-// 求解族模型升级（C2 精度）：settings 里配置了 solve_model（如网关更强的 deepseek-v4-pro-saas）时，
+// 求解族模型升级（C2 精度）：settings 里配置了 solve_model（与当前供应商默认模型不同档的更强纯文本模型）时，
 // 纯文本求解/复核调用优先用更强模型，调用失败自动回退供应商配置的模型。视觉调用（看图）不升级——
-// 网关的 pro 档模型不支持图片输入（实测 413）
+// 求解档若不支持图片输入会实测 413/400
 function solveModelOverride(): string {
   try {
     return String(getSetting('solve_model') || '').trim()
