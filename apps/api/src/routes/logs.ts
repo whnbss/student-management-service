@@ -2,7 +2,9 @@
 // B4 原题还原：错题本存「原题全文 + 选择题选项 + 题图（figure_spec 重绘 SVG，无法重绘时保留原图）」，
 // 原题同步存入题库（source='photo'）；变式题只作「举一反三」附加生成，不得替代原题
 import type { FastifyInstance } from 'fastify'
-import { db, nowISO } from '../db'
+import path from 'node:path'
+import fs from 'node:fs'
+import { db, nowISO, UPLOADS_DIR } from '../db'
 import { REDO_INTERVALS, addDays, todayLocal, specToSvg, sanitizeLatexChinese, sanitizeAiText } from '@workbench/shared'
 
 // figure_spec → 题库/错题 figure 列的 JSON 文本（服务端统一渲染 SVG，保证所见即所得）；无 spec 返回空串
@@ -132,11 +134,12 @@ export default async function logRoutes(app: FastifyInstance) {
   })
 
   // 编辑学情记录（C3：可事后补填/修改「下次课作业布置」等字段；不传的字段保持不变）
+  // D2：images 传入数组时整体替换（增删图片在前端编辑好后一次性提交）
   app.put('/api/logs/:id', async (req, reply) => {
     const { id } = req.params as { id: string }
     const cur = db.prepare('SELECT id FROM study_logs WHERE id = ?').get(id)
     if (!cur) { reply.code(404).send({ error: '学情记录不存在' }); return }
-    const b = (req.body || {}) as { content?: string; next_class_key?: string; homework?: string; type?: string; date?: string }
+    const b = (req.body || {}) as { content?: string; next_class_key?: string; homework?: string; type?: string; date?: string; images?: unknown }
     const sets: string[] = []
     const args: any[] = []
     if (b.content !== undefined) { if (!b.content.trim()) { reply.code(400).send({ error: '记录内容必填' }); return }; sets.push('content = ?'); args.push(b.content.trim()) }
@@ -144,15 +147,36 @@ export default async function logRoutes(app: FastifyInstance) {
     if (b.homework !== undefined) { sets.push('homework = ?'); args.push(String(b.homework || '').trim()) }
     if (b.type !== undefined && ['上课', '作业', '考试', '其他'].includes(b.type)) { sets.push('type = ?'); args.push(b.type) }
     if (b.date !== undefined && b.date.trim()) { sets.push('date = ?'); args.push(b.date.trim()) }
+    if (b.images !== undefined) {
+      if (!Array.isArray(b.images) || b.images.some((x) => typeof x !== 'string' || !x.startsWith('/uploads/'))) {
+        reply.code(400).send({ error: 'images 必须是 /uploads/ 路径数组' }); return
+      }
+      sets.push('images = ?'); args.push(JSON.stringify(b.images))
+    }
     if (!sets.length) { reply.code(400).send({ error: '没有要更新的字段' }); return }
     args.push(id)
     db.prepare(`UPDATE study_logs SET ${sets.join(', ')} WHERE id = ?`).run(...args)
     return { ok: true }
   })
 
+  // D2：删除学情记录时清理图片引用——日志删了，其独占的图片文件也一并删掉
+  // （该图仍被错题 image 或其它日志引用时保留文件，避免错题/其它记录图裂）
   app.delete('/api/logs/:id', async (req) => {
     const { id } = req.params as { id: string }
+    const cur = db.prepare('SELECT images FROM study_logs WHERE id = ?').get(id) as any
     db.prepare('DELETE FROM study_logs WHERE id = ?').run(id)
+    let imgs: string[] = []
+    try { imgs = JSON.parse(cur?.images || '[]') } catch { /* 忽略 */ }
+    for (const p of imgs) {
+      if (typeof p !== 'string' || !p.startsWith('/uploads/') || p.includes('..')) continue
+      const usedElsewhere =
+        (db.prepare('SELECT COUNT(*) AS n FROM mistakes WHERE image = ?').get(p) as any).n > 0 ||
+        (db.prepare("SELECT COUNT(*) AS n FROM study_logs WHERE images LIKE ?").get(`%${p}%`) as any).n > 0 ||
+        (db.prepare("SELECT COUNT(*) AS n FROM lesson_plans WHERE images LIKE ?").get(`%${p}%`) as any).n > 0
+      if (usedElsewhere) continue
+      const abs = path.join(UPLOADS_DIR, p.replace(/^\/uploads\//, ''))
+      if (abs.startsWith(UPLOADS_DIR)) await fs.promises.unlink(abs).catch(() => { /* 文件已不在则忽略 */ })
+    }
     return { ok: true }
   })
 }

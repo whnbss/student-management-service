@@ -1651,3 +1651,34 @@ export function requiresFigure(stem: string, qtype: string): boolean {
   if (qtype === '计算' || qtype === '实验') return true
   return SITUATION_CUES.test(stem || '')
 }
+
+// ---------- D4：题库去重（题干规范化 + 相似度，供查重守卫与重复检测端点共用） ----------
+// 题干规范化：小写、去掉空白/标点（含全角）/LaTeX 定界符与命令反斜杠、全角数字转半角，
+// 再把数字串打码为「＃」——「同模板换数值」的语义重复在打码后变成同构文本，
+// 字符串相似度即可覆盖语义层面（不依赖 AI，确定性可复算）
+export function normalizeStemForDup(s: unknown): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/\[a-za-z]+|[$\（(【\[｛{】\]）)｝}'"'“”‘’、，。：:；;!！?？·—\-_=~`^&*%#@<>｜|]/g, '')
+    .replace(/\d+(?:\.\d+)?/g, '＃')
+    .replace(/\s+/g, '')
+}
+
+// 字符 3-gram 集合（过短文本整串作为一个 gram，避免空集导致相似度恒 0）
+export function stemGrams(norm: string): Set<string> {
+  const out = new Set<string>()
+  for (let i = 0; i < norm.length - 2; i++) out.add(norm.slice(i, i + 3))
+  if (!out.size && norm) out.add(norm)
+  return out
+}
+
+// 题干相似度：打码规范化后 3-gram Jaccard，[0,1]
+export function stemSimilarity(a: string, b: string): number {
+  const ga = stemGrams(normalizeStemForDup(a))
+  const gb = stemGrams(normalizeStemForDup(b))
+  if (!ga.size || !gb.size) return 0
+  let inter = 0
+  for (const g of ga) if (gb.has(g)) inter++
+  return inter / (ga.size + gb.size - inter)
+}

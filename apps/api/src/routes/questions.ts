@@ -3,7 +3,7 @@
 import type { FastifyInstance } from 'fastify'
 import { db, nowISO, remainingHours } from '../db'
 import { pickProvider, generateQuiz, generateTiered, generateParentReport, validateQuizDrafts, reviewQuizDrafts, fixQuizDraft } from '../ai'
-import { sanitizeAiText, sanitizeLatexChinese, mergeSectionKps, daysAgo, checkSolutionArithmetic, checkAnswerTraceable, mentionsFigureStem, requiresFigure, QUIZ_LEVEL_ALIASES } from '@workbench/shared'
+import { sanitizeAiText, sanitizeLatexChinese, mergeSectionKps, daysAgo, checkSolutionArithmetic, checkAnswerTraceable, mentionsFigureStem, requiresFigure, QUIZ_LEVEL_ALIASES, normalizeStemForDup, stemGrams } from '@workbench/shared'
 import type { QuizDraft, QuizLevel, QuizReview } from '@workbench/shared'
 
 function kpOf(raw: string): string[] {
@@ -42,23 +42,49 @@ function sanitizeFigureJson(raw: unknown): string {
   return ''
 }
 
-// 查重：同知识点 + 题干前 40 字（去空白）相同 → 视为疑似重复
+// 查重（D4 增强）：① 同知识点 + 题干前 40 字（去空白）相同；② 题干打码规范化相似度 ≥ 0.85
+// （忽略数值/LaTeX/空格差异——「同模板换数值」的语义重复也能拦住）→ 视为疑似重复
 function normStem(s: string): string {
   return s.replace(/\s+/g, '').slice(0, 40)
 }
-function findDuplicates(drafts: Array<{ stem: string; knowledge_points: string[] }>): Array<{ index: number; id: number; stem: string }> {
+const DUP_SIM_THRESHOLD = 0.85
+function findDuplicates(drafts: Array<{ stem: string; knowledge_points: string[] }>): Array<{ index: number; id: number; stem: string; similarity?: number; reason?: string }> {
   const existing = db.prepare('SELECT id, stem, knowledge_points FROM questions').all() as any[]
-  const out: Array<{ index: number; id: number; stem: string }> = []
+  const out: Array<{ index: number; id: number; stem: string; similarity?: number; reason?: string }> = []
+  // 草稿 grams 预计算（≤30 条 × 库内 ≤数千条，Jaccard 纯内存可接受）
+  const draftGrams = drafts.map((d) => stemGrams(normalizeStemForDup(d.stem)))
+  const jaccard = (a: Set<string>, b: Set<string>) => {
+    if (!a.size || !b.size) return 0
+    let inter = 0
+    for (const g of a) if (b.has(g)) inter++
+    return inter / (a.size + b.size - inter)
+  }
   for (let i = 0; i < drafts.length; i++) {
     const kps = new Set(drafts[i].knowledge_points)
     const prefix = normStem(drafts[i].stem)
-    if (!prefix) continue
-    const hit = existing.find((e) => {
-      if (!e.stem || normStem(e.stem) !== prefix) return false
-      const ek = kpOf(e.knowledge_points)
-      return ek.some((k) => kps.has(k))
-    })
-    if (hit) out.push({ index: i, id: hit.id, stem: String(hit.stem).slice(0, 60) })
+    let hit: any = null
+    let similarity: number | undefined
+    let reason = ''
+    if (prefix) {
+      hit = existing.find((e) => {
+        if (!e.stem || normStem(e.stem) !== prefix) return false
+        const ek = kpOf(e.knowledge_points)
+        return ek.some((k) => kps.has(k))
+      })
+      if (hit) reason = '题干与库内题完全一致'
+    }
+    if (!hit) {
+      // 相似度扫描：取相似度最高的一条库内题（不限知识点——跨知识点的重复更该提示）
+      let best: any = null
+      let bestSim = 0
+      for (const e of existing) {
+        if (!e.stem) continue
+        const sim = jaccard(draftGrams[i], stemGrams(normalizeStemForDup(e.stem)))
+        if (sim >= DUP_SIM_THRESHOLD && sim > bestSim) { best = e; bestSim = sim }
+      }
+      if (best) { hit = best; similarity = Math.round(bestSim * 1000) / 1000; reason = `题干相似度 ${(bestSim * 100).toFixed(0)}%（忽略数值/公式书写差异）` }
+    }
+    if (hit) out.push({ index: i, id: hit.id, stem: String(hit.stem).slice(0, 60), similarity, reason })
   }
   return out
 }
@@ -140,27 +166,38 @@ async function closeTheLoop(
 
 export default async function questionRoutes(app: FastifyInstance) {
   // ---------- 题目列表：多条件筛选（搜索覆盖 题干/答案/解析/知识点） ----------
+  // D3：传 page 参数 → 服务端分页（返回 {items,total,page,page_size,pages}），不再全量返回；
+  // 不传 page → 兼容旧调用方（全局搜索等）仍返回数组
   app.get('/api/questions', async (req) => {
     const q = req.query as {
       q?: string; grade?: string; qtype?: string; kp?: string
       min_diff?: string; max_diff?: string; favorite?: string
+      page?: string; page_size?: string
     }
-    let sql = 'SELECT * FROM questions WHERE 1=1'
+    let where = ' WHERE 1=1'
     const args: any[] = []
     if (q.q) {
-      sql += ' AND (stem LIKE ? OR answer LIKE ? OR solution LIKE ? OR knowledge_points LIKE ?)'
+      where += ' AND (stem LIKE ? OR answer LIKE ? OR solution LIKE ? OR knowledge_points LIKE ?)'
       const like = `%${q.q}%`
       args.push(like, like, like, like)
     }
-    if (q.grade) { sql += ' AND grade = ?'; args.push(q.grade) }
-    if (q.qtype) { sql += ' AND qtype = ?'; args.push(q.qtype) }
-    if (q.min_diff) { sql += ' AND difficulty >= ?'; args.push(Number(q.min_diff)) }
-    if (q.max_diff) { sql += ' AND difficulty <= ?'; args.push(Number(q.max_diff)) }
-    if (q.favorite === '1') { sql += ' AND favorite = 1' }
-    sql += ' ORDER BY id DESC'
-    const rows = db.prepare(sql).all(...args) as any[]
-    // 知识点过滤在客户端语义化处理（JSON 数组 LIKE 兜底也可，这里统一内存过滤更准）
-    return q.kp ? rows.filter((r) => kpOf(r.knowledge_points).includes(q.kp!)) : rows
+    if (q.grade) { where += ' AND grade = ?'; args.push(q.grade) }
+    if (q.qtype) { where += ' AND qtype = ?'; args.push(q.qtype) }
+    if (q.min_diff) { where += ' AND difficulty >= ?'; args.push(Number(q.min_diff)) }
+    if (q.max_diff) { where += ' AND difficulty <= ?'; args.push(Number(q.max_diff)) }
+    if (q.favorite === '1') { where += ' AND favorite = 1' }
+    // D3：知识点筛选下沉到 SQL（knowledge_points 是 JSON 数组文本，按「"kp"」整元素精确匹配，分页下语义与旧内存过滤一致）
+    if (q.kp) { where += ' AND knowledge_points LIKE ?'; args.push(`%"${q.kp.replace(/"/g, '')}"%`) }
+    if (q.page !== undefined) {
+      const page = Math.max(1, Number(q.page) || 1)
+      const pageSize = Math.min(100, Math.max(1, Number(q.page_size) || 20))
+      const total = (db.prepare(`SELECT COUNT(*) AS n FROM questions${where}`).get(...args) as any).n
+      const items = db
+        .prepare(`SELECT * FROM questions${where} ORDER BY id DESC LIMIT ? OFFSET ?`)
+        .all(...args, pageSize, (page - 1) * pageSize) as any[]
+      return { ok: true, items, total, page, page_size: pageSize, pages: Math.max(1, Math.ceil(total / pageSize)) }
+    }
+    return db.prepare(`SELECT * FROM questions${where} ORDER BY id DESC`).all(...args) as any[]
   })
 
   // ---------- 知识点全库去重列表（筛选器选项来自全库，不随当前过滤缩小） ----------
@@ -169,6 +206,104 @@ export default async function questionRoutes(app: FastifyInstance) {
     const s = new Set<string>()
     for (const r of rows) for (const k of kpOf(r.knowledge_points)) s.add(k)
     return { ok: true, kps: [...s].sort((a, b) => a.localeCompare(b, 'zh')) }
+  })
+
+  // ---------- D4：全库重复检测 ----------
+  // 三类口径：精确重复（题干+答案规范化后相同）/ 近似重复（打码规范化后 高置信：Jaccard≥0.85 或包含度≥0.9，
+  // 忽略数值/LaTeX/空格差异）/ 疑似同模板（包含度≥0.8 但未达高置信——实测「同模板换数值+个别场景词不同」
+  // 的语义重复落在这个区间，字符相似度给不出更高置信，标记为「需人工判断」交教师裁决，不强行归组）。
+  // 跨知识点重复：命中对里知识点完全不相交（同一题被标到不同知识点）。
+  // 高置信对用并查集聚簇；疑似对按对输出（不做传递合并，防长链把不相关题串成巨组）。
+  app.get('/api/questions/duplicates', async () => {
+    const HIGH_JACCARD = 0.85
+    const HIGH_CONTAIN = 0.9
+    const SUSPECT_CONTAIN = 0.8
+    const SUSPECT_JACCARD = 0.6
+    const rows = db.prepare('SELECT id, stem, answer, knowledge_points, qtype, difficulty, favorite, created_at FROM questions ORDER BY id').all() as any[]
+    const norms = rows.map((r) => normalizeStemForDup(r.stem))
+    const rawNorms = rows.map((r) => String(r.stem || '').replace(/\s+/g, ''))
+    const ansNorms = rows.map((r) => normalizeStemForDup(r.answer))
+    const grams = norms.map((n) => stemGrams(n))
+    const kps = rows.map((r) => kpOf(r.knowledge_points))
+    const jaccardOf = (a: Set<string>, b: Set<string>) => {
+      if (!a.size || !b.size) return 0
+      let inter = 0
+      for (const g of a) if (b.has(g)) inter++
+      return inter / (a.size + b.size - inter)
+    }
+    const parent = rows.map((_, i) => i)
+    const find = (x: number): number => (parent[x] === x ? x : (parent[x] = find(parent[x])))
+    const union = (x: number, y: number) => { const a = find(x), b = find(y); if (a !== b) parent[Math.max(a, b)] = Math.min(a, b) }
+    interface Pair { i: number; j: number; sim: number; exact: boolean; crossKp: boolean; high: boolean }
+    const pairs: Pair[] = []
+    for (let i = 0; i < rows.length; i++) {
+      if (!norms[i]) continue
+      for (let j = i + 1; j < rows.length; j++) {
+        if (!norms[j]) continue
+        const exact = rawNorms[i] === rawNorms[j] && ansNorms[i] === ansNorms[j] && rawNorms[i].length > 0
+        let inter = 0
+        for (const g of grams[i]) if (grams[j].has(g)) inter++
+        const jac = inter / (grams[i].size + grams[j].size - inter)
+        const cont = inter / Math.min(grams[i].size, grams[j].size)
+        const high = jac >= HIGH_JACCARD || cont >= HIGH_CONTAIN
+        const suspect = jac >= SUSPECT_JACCARD || cont >= SUSPECT_CONTAIN
+        if (!exact && !high && !suspect) continue
+        if (exact || high) union(i, j)
+        const crossKp = kps[i].length > 0 && kps[j].length > 0 && !kps[i].some((k: string) => kps[j].includes(k))
+        pairs.push({ i, j, sim: Math.round(Math.max(jac, cont) * 1000) / 1000, exact, crossKp, high: exact || high })
+      }
+    }
+    const toItems = (idxs: number[]) => idxs.map((i) => ({
+      id: rows[i].id,
+      stem: String(rows[i].stem || '').slice(0, 80),
+      answer: String(rows[i].answer || '').slice(0, 40),
+      knowledge_points: kps[i],
+      qtype: rows[i].qtype,
+      difficulty: rows[i].difficulty,
+      favorite: rows[i].favorite,
+      created_at: rows[i].created_at,
+    }))
+    const kindOf = (ps: Pair[]) => {
+      if (ps.some((p) => p.exact)) return '精确重复'
+      if (ps.some((p) => p.crossKp)) return '跨知识点重复'
+      return ps.every((p) => !p.high) ? '疑似同模板' : '近似重复'
+    }
+    // 高置信聚簇（size>1 才是重复组）
+    const clusters = new Map<number, number[]>()
+    for (let i = 0; i < rows.length; i++) {
+      const root = find(i)
+      const arr = clusters.get(root) || []
+      arr.push(i)
+      clusters.set(root, arr)
+    }
+    const highMembers = new Set<number>()
+    const groups: Array<{ kind: string; max_similarity: number; items: ReturnType<typeof toItems> }> = []
+    for (const members of [...clusters.values()].filter((m) => m.length > 1)) {
+      members.forEach((i) => highMembers.add(i))
+      const ps = pairs.filter((p) => members.includes(p.i) && members.includes(p.j))
+      groups.push({ kind: kindOf(ps), max_similarity: Math.max(1, ...ps.map((p) => p.sim)), items: toItems(members) })
+    }
+    // 疑似对：不与高置信组重复输出（同对两端已在同一高置信组里就不再单列）
+    for (const p of pairs.filter((p) => !p.high)) {
+      if (find(p.i) === find(p.j) && highMembers.has(p.i) && highMembers.has(p.j)) continue
+      groups.push({ kind: kindOf([p]), max_similarity: p.sim, items: toItems([p.i, p.j]) })
+    }
+    groups.sort((a, b) => (a.kind === '精确重复' ? -1 : 1) - (b.kind === '精确重复' ? -1 : 1) || b.max_similarity - a.max_similarity)
+    return { ok: true, groups, total_questions: rows.length }
+  })
+
+  // ---------- D4：批量删除（重复检测「保留一题删其余」用；单接口事务，附实际删除数） ----------
+  app.post('/api/questions/bulk-delete', async (req, reply) => {
+    const b = (req.body || {}) as { ids?: unknown }
+    const ids = Array.isArray(b.ids) ? [...new Set(b.ids.map(Number).filter((n) => Number.isFinite(n) && n > 0))] : []
+    if (!ids.length) { reply.code(400).send({ error: 'ids 必须是非空数组' }); return }
+    const del = db.prepare('DELETE FROM questions WHERE id = ?')
+    let deleted = 0
+    const tx = db.transaction(() => {
+      for (const id of ids) deleted += del.run(id).changes
+    })
+    tx()
+    return { ok: true, deleted, requested: ids.length }
   })
 
   // ---------- 手动添加单题 ----------

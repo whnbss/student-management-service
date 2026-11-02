@@ -67,6 +67,18 @@ export default async function uploadRoutes(app: FastifyInstance) {
     return { ok: true, path: `/uploads/${String(studentId)}/${date}/${name}` }
   })
 
+  // ---------- D1：删除单个已上传图片（放弃分析时清理本次上传的文件） ----------
+  // 仅允许删除 /uploads/ 树内、不含 .. 的路径；文件不存在静默成功（幂等）
+  app.delete('/api/upload', async (req) => {
+    const q = req.query as { path?: string }
+    const p = String(q.path || '')
+    if (!p.startsWith('/uploads/') || p.includes('..')) return { ok: false, error: '非法路径' }
+    const abs = path.join(UPLOADS_DIR, p.replace(/^\/uploads\//, ''))
+    if (!abs.startsWith(UPLOADS_DIR)) return { ok: false, error: '非法路径' }
+    await fs.promises.unlink(abs).catch(() => { /* 文件已不在则忽略 */ })
+    return { ok: true }
+  })
+
   // ---------- C4：老师讲义（阶段报告附件） ----------
   // 上传：POST /api/students/:id/report-files（multipart：file + title），存 data/uploads/reports/<学生ID>/
   app.post('/api/students/:id/report-files', async (req, reply) => {

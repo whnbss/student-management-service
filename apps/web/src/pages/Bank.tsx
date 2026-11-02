@@ -35,6 +35,10 @@ const DIFF_COLORS: Record<number, string> = {
 
 
 
+// D4：重复检测结果结构
+interface DupItem { id: number; stem: string; answer: string; knowledge_points: string[]; qtype: string; difficulty: number; favorite: number; created_at: string }
+interface DupGroup { kind: string; max_similarity: number; items: DupItem[] }
+
 export default function Bank() {
   const show = useToastStore((s) => s.show)
   const [list, setList] = useState<Question[]>([])
@@ -45,6 +49,11 @@ export default function Bank() {
   const [fKp, setFKp] = useState('')
   const [fFav, setFFav] = useState(false)
   const [showFilters, setShowFilters] = useState(false) // 移动端筛选收起
+  // D3：服务端分页（默认每页 20，可切 50）
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+  const [pages, setPages] = useState(1)
 
   // 编辑表单（展开卡片后可改）
   const [editId, setEditId] = useState<number | null>(null)
@@ -53,7 +62,9 @@ export default function Bank() {
   const [saving, setSaving] = useState(false)
 
   // 组卷：勾选的题目 id + 试卷设置（分值按题型、考试时长、大题内手动顺序）
+  // D3：分页后勾选项跨页保留——pickedItems 缓存已勾选的完整题目对象（不只当前页的 list）
   const [picked, setPicked] = useState<Set<number>>(new Set())
+  const [pickedItems, setPickedItems] = useState<Question[]>([])
   const [showPaper, setShowPaper] = useState(false)
   const [paperTitle, setPaperTitle] = useState('高中物理练习卷')
   const [duration, setDuration] = useState(60)
@@ -77,6 +88,16 @@ export default function Bank() {
   // 「从教材选择」选择器：'gen'=出题器多选录入 / 'filter'=题库筛选单选 / null=关闭
   const [tbPicker, setTbPicker] = useState<null | 'gen' | 'filter'>(null)
 
+  // D4：重复检测
+  const [showDups, setShowDups] = useState(false)
+  const [dupLoading, setDupLoading] = useState(false)
+  const [dupGroups, setDupGroups] = useState<DupGroup[]>([])
+  const [dupKeeper, setDupKeeper] = useState<Record<number, number>>({}) // 组索引 → 保留题 id
+  const [dupBusy, setDupBusy] = useState(false)
+
+  // D3：筛选条件变化时回到第 1 页再加载
+  useEffect(() => { setPage(1) }, [q, fGrade, fQtype, fKp, fFav])
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -86,12 +107,16 @@ export default function Bank() {
       if (fQtype) qs.set('qtype', fQtype)
       if (fKp) qs.set('kp', fKp)
       if (fFav) qs.set('favorite', '1')
+      qs.set('page', String(page))
+      qs.set('page_size', String(pageSize))
       const [qs2, mk, kps] = await Promise.all([
-        get<Question[]>(`/api/questions?${qs.toString()}`),
+        get<{ items: Question[]; total: number; pages: number }>(`/api/questions?${qs.toString()}`),
         fFav ? Promise.resolve([]) : get<Mistake[]>('/api/mistakes').catch(() => [] as Mistake[]),
         get<{ kps: string[] }>('/api/questions/kps').catch(() => ({ kps: [] })),
       ])
-      setList(qs2)
+      setList(qs2.items)
+      setTotal(qs2.total)
+      setPages(qs2.pages)
       setAllKps(kps.kps)
       // 错题知识点聚合（只在首次拉取时更新，避免覆盖用户输入）
       if (!fFav) {
@@ -103,7 +128,7 @@ export default function Bank() {
     } finally {
       setLoading(false)
     }
-  }, [q, fGrade, fQtype, fKp, fFav, show])
+  }, [q, fGrade, fQtype, fKp, fFav, page, pageSize, show])
 
   useEffect(() => { load() }, [load])
 
@@ -127,6 +152,7 @@ export default function Bank() {
     await del(`/api/questions/${item.id}`)
     show('已删除')
     setPicked((p) => { const n = new Set(p); n.delete(item.id); return n })
+    setPickedItems((arr) => arr.filter((x) => x.id !== item.id))
     load()
   }
 
@@ -275,7 +301,8 @@ export default function Bank() {
 
   // ---------- 组卷 ----------
   // secOrder 直接存题目对象：题库题与出题草稿都能进组卷流程（草稿 id 用负数，仅作 key）
-  const pickedQuestions = useMemo(() => list.filter((x) => picked.has(x.id)), [list, picked])
+  // D3：分页后勾选跨页保留——从 pickedItems（勾选时缓存的完整对象）取，而非当前页 list
+  const pickedQuestions = useMemo(() => pickedItems.filter((x) => picked.has(x.id)), [pickedItems, picked])
   const toPaperQuestion = (q: Question | QuizDraft): PaperQuestion => ({
     id: 'id' in q ? q.id : -1,
     stem: q.stem,
@@ -338,8 +365,59 @@ export default function Bank() {
     if (!printHtml(paperTitle + (withAnswer ? '（含答案）' : '（学生版）'), header + body)) show('浏览器拦截了弹出窗口')
   }
 
-  const togglePick = (id: number) => {
-    setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  // D3：勾选时缓存完整题目对象（跨页保留），取消勾选时移除
+  const togglePick = (item: Question) => {
+    setPicked((p) => { const n = new Set(p); n.has(item.id) ? n.delete(item.id) : n.add(item.id); return n })
+    setPickedItems((arr) => (picked.has(item.id) ? arr.filter((x) => x.id !== item.id) : (arr.some((x) => x.id === item.id) ? arr : [...arr, item])))
+  }
+
+  // ---------- D4：重复检测 ----------
+  const runDupCheck = async () => {
+    setDupLoading(true)
+    try {
+      const r = await get<{ groups: DupGroup[]; total_questions: number }>('/api/questions/duplicates')
+      setDupGroups(r.groups)
+      setDupKeeper(Object.fromEntries(r.groups.map((g, i) => [i, g.items[0].id])))
+      setShowDups(true)
+      if (!r.groups.length) show('全库扫描完成：没有发现重复题目')
+    } catch (e: any) {
+      show(e.message || '重复检测失败')
+    } finally {
+      setDupLoading(false)
+    }
+  }
+
+  // 合并知识点：把组内其它题的知识点并入保留题，再删除其余（一次完成）
+  const resolveDupGroup = async (gi: number, mergeKps: boolean) => {
+    const g = dupGroups[gi]
+    if (!g) return
+    const keeperId = dupKeeper[gi] ?? g.items[0].id
+    const others = g.items.filter((x) => x.id !== keeperId)
+    if (!others.length) return
+    const keeper = g.items.find((x) => x.id === keeperId)!
+    const tip = mergeKps
+      ? `第 ${gi + 1} 组（${g.kind}）：\n保留 #${keeper.id}，知识点合并为：${[...new Set([...keeper.knowledge_points, ...others.flatMap((o) => o.knowledge_points)])].join('、') || '（空）'}\n删除其余 ${others.length} 题（#${others.map((o) => o.id).join('、#')}），删除后不可恢复，确定？`
+      : `第 ${gi + 1} 组（${g.kind}）：\n保留 #${keeper.id}，删除其余 ${others.length} 题（#${others.map((o) => o.id).join('、#')}）\n先预览再确认，删除后不可恢复，确定？`
+    if (!confirm(tip)) return
+    setDupBusy(true)
+    try {
+      if (mergeKps) {
+        const merged = [...new Set([...keeper.knowledge_points, ...others.flatMap((o) => o.knowledge_points)])]
+        if (merged.length) await put(`/api/questions/${keeperId}`, { knowledge_points: merged })
+      }
+      const r = await post<{ ok: boolean; deleted: number }>('/api/questions/bulk-delete', { ids: others.map((o) => o.id) })
+      show(`已处理：删除 ${r.deleted} 题${mergeKps ? '，知识点已并入保留题' : ''}`)
+      // 从组列表移除该组；被删题目若在勾选区也一并清掉
+      setDupGroups((gs) => gs.filter((_, i) => i !== gi))
+      setDupKeeper((k) => { const n: Record<number, number> = {}; for (const key of Object.keys(k)) { const idx = Number(key); if (idx < gi) n[idx] = k[idx]; else if (idx > gi) n[idx - 1] = k[idx] } return n })
+      setPickedItems((arr) => arr.filter((x) => !others.some((o) => o.id === x.id)))
+      setPicked((p) => { const n = new Set(p); for (const o of others) n.delete(o.id); return n })
+      load()
+    } catch (e: any) {
+      show(e.message || '处理失败')
+    } finally {
+      setDupBusy(false)
+    }
   }
 
   const diffBadge = (d: number) => (
@@ -377,7 +455,7 @@ export default function Bank() {
           {item.grade && <span className="text-xs text-slate-400">{item.grade}</span>}
           <span className="flex-1" />
           <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer select-none">
-            <input type="checkbox" checked={picked.has(item.id)} onChange={() => togglePick(item.id)} />组卷
+            <input type="checkbox" checked={picked.has(item.id)} onChange={() => togglePick(item)} />组卷
           </label>
         </div>
         <div className="text-sm cursor-pointer" onClick={() => (editId === item.id ? setEditId(null) : startEdit(item))}>
@@ -665,6 +743,9 @@ export default function Bank() {
         <span className="flex-1" />
         {/* 移动端入口 */}
         <button className="btn-outline !px-3 !py-1.5 text-xs sm:hidden" onClick={() => setShowFilters(!showFilters)}>筛选</button>
+        <button className="btn-outline !px-3 !py-1.5 text-xs" disabled={dupLoading} onClick={runDupCheck} title="扫描全库：精确重复 / 近似重复（换数值也算）/ 跨知识点重复">
+          {dupLoading ? '检测中…' : <><TriangleAlert className="w-4 h-4 inline-block align-[-2px]" /> 重复检测</>}
+        </button>
         <button className="btn-primary !px-3 !py-1.5 text-xs lg:hidden" onClick={() => setShowGen(!showGen)}><Bot className="w-4 h-4 inline-block align-[-2px]" /> 智能出题</button>
       </div>
 
@@ -700,8 +781,18 @@ export default function Bank() {
             </div>
           ) : (
             <section className="space-y-3">
-              <h2 className="text-sm font-semibold text-slate-500 px-1">题目（{list.length}）</h2>
+              <h2 className="text-sm font-semibold text-slate-500 px-1">题目（共 {total} 题 · 第 {page}/{pages} 页）</h2>
               {list.map(card)}
+              {/* D3：服务端分页控件 */}
+              <div className="flex items-center justify-center gap-3 pt-2 flex-wrap">
+                <button className="btn-outline !px-3 !py-1.5 text-xs" disabled={page <= 1 || loading} onClick={() => setPage(page - 1)}>上一页</button>
+                <span className="num text-xs text-slate-400">第 {page} / {pages} 页 · 共 {total} 题</span>
+                <button className="btn-outline !px-3 !py-1.5 text-xs" disabled={page >= pages || loading} onClick={() => setPage(page + 1)}>下一页</button>
+                <select className="input !w-24 !py-1.5 text-xs" value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }}>
+                  <option value={20}>每页 20</option>
+                  <option value={50}>每页 50</option>
+                </select>
+              </div>
             </section>
           )}
         </div>
@@ -714,6 +805,14 @@ export default function Bank() {
             <p className="text-[11px] text-slate-400">在左侧勾选题目（已选 {picked.size}），按题型分大题生成可打印试卷</p>
             <button className="btn-primary !px-3 !py-1.5 text-xs w-full" disabled={picked.size === 0} onClick={openPaper}>
               <FileText className="w-4 h-4 inline-block align-[-2px]" /> 组卷预览（{picked.size}）
+            </button>
+          </div>
+          {/* D4：重复检测（桌面端入口） */}
+          <div className="card p-4 space-y-2">
+            <h2 className="font-semibold text-sm mb-1">重复检测</h2>
+            <p className="text-[11px] text-slate-400">扫描全库：精确重复、近似重复（忽略数值/公式书写差异，换数值的同模板题也算）、跨知识点重复</p>
+            <button className="btn-outline !px-3 !py-1.5 text-xs w-full" disabled={dupLoading} onClick={runDupCheck}>
+              <TriangleAlert className="w-4 h-4 inline-block align-[-2px]" /> {dupLoading ? '检测中…' : '开始全库检测'}
             </button>
           </div>
         </aside>
@@ -733,6 +832,53 @@ export default function Bank() {
         </div>
       )}
       {paperModal}
+
+      {/* D4：重复检测结果弹层（分组展示，支持保留一题/批量删除其余/合并知识点） */}
+      {showDups && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-6" onClick={() => setShowDups(false)}>
+          <div className="bg-white dark:bg-slate-900 w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl p-5 space-y-3 max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2">
+              <h2 className="font-semibold"><TriangleAlert className="w-4 h-4 inline-block align-[-2px]" /> 重复检测（{dupGroups.length} 组）</h2>
+              <span className="flex-1" />
+              <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setShowDups(false)}>关闭</button>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              口径：精确重复 = 题干+答案一致；近似重复 = 规范化相似度 ≥85%（忽略数值/LaTeX/空格差异，同模板换数值也会命中）；跨知识点重复 = 同题被标到不同知识点。处理前会先预览待删题目。
+            </p>
+            {dupGroups.length === 0 && <div className="card p-8 text-center text-sm text-slate-400">没有发现重复题目 ✅</div>}
+            <div className="space-y-3">
+              {dupGroups.map((g, gi) => {
+                const keeperId = dupKeeper[gi] ?? g.items[0].id
+                return (
+                  <div key={gi} className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap text-xs">
+                      <span className={`px-2 py-0.5 rounded-full ${g.kind === '精确重复' ? 'bg-red-100 text-red-600' : g.kind === '跨知识点重复' ? 'bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-300' : 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-300'}`}>{g.kind}</span>
+                      <span className="text-slate-400 num">相似度 {(g.max_similarity * 100).toFixed(0)}% · {g.items.length} 题</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {g.items.map((m) => (
+                        <label key={m.id} className={`flex items-start gap-2 text-xs rounded-lg p-2 cursor-pointer ${keeperId === m.id ? 'bg-green-50 dark:bg-green-900/20 ring-1 ring-green-300 dark:ring-green-700' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
+                          <input type="radio" name={`dup-${gi}`} className="mt-0.5" checked={keeperId === m.id} onChange={() => setDupKeeper((k) => ({ ...k, [gi]: m.id }))} />
+                          <span className="min-w-0 flex-1">
+                            <span className="num text-slate-400">#{m.id}</span> <span className="text-slate-400">（{m.qtype} · 难度{m.difficulty}）</span>
+                            <span className="block truncate"><Katex text={m.stem} /></span>
+                            <span className="block text-slate-400 truncate">答案：{m.answer || '（空）'} · 知识点：{m.knowledge_points.join('、') || '（无）'}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      <button className="btn-primary !px-3 !py-1.5 text-xs" disabled={dupBusy} onClick={() => resolveDupGroup(gi, true)}>合并知识点并删除其余（{g.items.length - 1}）</button>
+                      <button className="btn-outline !px-3 !py-1.5 text-xs !text-red-500 !border-red-200 dark:!border-red-900" disabled={dupBusy} onClick={() => resolveDupGroup(gi, false)}>仅删除其余（{g.items.length - 1}）</button>
+                      <button className="btn-outline !px-3 !py-1.5 text-xs" disabled={dupBusy} onClick={() => setDupGroups((gs) => gs.filter((_, i) => i !== gi))}>保留全部（忽略此组）</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 「从教材选择」级联选择器（出题器多选录入 / 题库筛选单选） */}
       {tbPicker === 'gen' && (

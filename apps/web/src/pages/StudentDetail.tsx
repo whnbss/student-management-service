@@ -1,10 +1,11 @@
 // 学生详情：看板 / 学情日志 / 课时缴费 / 课表 四个子 Tab
 // 桌面端两栏：左（当前 Tab 内容）/ 右（学情看板 + 快捷入口）
 import { useCallback, useEffect, useState } from 'react'
-import {BarChart3, BookOpen, CalendarClock, Camera, Download, Mail, PenLine, Pin, Printer, SquarePen, Wallet} from 'lucide-react'
+import {BarChart3, BookOpen, CalendarClock, Camera, Download, Image as ImageIcon, Mail, PenLine, Pin, Printer, SquarePen, Wallet} from 'lucide-react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { get, post, put, del } from '@/lib/api'
-import { useToastStore } from '@/stores/auth'
+import { useToastStore, useAuthStore } from '@/stores/auth'
+import { uploadImage } from '@/lib/image'
 import TextbookPicker from '@/components/TextbookPicker'
 import { NextKeyText } from '@/components/Kp'
 import { aggregateKp, KpMasteryBars, KP_LEGEND, MistakeTrend, ErrorTypeBars } from '@/components/Charts'
@@ -43,10 +44,17 @@ export default function StudentDetail() {
   // 学情日志表单（C3：homework=下次课作业布置，可选）
   const [logForm, setLogForm] = useState({ date: todayLocal(), type: '上课', content: '', next_class_key: '', homework: '' })
   const [logSaving, setLogSaving] = useState(false)
+  // D2：新增学情记录支持图片（上传/粘贴多张，存 /uploads/<学生ID>/<日期>/）
+  const [logImages, setLogImages] = useState<string[]>([])
+  const [logImgBusy, setLogImgBusy] = useState(false)
   // C3：日志卡内编辑作业布置（补填/修改）
   const [editingLogId, setEditingLogId] = useState<number | null>(null)
   const [logEditForm, setLogEditForm] = useState({ homework: '', next_class_key: '' })
   const [logEditSaving, setLogEditSaving] = useState(false)
+  // D2：编辑日志时的图片列表（null=未进入图片编辑；数组=编辑中，保存时整体替换）
+  const [logEditImages, setLogEditImages] = useState<string[] | null>(null)
+  // D2：图片放大预览（教师端时间线点击放大，替代原来的新开窗口）
+  const [lightbox, setLightbox] = useState<string | null>(null)
   // 课时包表单
   const [pkgForm, setPkgForm] = useState({ hours: 10, amount: 0, purchase_date: todayLocal(), note: '' })
   const [pkgSaving, setPkgSaving] = useState(false)
@@ -125,13 +133,38 @@ export default function StudentDetail() {
     if (!printRedoSheet(items, `${student.name} · 错题重做练习单`)) show('浏览器拦截了弹出窗口')
   }
 
+  // D2：把图片压缩上传到该生名下，追加到指定图片列表（新增表单 / 编辑表单共用）
+  const addLogImages = async (fl: FileList | File[], target: 'new' | 'edit') => {
+    const arr = Array.from(fl).filter((f) => f.type.startsWith('image/'))
+    if (!arr.length) return
+    setLogImgBusy(true)
+    try {
+      const token = useAuthStore.getState().token || ''
+      const paths: string[] = []
+      for (const f of arr) paths.push(await uploadImage(f, id || '', token))
+      if (target === 'new') setLogImages((prev) => [...prev, ...paths])
+      else setLogEditImages((prev) => [...(prev || []), ...paths])
+    } catch (e: any) {
+      show(e.message || '图片上传失败')
+    } finally {
+      setLogImgBusy(false)
+    }
+  }
+
+  // D2：内容输入框 Ctrl+V 粘贴截图直接加入图片列表
+  const pasteIntoLog = (e: React.ClipboardEvent, target: 'new' | 'edit') => {
+    const fs = Array.from(e.clipboardData.files || []).filter((f) => f.type.startsWith('image/'))
+    if (fs.length) { e.preventDefault(); addLogImages(fs, target) }
+  }
+
   const saveLog = async () => {
     if (!logForm.content.trim()) { show('请填写记录内容'); return }
     setLogSaving(true)
     try {
-      await post(`/api/students/${id}/logs`, logForm)
+      await post(`/api/students/${id}/logs`, { ...logForm, images: logImages })
       show('已记录')
       setLogForm({ ...logForm, content: '', next_class_key: '', homework: '' })
+      setLogImages([])
       load()
     } catch (e: any) {
       show(e.message || '保存失败')
@@ -140,13 +173,27 @@ export default function StudentDetail() {
     }
   }
 
-  // C3：保存日志补填（作业布置/下次课重点）
+  // C3：保存日志补填（作业布置/下次课重点）；D2：图片列表有改动时一并提交
+  // 打开日志编辑器：图片列表一并初始化（编辑时可增删）
+  const openLogEdit = (log: StudyLog) => {
+    setEditingLogId(log.id)
+    setLogEditForm({ homework: log.homework || '', next_class_key: log.next_class_key || '' })
+    let imgs: string[] = []
+    try { imgs = JSON.parse(log.images || '[]') } catch { /* 忽略 */ }
+    setLogEditImages(Array.isArray(imgs) ? imgs : [])
+  }
+
   const saveLogEdit = async (logId: number) => {
     setLogEditSaving(true)
     try {
-      await put(`/api/logs/${logId}`, { homework: logEditForm.homework, next_class_key: logEditForm.next_class_key })
+      await put(`/api/logs/${logId}`, {
+        homework: logEditForm.homework,
+        next_class_key: logEditForm.next_class_key,
+        ...(logEditImages !== null ? { images: logEditImages } : {}),
+      })
       show('已保存')
       setEditingLogId(null)
+      setLogEditImages(null)
       load()
     } catch (e: any) {
       show(e.message || '保存失败')
@@ -303,10 +350,28 @@ export default function StudentDetail() {
                 {LOG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
-            <textarea className="input" rows={3} placeholder="本节内容、学生表现…" value={logForm.content} onChange={(e) => setLogForm({ ...logForm, content: e.target.value })} />
+            <textarea className="input" rows={3} placeholder="本节内容、学生表现…（支持 Ctrl+V 直接粘贴截图）" value={logForm.content} onChange={(e) => setLogForm({ ...logForm, content: e.target.value })} onPaste={(e) => pasteIntoLog(e, 'new')} />
             <input className="input" placeholder="下次课重点（可选，将出现在今日工作台）" value={logForm.next_class_key} onChange={(e) => setLogForm({ ...logForm, next_class_key: e.target.value })} />
             <input className="input" placeholder="下次课作业布置（可选，学生端「日志」可见；不填留空）" value={logForm.homework} onChange={(e) => setLogForm({ ...logForm, homework: e.target.value })} />
-            <button className="btn-primary w-full" disabled={logSaving} onClick={saveLog}>{logSaving ? '保存中…' : '保存记录'}</button>
+            {/* D2：图片上传（多选）+ 粘贴截图，保存时随记录写入 study_logs.images */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <label className="btn-outline !px-3 !py-1.5 cursor-pointer">
+                {logImgBusy ? '上传中…' : <><ImageIcon className="w-4 h-4 inline-block align-[-2px]" /> 添加图片</>}
+                <input type="file" accept="image/*" multiple className="hidden" disabled={logImgBusy} onChange={(e) => { if (e.target.files) addLogImages(e.target.files, 'new'); e.currentTarget.value = '' }} />
+              </label>
+              <span className="text-slate-400">或在内容框里 Ctrl+V 粘贴截图</span>
+            </div>
+            {logImages.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {logImages.map((p, i) => (
+                  <div key={p + i} className="relative">
+                    <img src={p} className="h-20 rounded-lg border border-slate-200 dark:border-slate-700 object-cover cursor-zoom-in" onClick={() => setLightbox(p)} />
+                    <button className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/60 text-white text-xs" onClick={() => setLogImages((prev) => prev.filter((_, j) => j !== i))}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button className="btn-primary w-full" disabled={logSaving || logImgBusy} onClick={saveLog}>{logSaving ? '保存中…' : '保存记录'}</button>
           </div>
 
           {logs.length === 0 ? (
@@ -334,7 +399,7 @@ export default function StudentDetail() {
                           <div className="flex gap-2 mt-2 overflow-x-auto">
                             {imgs.map((p, i) => (
                               <img key={i} src={p} className="h-24 rounded-lg border border-slate-200 dark:border-slate-700 object-cover cursor-zoom-in" loading="lazy"
-                                onClick={() => window.open(p, '_blank')} />
+                                onClick={() => setLightbox(p)} />
                             ))}
                           </div>
                         )
@@ -369,23 +434,41 @@ export default function StudentDetail() {
                         <div className="text-xs mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                           {editingLogId === log.id ? (
                             <div className="space-y-2">
-                              <input className="input !text-xs" placeholder="下次课作业布置（留空 = 无作业）" value={logEditForm.homework} onChange={(e) => setLogEditForm({ ...logEditForm, homework: e.target.value })} />
-                              <input className="input !text-xs" placeholder="下次课重点" value={logEditForm.next_class_key} onChange={(e) => setLogEditForm({ ...logEditForm, next_class_key: e.target.value })} />
+                              <input className="input !text-xs" placeholder="下次课作业布置（留空 = 无作业）" value={logEditForm.homework} onChange={(e) => setLogEditForm({ ...logEditForm, homework: e.target.value })} onPaste={(e) => pasteIntoLog(e, 'edit')} />
+                              <input className="input !text-xs" placeholder="下次课重点" value={logEditForm.next_class_key} onChange={(e) => setLogEditForm({ ...logEditForm, next_class_key: e.target.value })} onPaste={(e) => pasteIntoLog(e, 'edit')} />
+                              {/* D2：编辑时增删图片（保存时整体替换 study_logs.images） */}
+                              <div className="flex flex-wrap items-center gap-2">
+                                <label className="btn-outline !px-3 !py-1.5 cursor-pointer">
+                                  {logImgBusy ? '上传中…' : <><ImageIcon className="w-4 h-4 inline-block align-[-2px]" /> 添加图片</>}
+                                  <input type="file" accept="image/*" multiple className="hidden" disabled={logImgBusy} onChange={(e) => { if (e.target.files) addLogImages(e.target.files, 'edit'); e.currentTarget.value = '' }} />
+                                </label>
+                                <span className="text-slate-400">粘贴截图到上面任一输入框也可（Ctrl+V）</span>
+                              </div>
+                              {(logEditImages || []).length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {(logEditImages || []).map((p, i) => (
+                                    <div key={p + i} className="relative">
+                                      <img src={p} className="h-16 rounded-lg border border-slate-200 dark:border-slate-700 object-cover cursor-zoom-in" onClick={() => setLightbox(p)} />
+                                      <button className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/60 text-white text-xs" title="移除此图" onClick={() => setLogEditImages((prev) => (prev || []).filter((_, j) => j !== i))}>×</button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                               <div className="flex gap-2">
                                 <button className="btn-primary !px-3 !py-1.5 text-xs" disabled={logEditSaving} onClick={() => saveLogEdit(log.id)}>{logEditSaving ? '保存中…' : '保存'}</button>
-                                <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setEditingLogId(null)}>取消</button>
+                                <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => { setEditingLogId(null); setLogEditImages(null) }}>取消</button>
                               </div>
                             </div>
                           ) : (
                             <p className="text-amber-600 dark:text-amber-400">
                               <PenLine className="w-3.5 h-3.5 inline-block align-[-2px]" /> 下次课作业布置：{log.homework}
-                              <button className="ml-2 text-slate-400 hover:text-primary-600 underline" onClick={() => { setEditingLogId(log.id); setLogEditForm({ homework: log.homework || '', next_class_key: log.next_class_key || '' }) }}>编辑</button>
+                              <button className="ml-2 text-slate-400 hover:text-primary-600 underline" onClick={() => openLogEdit(log)}>编辑</button>
                             </p>
                           )}
                         </div>
                       )}
                       {!log.homework && editingLogId !== log.id && (
-                        <button className="text-[11px] text-slate-400 hover:text-primary-600 mt-2" onClick={() => { setEditingLogId(log.id); setLogEditForm({ homework: '', next_class_key: log.next_class_key || '' }) }}>＋ 补填作业布置</button>
+                        <button className="text-[11px] text-slate-400 hover:text-primary-600 mt-2" onClick={() => openLogEdit(log)}>＋ 补填作业布置</button>
                       )}
                     </div>
                   </div>
@@ -588,6 +671,13 @@ export default function StudentDetail() {
           <button className="btn-outline !px-3 !py-1.5 text-xs !text-red-600 !border-red-300 font-medium" onClick={removeStudent}>删除该学生（全部数据）</button>
         </div>
       </details>
+
+      {/* D2：图片放大预览（点遮罩或图片关闭） */}
+      {lightbox && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
+          <img src={lightbox} className="max-w-full max-h-full object-contain" />
+        </div>
+      )}
     </div>
   )
 }

@@ -386,6 +386,88 @@ await req('DELETE', `/api/questions/${qidSan}`)
 await req('DELETE', `/api/questions/${dupId}`)
 await req('DELETE', `/api/questions/${dupFirst}`)
 
+// ==================== 批次 D：题库分页 / 重复检测 / 日志图片 / 上传清理 ====================
+
+// D3-1. 服务端分页：一次性造 25 题 → page=1/page_size=20 返回 20 条 + total/pages
+r = await req('POST', '/api/questions/bulk', { force: true, questions: Array.from({ length: 25 }, (_, i) => ({
+  stem: `D3分页测试题第${i}题：质量 $m=${i + 1}kg$ 的物体受 $F=${i + 2}N$ 恒力，求加速度`,
+  answer: `${i}m/s^2`, solution: '由牛顿第二定律求得', knowledge_points: ['D3分页测试知识点'], difficulty: 2, qtype: '计算', grade: '高一',
+})) })
+const d3Ids = r.data?.ids || []
+log('D3 批量造题25道', r.status === 200 && d3Ids.length === 25, `ids=${d3Ids.length}`)
+r = await req('GET', '/api/questions?page=1&page_size=20&kp=' + encodeURIComponent('D3分页测试知识点'))
+log('D3 分页第1页', r.status === 200 && Array.isArray(r.data?.items) && r.data.items.length === 20 && r.data.total === 25 && r.data.pages === 2, `items=${r.data?.items?.length} total=${r.data?.total} pages=${r.data?.pages}`)
+r = await req('GET', '/api/questions?page=2&page_size=20&kp=' + encodeURIComponent('D3分页测试知识点'))
+log('D3 分页第2页', r.status === 200 && r.data?.items?.length === 5 && r.data?.total === 25, `items=${r.data?.items?.length}`)
+// D3-2. 不传 page 保持兼容（返回数组，全局搜索等旧调用方不受影响）
+r = await req('GET', '/api/questions?q=' + encodeURIComponent('D3分页测试题第0题'))
+log('D3 兼容旧数组返回', r.status === 200 && Array.isArray(r.data) && r.data.length === 1)
+// D3-3. 清理造题数据
+r = await req('POST', '/api/questions/bulk-delete', { ids: d3Ids })
+log('D4 批量删除接口', r.status === 200 && r.data?.deleted === 25, `deleted=${r.data?.deleted}`)
+
+// D4-1. 重复检测：精确重复（题干+答案相同）
+const dupStemA = 'D4精确重复测试题：光滑水平面上质量2kg的物体受水平恒力4N，求加速度'
+r = await req('POST', '/api/questions', { stem: dupStemA, answer: '2m/s^2', solution: '略', knowledge_points: ['牛顿第二定律'], qtype: '计算' })
+const dupA1 = r.data?.id
+r = await req('POST', '/api/questions', { stem: dupStemA, answer: '2m/s^2', solution: '略', knowledge_points: ['牛顿第二定律'], qtype: '计算' })
+const dupA2 = r.data?.id
+// D4-2. 近似重复（同模板换数值：规范化打码后完全同构，相似度=1；与精确组题面无关，不会串组）
+r = await req('POST', '/api/questions', { stem: 'D4近似重复测试题：汽车以20m/s的速度匀减速刹车，刹车距离为12m，求加速度大小', answer: '2m/s^2', solution: '略', knowledge_points: ['牛顿第二定律'], qtype: '计算' })
+const dupB1 = r.data?.id
+r = await req('POST', '/api/questions', { stem: 'D4近似重复测试题：汽车以30m/s的速度匀减速刹车，刹车距离为18m，求加速度大小', answer: '2m/s^2', solution: '略', knowledge_points: ['牛顿第二定律'], qtype: '计算' })
+const dupB2 = r.data?.id
+// D4-3. 跨知识点重复：同题干被标到不同知识点（答案不同 → 不算精确重复，走跨知识点口径）
+r = await req('POST', '/api/questions', { stem: 'D4跨知识点测试题：竖直上抛的物体回到抛出点时速度大小与初速度的关系', answer: '相等', solution: '略', knowledge_points: ['匀变速直线运动'], qtype: '计算' })
+const dupC1 = r.data?.id
+r = await req('POST', '/api/questions', { stem: 'D4跨知识点测试题：竖直上抛的物体回到抛出点时速度大小与初速度的关系', answer: '大小相等方向相反', solution: '略', knowledge_points: ['竖直上抛运动'], qtype: '计算' })
+const dupC2 = r.data?.id
+r = await req('GET', '/api/questions/duplicates')
+const dupG = r.data?.groups || []
+const gOf = (id) => dupG.find((g) => g.items.some((x) => x.id === id))
+log('D4 检测出精确重复组', gOf(dupA1)?.kind === '精确重复' && gOf(dupA1)?.items?.length === 2, JSON.stringify(gOf(dupA1)?.kind))
+log('D4 检测出近似重复组（换数值）', !!gOf(dupB1) && gOf(dupB1).items.some((x) => x.id === dupB2), `kind=${gOf(dupB1)?.kind} sim=${gOf(dupB1)?.max_similarity}`)
+log('D4 检测出跨知识点重复组', gOf(dupC1)?.kind === '跨知识点重复' && gOf(dupC1)?.items?.some((x) => x.id === dupC2), JSON.stringify(gOf(dupC1)?.kind))
+// D4-4. 批量入库查重：与库内题只差数值（换模板数值）→ 相似度守卫拦截
+r = await req('POST', '/api/questions/bulk', { questions: [{ stem: 'D4近似重复测试题：汽车以40m/s的速度匀减速刹车，刹车距离为25m，求加速度大小', answer: '1.5m/s^2', solution: '略', knowledge_points: ['牛顿第二定律'], difficulty: 2, qtype: '计算' }] })
+log('D4 入库相似度守卫拦截', r.data?.ok === false && Array.isArray(r.data?.duplicates) && r.data.duplicates.length >= 1, JSON.stringify(r.data?.duplicates?.[0]?.reason || ''))
+// D4-5. 清理检测用题
+r = await req('POST', '/api/questions/bulk-delete', { ids: [dupA1, dupA2, dupB1, dupB2, dupC1, dupC2] })
+log('D4 重复组批量删除', r.status === 200 && r.data?.deleted === 6, `deleted=${r.data?.deleted}`)
+
+// D2-1. 学情日志图片：POST 带图片 + PUT 整体替换 + 非法路径拒绝
+r = await req('POST', `/api/students/${sid}/logs`, { date, type: '上课', content: 'D2 图片日志测试', images: [] })
+const d2LogId = r.data?.id
+r = await req('PUT', `/api/logs/${d2LogId}`, { images: ['/uploads/9/2026-01-01/d2-test.jpg', '/uploads/9/2026-01-01/d2-test2.jpg'] })
+log('D2 日志图片写入', r.status === 200 && r.data?.ok)
+r = await req('GET', `/api/students/${sid}/logs`)
+const d2Log = r.data.find((x) => x.id === d2LogId)
+log('D2 日志图片回读', Array.isArray(JSON.parse(d2Log?.images || '[]')) && JSON.parse(d2Log.images).length === 2, d2Log?.images)
+r = await req('PUT', `/api/logs/${d2LogId}`, { images: ['http://evil/x.jpg'] })
+log('D2 非法图片路径拒绝', r.status === 400)
+// D2-2. 删除日志 → 图片引用随之清理（库内无残留）
+r = await req('DELETE', `/api/logs/${d2LogId}`)
+log('D2 删除日志', r.status === 200 && r.data?.ok)
+r = await req('GET', `/api/students/${sid}/logs`)
+log('D2 删除后无残留引用', !r.data.some((x) => (x.images || '').includes('d2-test')))
+
+// D1-1. 上传图片后可通过 /api/upload DELETE 清理（放弃分析场景）
+const d1fd = new FormData()
+d1fd.append('file', new Blob([Buffer.from(pngB64, 'base64')], { type: 'image/png' }), 'd1.png')
+d1fd.append('student_id', String(sid))
+r = await fetch(BASE + '/api/upload', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: d1fd })
+d = await r.json().catch(() => null)
+const d1Path = d?.path
+r = await req('DELETE', `/api/upload?path=${encodeURIComponent(d1Path || '')}`)
+log('D1 上传图片删除接口', r.status === 200 && r.data?.ok)
+if (d1Path) {
+  const res = await fetch(BASE + d1Path)
+  log('D1 删除后文件不可访问', res.status === 404, `status=${res.status}`)
+}
+// D1-2. 非法路径拒绝（防目录穿越）
+r = await req('DELETE', `/api/upload?path=${encodeURIComponent('/uploads/../app.db')}`)
+log('D1 非法路径拒绝', r.data?.ok === false, JSON.stringify(r.data))
+
 // ==================== P2 冒烟：H5 只读分享链接 ====================
 
 // 31m. 生成分享链接：报告结构不完整拒绝 / 正常生成返回 token 与过期时间

@@ -358,6 +358,8 @@ export function StudentLogs() {
   const show = useToastStore((s) => s.show)
   const [rows, setRows] = useState<StudentLog[]>([])
   const [loading, setLoading] = useState(true)
+  // D2：图片放大预览（点击日志里的图片全屏查看）
+  const [lightbox, setLightbox] = useState<string | null>(null)
 
   useEffect(() => {
     get<StudentLog[]>('/api/student/logs')
@@ -389,7 +391,8 @@ export function StudentLogs() {
             {imgsOf(r.images).length > 0 && (
               <div className="flex gap-2 flex-wrap">
                 {imgsOf(r.images).map((src, i) => (
-                  <img key={i} src={src} className="rounded-lg max-h-36 object-cover" loading="lazy" />
+                  <img key={i} src={src} className="rounded-lg max-h-36 object-cover cursor-zoom-in" loading="lazy"
+                    onClick={() => setLightbox(src)} />
                 ))}
               </div>
             )}
@@ -406,6 +409,13 @@ export function StudentLogs() {
             )}
           </div>
         ))
+      )}
+
+      {/* D2：图片放大预览（点遮罩关闭） */}
+      {lightbox && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
+          <img src={lightbox} className="max-w-full max-h-full object-contain" />
+        </div>
       )}
     </div>
   )

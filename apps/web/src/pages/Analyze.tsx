@@ -2,7 +2,7 @@
 // 流程状态存于全局 store（stores/analyze.ts）：切到其它页面再回来仍停留在上次的分析界面，不丢结果
 import { useEffect, useRef, useState } from 'react'
 import {Camera, Image} from 'lucide-react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useBlocker, useLocation, useNavigate } from 'react-router-dom'
 import { get } from '@/lib/api'
 import { useToastStore } from '@/stores/auth'
 import { useAnalyzeStore, type ImageRole } from '@/stores/analyze'
@@ -38,6 +38,7 @@ export default function Analyze() {
   const mistakeChecked = useAnalyzeStore((s) => s.mistakeChecked)
   const logType = useAnalyzeStore((s) => s.logType)
   const nextKey = useAnalyzeStore((s) => s.nextKey)
+  const ignored = useAnalyzeStore((s) => s.ignored)
   const setStudentId = useAnalyzeStore((s) => s.setStudentId)
   const addFiles = useAnalyzeStore((s) => s.addFiles)
   const removeFile = useAnalyzeStore((s) => s.removeFile)
@@ -47,6 +48,9 @@ export default function Analyze() {
   const setMistakeChecked = useAnalyzeStore((s) => s.setMistakeChecked)
   const setLogType = useAnalyzeStore((s) => s.setLogType)
   const setNextKey = useAnalyzeStore((s) => s.setNextKey)
+  const ignoreItem = useAnalyzeStore((s) => s.ignoreItem)
+  const restoreItem = useAnalyzeStore((s) => s.restoreItem)
+  const discardAll = useAnalyzeStore((s) => s.discardAll)
   const start = useAnalyzeStore((s) => s.start)
   const save = useAnalyzeStore((s) => s.save)
 
@@ -69,6 +73,29 @@ export default function Analyze() {
     const n = Number(presetStudent)
     if (Number.isFinite(n) && n > 0) setStudentId(n)
   }, [presetStudent, setStudentId])
+
+  // D1：有未保存的分析结果时，应用内跳转给确认提示（刷新/关闭由下方 beforeunload 兜底）
+  const hasUnsaved = step === 'review' && !!draft
+  const blocker = useBlocker(hasUnsaved)
+  useEffect(() => {
+    if (blocker.state === 'blocked') {
+      if (window.confirm('本次分析还没有保存，离开后结果将丢失。确定要离开吗？')) blocker.proceed()
+      else blocker.reset()
+    }
+  }, [blocker])
+  useEffect(() => {
+    if (!hasUnsaved) return
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault() }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [hasUnsaved])
+
+  // D1：放弃本次分析（确认后清空草稿与已上传图片，回到拍照步骤）
+  const doDiscard = async () => {
+    if (!window.confirm('放弃本次分析？草稿与已上传的图片都会清空，需重新拍照分析。')) return
+    await discardAll()
+    show('已放弃本次分析，可重新拍照')
+  }
 
   const pick = (fl: FileList | null, role: ImageRole = 'paper') => {
     if (!fl?.length) return
@@ -167,6 +194,9 @@ export default function Analyze() {
 
   // ---------- 步骤 4：结果编辑页逐项确认 ----------
   if (step === 'review' && draft) {
+    // D1：保留的题（被忽略的不渲染主列表、不参与保存）
+    const keptItems = draft.items.filter((it) => !ignored.includes(it.no))
+    const ignoredItems = draft.items.filter((it) => ignored.includes(it.no))
     return (
       <div className="space-y-4">
         <div>
@@ -184,13 +214,27 @@ export default function Analyze() {
           {uploadedPaths.length > 0 && (
             <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setViewIdx(0)}>查看原图</button>
           )}
+          {/* D1：整体放弃——确认后清空草稿与已上传图片，回到拍照步骤 */}
+          <button className="btn-outline !px-3 !py-1.5 text-xs !text-red-500 !border-red-200 dark:!border-red-900" onClick={doDiscard}>放弃本次分析，重新拍照</button>
         </div>
+
+        {/* D1：已忽略的题（可撤销，不参与保存） */}
+        {ignoredItems.length > 0 && (
+          <div className="rounded-xl bg-slate-100 dark:bg-slate-800/60 px-3 py-2 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-400">已忽略 {ignoredItems.length} 题（保存时不入库）：</span>
+            {ignoredItems.map((it) => (
+              <button key={it.no} className="text-xs px-2 py-0.5 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-primary-600" onClick={() => restoreItem(it.no)}>
+                第 {it.no} 题 · 撤销
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* 逐题判定 */}
         <section className="card p-4 space-y-3">
-          <h2 className="font-semibold text-sm">逐题判定（{draft.items.length} 题 · 预估 {draft.paper_meta.score_estimate} 分）</h2>
+          <h2 className="font-semibold text-sm">逐题判定（保存 {keptItems.length}/{draft.items.length} 题 · 预估 {draft.paper_meta.score_estimate} 分）</h2>
           {draft.items.length === 0 && <p className="text-sm text-slate-400">未识别到题目</p>}
-          {draft.items.map((it, idx) => (
+          {draft.items.map((it, idx) => ignored.includes(it.no) ? null : (
             <div key={idx} className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="num font-semibold">第 {it.no} 题</span>
@@ -215,6 +259,13 @@ export default function Analyze() {
                     存入错题本
                   </label>
                 )}
+                {/* D1：逐题删除/忽略（保存时不入库，可撤销） */}
+                {!((it.verdict === '错' || it.verdict === '部分对')) && <span className="ml-auto" />}
+                <button
+                  className="text-[11px] text-slate-400 hover:text-red-500"
+                  title="删除/忽略此题（保存时不入库）"
+                  onClick={() => { if (window.confirm(`忽略第 ${it.no} 题？该题不会保存入库（可撤销）。`)) ignoreItem(it.no) }}
+                >忽略此题</button>
               </div>
               {/* B4：原题还原（题干 + 选项 + 题图）——逐项核对，严禁编造 */}
               {(it.stem || editing) && (
@@ -354,9 +405,15 @@ export default function Analyze() {
             <input className="input flex-1" placeholder="下次课重点（将出现在今日工作台）" value={nextKey} onChange={(e) => setNextKey(e.target.value)} />
           </div>
           <p className="text-xs text-slate-400">
-            将保存 {uploadedPaths.length} 张图片；勾选的错题（{Object.values(mistakeChecked).filter(Boolean).length} 道）自动进入错题本并按 1/3/7/15 天生成重做计划。
+            将保存 {uploadedPaths.length} 张图片、{keptItems.length} 道题（已忽略 {ignoredItems.length} 道不入库）；
+            其中勾选的错题（{keptItems.filter((it) => (it.verdict === '错' || it.verdict === '部分对') && (mistakeChecked[it.no] ?? true)).length} 道）自动进入错题本并按 1/3/7/15 天生成重做计划。
           </p>
-          <button className="btn-primary w-full" onClick={() => save(() => navigate(`/students/${studentId}`))}>确认保存</button>
+          {keptItems.length === 0 ? (
+            <p className="text-xs text-amber-500">所有题都已被忽略——请撤销忽略或「放弃本次分析，重新拍照」。</p>
+          ) : null}
+          <button className="btn-primary w-full" disabled={keptItems.length === 0} onClick={() => save(() => navigate(`/students/${studentId}`))}>
+            确认保存（保留 {keptItems.length} 题）
+          </button>
         </div>
 
         {viewIdx !== null && uploadedPaths[viewIdx] && (

@@ -3,7 +3,7 @@
 // 分析中途切走再回来也能看到最新进度/结果（分析请求在 store action 里继续跑）
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { post } from '@/lib/api'
+import { post, del } from '@/lib/api'
 import { uploadImage } from '@/lib/image'
 import { useAuthStore, useToastStore } from '@/stores/auth'
 import type { Student, AiAnalysisResult } from '@workbench/shared'
@@ -27,6 +27,7 @@ interface AnalyzeState {
   mistakeChecked: Record<number, boolean>
   logType: string
   nextKey: string
+  ignored: number[] // D1：被教师删除/忽略的题号（不参与保存）
 
   setStep: (s: AnalyzeStep) => void
   setStudentId: (id: number | null) => void
@@ -38,6 +39,9 @@ interface AnalyzeState {
   setMistakeChecked: (v: Record<number, boolean>) => void
   setLogType: (v: string) => void
   setNextKey: (v: string) => void
+  ignoreItem: (no: number) => void // D1：逐题删除/忽略
+  restoreItem: (no: number) => void // D1：撤销忽略
+  discardAll: () => Promise<void> // D1：放弃本次分析（清草稿+删已上传图片）回到拍照步骤
   start: () => Promise<void> // 上传 + AI 分析
   save: (onDone: () => void) => Promise<void> // 确认保存入库
   reset: () => void
@@ -59,6 +63,7 @@ export const useAnalyzeStore = create<AnalyzeState>()(
       mistakeChecked: {},
       logType: '作业',
       nextKey: '',
+      ignored: [],
 
       setStep: (s) => set({ step: s }),
       setStudentId: (id) => set({ studentId: id }),
@@ -81,6 +86,17 @@ export const useAnalyzeStore = create<AnalyzeState>()(
       setMistakeChecked: (v) => set({ mistakeChecked: v }),
       setLogType: (v) => set({ logType: v }),
       setNextKey: (v) => set({ nextKey: v }),
+      // D1：逐题删除/忽略——被忽略的题在保存时不会入库（错题/原题入库都只看保留的题）
+      ignoreItem: (no) => set({ ignored: [...new Set([...get().ignored, no])] }),
+      restoreItem: (no) => set({ ignored: get().ignored.filter((n) => n !== no) }),
+      // D1：放弃本次分析——删掉本次已上传的服务器图片（尽力而为，失败不阻塞），再完全重置前端状态
+      discardAll: async () => {
+        const { uploadedPaths } = get()
+        for (const p of uploadedPaths) {
+          try { await del(`/api/upload?path=${encodeURIComponent(p)}`) } catch { /* 尽力清理，失败不阻塞 */ }
+        }
+        get().reset()
+      },
 
       start: async () => {
         const { studentId, files, roles } = get()
@@ -119,6 +135,7 @@ export const useAnalyzeStore = create<AnalyzeState>()(
               aiNote: `分析供应商：${r.provider}`,
               mistakeChecked: Object.fromEntries(r.analysis.items.filter((it) => it.verdict === '错' || it.verdict === '部分对').map((it) => [it.no, true])),
               nextKey: r.analysis.next_class_questions.slice(0, 3).join('；'),
+              ignored: [], // D1：新分析开始时清空上一次的忽略记录，避免残留
               step: 'review',
             })
           } catch (e) {
@@ -132,27 +149,30 @@ export const useAnalyzeStore = create<AnalyzeState>()(
       },
 
       save: async (onDone) => {
-        const { draft, studentId, uploadedPaths, mistakeChecked, logType, nextKey } = get()
+        const { draft, studentId, uploadedPaths, mistakeChecked, logType, nextKey, ignored } = get()
         const show = useToastStore.getState().show
         if (!draft || !studentId) return
+        // D1：只保存保留的题——被忽略的题从分析结果里剔除，错题/原题入库/记录内容都只看保留题
+        const keptItems = draft.items.filter((it) => !ignored.includes(it.no))
+        const keptDraft: AiAnalysisResult = { ...draft, items: keptItems }
         set({ step: 'saving' })
         try {
           const content =
-            `【${draft.paper_meta.type}批改】共 ${draft.items.length} 题：` +
-            draft.items.map((it) => `第${it.no}题${it.verdict}`).join('、') +
-            `。${draft.overall_comment}`
+            `【${keptDraft.paper_meta.type}批改】共 ${keptItems.length} 题：` +
+            keptItems.map((it) => `第${it.no}题${it.verdict}`).join('、') +
+            `。${keptDraft.overall_comment}`
           const r = await post<{ id: number; mistakes_created: number; bank_questions_created: number }>(`/api/students/${studentId}/logs`, {
             date: todayLocal(),
             type: logType,
             content,
             next_class_key: nextKey,
             images: uploadedPaths,
-            ai_result: draft,
+            ai_result: keptDraft,
             create_mistakes: true,
-            mistake_nos: draft.items.filter((it) => mistakeChecked[it.no]).map((it) => it.no),
+            mistake_nos: keptItems.filter((it) => mistakeChecked[it.no]).map((it) => it.no),
             // B4 原题还原：勾选入错题本的原题同步存入题库（source=photo），变式题仍走「举一反三」
             photo_bank: true,
-            photo_bank_nos: draft.items.filter((it) => mistakeChecked[it.no] && it.stem).map((it) => it.no),
+            photo_bank_nos: keptItems.filter((it) => mistakeChecked[it.no] && it.stem).map((it) => it.no),
           })
           show(`已保存，生成 ${r.mistakes_created} 道错题${r.bank_questions_created ? `、${r.bank_questions_created} 道原题入库` : ''}`)
           get().reset()
@@ -167,7 +187,7 @@ export const useAnalyzeStore = create<AnalyzeState>()(
         set({
           step: 'pick', studentId: null, files: [], previews: [], roles: [], progress: '',
           analysis: null, draft: null, uploadedPaths: [], aiNote: '', mistakeChecked: {},
-          logType: '作业', nextKey: '',
+          logType: '作业', nextKey: '', ignored: [],
         }),
     }),
     {
