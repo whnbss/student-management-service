@@ -77,6 +77,19 @@ async function doRunBackup(): Promise<{ ok: boolean; file?: string; db_only?: bo
         /* 被占用等场景跳过，下次轮转再删 */
       }
     }
+    // P2-111：顺带清理 BACKUP_DIR 下历史遗留的裸快照 app-*.db*（如 purge/手工快照残留及 -shm/-wal 伴生）——
+    // 它们不匹配上面的 zip 轮转正则、永不清理，且 -wal 伴生易被误认为可用备份。
+    // 仅删 1 小时前的旧文件：本进程自己的 app-<tag>.db 在途快照已在上面 rmSync 掉，
+    // 时间窗保护的是多进程共用 data 目录时其它进程正在写入的快照
+    const now = Date.now()
+    for (const f of fs.readdirSync(BACKUP_DIR).filter((f) => /^app-.*\.db(?:-shm|-wal)?$/.test(f))) {
+      try {
+        const p = path.join(BACKUP_DIR, f)
+        if (now - fs.statSync(p).mtimeMs > 60 * 60 * 1000) fs.rmSync(p, { force: true })
+      } catch {
+        /* 被占用等场景跳过，下次轮转再删 */
+      }
+    }
     setSetting('last_backup_at', String(Date.now()))
     return { ok: true, file: zipPath, db_only: dbOnly }
   } catch (e: any) {
