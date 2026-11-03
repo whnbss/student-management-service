@@ -156,6 +156,81 @@ for (const r of rows) {
 if (dirBad.length) { hardFail++; console.log(`✗ 箭头方向/双体结构：${dirBad.length} 题图与题干不符（P1-118 家族口径）→ ${dirBad.join(' ')}`) }
 else console.log('✓ 箭头方向/双体结构：全部带图题箭头方向与题干「向右/向左」一致、板块双体题结构完整')
 
+// ---------- 2f. answer vs solution 数值一致性守卫（验收 #73 P1-123：#10/#713/#477 三起「解析对、答案错」同族） ----------
+// 口径：answer 中每个物理数值（含科学计数/分数/根号/π 求值）必须能在 solution 数值池中找到（5% 容差，
+// 覆盖 2~3 位有效数字舍入误差）；题干已知量豁免、解析「为零」豁免。真实不一致（同族历史案均为 ≥2 倍量级）远超容差。
+const BSUP: Record<string, string> = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁺': '+', '⁻': '-' }
+// 求值：纯数 | PI | 乘积链 a*b*c（元素为纯数或 PI），允许包裹括号；纯符号（N_0/mg 等）按 1 处理（仅用于匹配池）
+function auditEvalN(t0: string): number {
+  let t = String(t0).trim()
+  while (/^\(.*\)$/.test(t)) t = t.slice(1, -1).trim()
+  if (!t) return NaN
+  let v = 1
+  for (const p0 of t.split('*')) {
+    let p = p0.trim()
+    while (/^\(.*\)$/.test(p)) p = p.slice(1, -1).trim()
+    if (p === 'PI') { v *= Math.PI; continue }
+    if (!/^[\d.]+(?:e[+-]?\d+)?$/.test(p)) {
+      if (/^[A-Za-z][A-Za-z0-9_]*$/.test(p)) continue // 纯符号按 1
+      return NaN
+    }
+    v *= parseFloat(p)
+  }
+  return v
+}
+function auditParseNums(text: string): number[] {
+  let s = String(text || '')
+  s = s.replace(/[（(]\s*\d{1,2}\s*[)）]/g, ' ') // 小问序号标签
+  s = s.replace(/\\times\s*10\^\{?([+-]?\d+)\}?/g, 'e$1')
+  s = s.replace(/×\s*10\^\{?([+-]?\d+)\}?/g, 'e$1')
+  s = s.replace(/×\s*10([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+)/g, (_, sup: string) => 'e' + [...sup].map((c) => BSUP[c] ?? '').join(''))
+  s = s.replace(/\\times/g, '*').replace(/×/g, '*')
+  s = s.replace(/\\pi/g, 'PI').replace(/π/g, 'PI')
+  s = s.replace(/\\sqrt\s*\{([^{}]+)\}/g, 'SQ($1)').replace(/\\sqrt\s*(\d+(?:\.\d+)?)/g, 'SQ($1)')
+  s = s.replace(/\\(?:d|t)?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, 'FR($1,$2)')
+  s = s.replace(/\\[a-zA-Z]+/g, ' ') // 其余 LaTeX 命令剥离（防 \approx 的 x 吃掉 lookbehind）
+  const out: number[] = []
+  const P = (v: number) => { if (Number.isFinite(v)) out.push(v) }
+  for (let i = 0; i < 6; i++) {
+    const before = s
+    // 系数×根号：5SQ(3) → 8.66；先 SQ 后 FR（SQ 可能嵌在 FR 参数里）
+    s = s.replace(/(\d+(?:\.\d+)?)?\s*SQ\(([^()]+)\)/g, (_, coef: string | undefined, x: string) => {
+      const v = Math.sqrt(auditEvalN(x))
+      P(v)
+      const prod = coef ? parseFloat(coef) * v : v
+      P(prod)
+      return String(prod)
+    })
+    s = s.replace(/FR\(([^(),]+),([^(),]+)\)/g, (_, a: string, b: string) => {
+      const v = auditEvalN(a) / auditEvalN(b)
+      P(v)
+      return String(v)
+    })
+    if (s === before) break
+  }
+  for (const m of s.matchAll(/PI/g)) P(Math.PI)
+  for (const m of s.matchAll(/(?<![\w.])(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?![\w])/g)) P(parseFloat(m[1]))
+  for (const m of s.matchAll(/(?<![\w.])(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)(?![\w.])/g)) P(parseFloat(m[1]) / parseFloat(m[2]))
+  return out
+}
+const valClose = (a: number, b: number) => a === b || Math.abs(a - b) <= Math.max(1e-9, 0.05 * Math.max(Math.abs(a), Math.abs(b)))
+const ZH_ZERO = /为零|等于零|是零|读数为零|电流为零|速度为零/
+const ansSolBad: string[] = []
+for (const r of rows) {
+  const stemN = auditParseNums(String(r.stem || ''))
+  const ansN = auditParseNums(String(r.answer || ''))
+  const solN = auditParseNums(String(r.solution || ''))
+  if (ZH_ZERO.test(String(r.solution || ''))) solN.push(0)
+  const missing: number[] = []
+  for (const a of ansN) {
+    if (stemN.some((sv) => valClose(a, sv))) continue // 题干已知量豁免
+    if (!solN.some((sv) => valClose(a, sv))) missing.push(Number(a.toPrecision(4)))
+  }
+  if (missing.length) ansSolBad.push(`#${r.id}(answer 独有值 ${[...new Set(missing)].join(',')})`)
+}
+if (ansSolBad.length) { hardFail++; console.log(`✗ 答案/解析一致：${ansSolBad.length} 题 answer 含 solution 中找不到的数值（P1-123 家族口径，需人工复核）→ ${ansSolBad.join(' ')}`) }
+else console.log('✓ 答案/解析一致：全部题 answer 数值均可在 solution（或题干已知量）中溯源')
+
 // ---------- 3. 字面 \n（后非字母） ----------
 const litIds: string[] = []
 let litTotal = 0
