@@ -231,6 +231,83 @@ for (const r of rows) {
 if (ansSolBad.length) { hardFail++; console.log(`✗ 答案/解析一致：${ansSolBad.length} 题 answer 含 solution 中找不到的数值（P1-123 家族口径，需人工复核）→ ${ansSolBad.join(' ')}`) }
 else console.log('✓ 答案/解析一致：全部题 answer 数值均可在 solution（或题干已知量）中溯源')
 
+// ---------- 2g. figure 底板指纹守卫（验收 #75 P1-125：23 题同底板仅换文字标注的「换皮图」） ----------
+// 两层（零 AI 纯结构比对）：
+// ① 硬失败（回归钉）：P1-125 坏底板（虚线矩形「B / E（匀强场区）」+ 向上箭头 + +q 黄圆）除留观察的
+//    #339 外任何题再现 → 硬失败（该家族已 22 题重画，此钉防同款底板复发）。
+// ② 观察项（不硬失败）：同指纹族（剥离 <text> 内容与颜色、坐标按 8px 桶化后完全一致）且族内题干
+//    中文双字 bigram 相似度过低（<0.10）=「同底板 + 不相干场景」疑似换皮 → 打印族清单供甄别。
+//    注：本库存在大量**合法**同模板族（如电路底板逐题定制文字，#143 族 37 题），不能一刀切硬失败；
+//    #75 轮实证该口径下合法族与坏族需人工甄别，故只作观察项。
+function figFingerprint(svg0: string): Set<string> {
+  let s = String(svg0).replace(/<text[\s\S]*?<\/text>/g, '<text/>')
+  const toks = new Set<string>()
+  for (const m of s.matchAll(/<(rect|line|circle|polygon|path|ellipse|polyline)\b([^>]*?)\/?>/g)) {
+    const attrs: string[] = []
+    for (const a of m[2].matchAll(/([\w-]+)="([^"]*)"/g)) {
+      const k = a[1]
+      let v = a[2]
+      if (k === 'fill' || k === 'stroke') v = '' // 颜色剥离（换色不算换结构）
+      v = v.replace(/-?\d+(?:\.\d+)?/g, (n) => String(Math.round(parseFloat(n) / 8))) // 坐标桶化
+      attrs.push(`${k}=${v}`)
+    }
+    attrs.sort()
+    toks.add(m[1] + '|' + attrs.join('&'))
+  }
+  toks.delete('rect|x=0&y=0&fill=&height=30&width=50') // 全图透明背景 rect（桶化后 400→50、240→30）
+  return toks
+}
+const BAD_PLATE_MARK = 'B / E（匀强场区）'
+const BAD_PLATE_KEEP = new Set([339]) // 监督 #75 明示留观察
+const plateRegress = db
+  .prepare('SELECT id FROM questions WHERE figure LIKE ?')
+  .all(`%${BAD_PLATE_MARK}%`)
+  .map((r) => Number(r.id))
+  .filter((id) => !BAD_PLATE_KEEP.has(id))
+if (plateRegress.length) {
+  hardFail++
+  console.log(`✗ 底板指纹：P1-125 坏底板在 ${plateRegress.length} 题再现（应仅剩留观察 #339）→ ${plateRegress.map((i) => '#' + i).join(' ')}`)
+} else console.log('✓ 底板指纹：P1-125 坏底板仅剩留观察 #339，无复发')
+
+const zhBigrams = (s: string) => {
+  const t = String(s).replace(/\s|\$|\\|[a-zA-Z0-9{}^_()（）=+*/.,、：:;；！!?？'"-]/g, '')
+  const out = new Set<string>()
+  for (let i = 0; i < t.length - 1; i++) out.add(t.slice(i, i + 2))
+  return out
+}
+const svgRows2g: { id: number; fp: Set<string>; bg: Set<string> }[] = []
+for (const r of rows) {
+  try {
+    const f = JSON.parse(String(r.figure || 'null'))
+    if (f && f.kind === 'svg') svgRows2g.push({ id: Number(r.id), fp: figFingerprint(String(f.data)), bg: zhBigrams(String(r.stem || '')) })
+  } catch { /* 跳过坏 JSON */ }
+}
+const fpGroups = new Map<string, number[]>()
+for (const it of svgRows2g) {
+  const key = [...it.fp].sort().join('\n')
+  if (!fpGroups.has(key)) fpGroups.set(key, [])
+  fpGroups.get(key)!.push(it.id)
+}
+const skinFams: string[] = []
+for (const members of fpGroups.values()) {
+  if (members.length < 2) continue
+  let minSim = 1
+  for (let i = 0; i < members.length; i++) {
+    const bi = svgRows2g.find((x) => x.id === members[i])!.bg
+    for (let j = i + 1; j < members.length; j++) {
+      const bj = svgRows2g.find((x) => x.id === members[j])!.bg
+      let inter = 0
+      for (const t of bi) if (bj.has(t)) inter++
+      const uni = bi.size + bj.size - inter
+      if (uni > 0 && inter / uni < minSim) minSim = inter / uni
+    }
+  }
+  if (minSim < 0.1) skinFams.push(`{${members.slice(0, 6).map((i) => '#' + i).join(' ')}${members.length > 6 ? ` …共${members.length}题` : ''}}(最小bigram=${minSim.toFixed(3)})`)
+}
+if (skinFams.length) {
+  console.log(`⚠ 底板指纹观察：${skinFams.length} 个同指纹族族内题干场景差异大（同底板换皮疑似，待人工甄别，不计硬失败）→ ${skinFams.slice(0, 8).join(' ')}`)
+} else console.log(`✓ 底板指纹观察：${svgRows2g.length} 张 svg 图无「同底板 + 不相干场景」族`)
+
 // ---------- 3. 字面 \n（后非字母） ----------
 const litIds: string[] = []
 let litTotal = 0
