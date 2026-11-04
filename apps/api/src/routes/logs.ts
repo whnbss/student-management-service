@@ -104,6 +104,7 @@ export default async function logRoutes(app: FastifyInstance) {
       images?: string[]; ai_result?: any; create_mistakes?: boolean; mistake_nos?: number[]
       photo_bank?: boolean // B4：原题是否同步存入题库（默认 true）
       photo_bank_nos?: number[] // B4：存入题库的题号（默认跟随错题勾选）
+      handout_ids?: number[] // E：随本条日志上传的课次讲义（前端先传文件拿到 id，落库时一并关联）
     }
     if (!b.content || !b.content.trim()) { reply.code(400).send({ error: '记录内容必填' }); return }
     const type = ['上课', '作业', '考试', '其他'].includes(b.type || '') ? b.type! : '其他'
@@ -118,6 +119,11 @@ export default async function logRoutes(app: FastifyInstance) {
       aiJson, b.ai_result ? 1 : 0, b.next_class_key || '', String(b.homework || '').trim(), nowISO()
     )
     const logId = Number(r.lastInsertRowid)
+    // E：关联课次讲义（仅接受属于该生的 handout，防串号）
+    if (Array.isArray(b.handout_ids) && b.handout_ids.length) {
+      const att = db.prepare("UPDATE report_files SET log_id = ? WHERE id = ? AND student_id = ? AND kind = 'handout'")
+      for (const hid of b.handout_ids) att.run(logId, Number(hid), Number(id))
+    }
     // AI 分析结果确认入库时，抽取错/部分对题目进错题本（教师可在错题本中编辑）——B4：原题全文/选项/题图一并入库
     let mistakeCount = 0
     let bankCount = 0
@@ -135,11 +141,12 @@ export default async function logRoutes(app: FastifyInstance) {
 
   // 编辑学情记录（C3：可事后补填/修改「下次课作业布置」等字段；不传的字段保持不变）
   // D2：images 传入数组时整体替换（增删图片在前端编辑好后一次性提交）
+  // E：handout_ids 传入数组时整体替换日志关联讲义——移除的讲义 log_id 置空保留（变独立讲义，不删文件）
   app.put('/api/logs/:id', async (req, reply) => {
     const { id } = req.params as { id: string }
     const cur = db.prepare('SELECT id FROM study_logs WHERE id = ?').get(id)
     if (!cur) { reply.code(404).send({ error: '学情记录不存在' }); return }
-    const b = (req.body || {}) as { content?: string; next_class_key?: string; homework?: string; type?: string; date?: string; images?: unknown }
+    const b = (req.body || {}) as { content?: string; next_class_key?: string; homework?: string; type?: string; date?: string; images?: unknown; handout_ids?: unknown }
     const sets: string[] = []
     const args: any[] = []
     if (b.content !== undefined) { if (!b.content.trim()) { reply.code(400).send({ error: '记录内容必填' }); return }; sets.push('content = ?'); args.push(b.content.trim()) }
@@ -153,17 +160,45 @@ export default async function logRoutes(app: FastifyInstance) {
       }
       sets.push('images = ?'); args.push(JSON.stringify(b.images))
     }
-    if (!sets.length) { reply.code(400).send({ error: '没有要更新的字段' }); return }
-    args.push(id)
-    db.prepare(`UPDATE study_logs SET ${sets.join(', ')} WHERE id = ?`).run(...args)
+    let handoutChanged = false
+    if (b.handout_ids !== undefined) {
+      if (!Array.isArray(b.handout_ids) || b.handout_ids.some((x) => !Number.isInteger(Number(x)))) {
+        reply.code(400).send({ error: 'handout_ids 必须是讲义 id 数组' }); return
+      }
+      handoutChanged = true
+    }
+    if (!sets.length && !handoutChanged) { reply.code(400).send({ error: '没有要更新的字段' }); return }
+    if (sets.length) {
+      args.push(id)
+      db.prepare(`UPDATE study_logs SET ${sets.join(', ')} WHERE id = ?`).run(...args)
+    }
+    if (handoutChanged) {
+      const want = new Set((b.handout_ids as unknown[]).map(Number))
+      const curAttached = db.prepare("SELECT id FROM report_files WHERE log_id = ? AND kind = 'handout'").all(id) as Array<{ id: number }>
+      const detach = curAttached.filter((c) => !want.has(c.id))
+      const curIds = new Set(curAttached.map((c) => c.id))
+      const attach = [...want].filter((hid) => !curIds.has(hid))
+      if (detach.length) {
+        const q = db.prepare('UPDATE report_files SET log_id = NULL WHERE id = ?')
+        for (const c of detach) q.run(c.id)
+      }
+      if (attach.length) {
+        // 只关联属于该生（日志所在学生）的讲义，防串号
+        const sid = (db.prepare('SELECT student_id FROM study_logs WHERE id = ?').get(id) as any)?.student_id
+        const att = db.prepare("UPDATE report_files SET log_id = ? WHERE id = ? AND student_id = ? AND kind = 'handout'")
+        for (const hid of attach) att.run(id, hid, sid)
+      }
+    }
     return { ok: true }
   })
 
   // D2：删除学情记录时清理图片引用——日志删了，其独占的图片文件也一并删掉
   // （该图仍被错题 image 或其它日志引用时保留文件，避免错题/其它记录图裂）
+  // E：日志删除时关联讲义保留（log_id 置空变独立讲义），不静默删文件
   app.delete('/api/logs/:id', async (req) => {
     const { id } = req.params as { id: string }
     const cur = db.prepare('SELECT images FROM study_logs WHERE id = ?').get(id) as any
+    db.prepare("UPDATE report_files SET log_id = NULL WHERE log_id = ? AND kind = 'handout'").run(id)
     db.prepare('DELETE FROM study_logs WHERE id = ?').run(id)
     let imgs: string[] = []
     try { imgs = JSON.parse(cur?.images || '[]') } catch { /* 忽略 */ }

@@ -97,6 +97,23 @@ export interface StudyLog {
   student_name?: string
 }
 
+// E 批次：教学讲义（课次讲义）。与 C4 阶段报告附件共用 report_files 表与同一套文件管线，以 kind 区分：
+// kind='report' → 阶段报告讲义（学生端「报告」Tab）；kind='handout' → 课次讲义（学生端「讲义资料」，可关联学情日志）
+export interface Handout {
+  id: number
+  student_id: number
+  log_id: number | null // 关联的学情日志（可空=独立上传；日志删除后置空保留）
+  kind: 'report' | 'handout'
+  title: string // 显示名（默认取原始文件名去扩展名）
+  filename: string // 原始文件名（下载时还原，中文经 RFC 5987 编码不乱码）
+  path: string // 相对路径 /uploads/handouts/<学生ID>/<uuid>.<ext>
+  mime: string
+  ext: string // 格式角标（docx/pdf/pptx…）
+  size: number
+  created_at: string
+  log_date?: string // 关联课次（日志日期，列表展示用，LEFT JOIN 查询附带）
+}
+
 export interface TodayInfo {
   date: string
   weekday: number

@@ -1,13 +1,13 @@
 // 学生工作台三个视图：我的错题（重做）/ 我的课时 / 我的报告（只读）
 import { useCallback, useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { ChevronDown, CircleCheck, FileText as FileTextIcon } from 'lucide-react'
+import { ChevronDown, CircleCheck, FileText as FileTextIcon, Paperclip } from 'lucide-react'
 import { get, post } from '@/lib/api'
 import { useAuthStore, useToastStore } from '@/stores/auth'
 import Katex from '@/components/Katex'
 import QuestionFigure from '@/components/QuestionFigure'
 import { KpChips } from '@/components/Kp'
-import type { Mistake } from '@workbench/shared'
+import type { Mistake, Handout } from '@workbench/shared'
 import type { StudentMe } from '@workbench/shared'
 import { todayLocal } from '@workbench/shared'
 
@@ -231,12 +231,37 @@ export function StudentHours() {
 }
 
 // ---------------- 我的报告（只读） ----------------
+// E：讲义下载统一走 /api/handouts/:id/file（教师或本人学生；Content-Disposition attachment + RFC 5987 中文名不乱码）
+export async function downloadHandoutBlob(h: { id: number; filename: string; title: string }, show: (m: string) => void) {
+  try {
+    const res = await fetch(`/api/handouts/${h.id}/file`, {
+      headers: { Authorization: `Bearer ${useAuthStore.getState().token}` },
+    })
+    if (!res.ok) throw new Error(res.status === 404 ? '讲义文件不存在' : res.status === 403 ? '无权限访问该讲义' : '下载失败')
+    const blob = await res.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = h.filename || h.title || '讲义'
+    a.click()
+    URL.revokeObjectURL(a.href)
+  } catch (e: any) {
+    show(e.message || '下载失败')
+  }
+}
+
+// E：讲义格式角标（docx→D / pdf→P / pptx→S…）
+export function handoutExtBadge(ext: string): string {
+  return ({ '.docx': 'D', '.doc': 'D', '.pdf': 'P', '.pptx': 'S', '.ppt': 'S' } as Record<string, string>)[ext] || 'F'
+}
+
 export function StudentReports() {
   const show = useToastStore((s) => s.show)
   const [rows, setRows] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   // C4：老师讲义（学生只能看到并下载自己的）
   const [files, setFiles] = useState<any[]>([])
+  // E：课次讲义（随学情日志上传 + 独立上传的）
+  const [handouts, setHandouts] = useState<Handout[]>([])
   const token = useAuthStore((s) => s.token)
 
   useEffect(() => {
@@ -245,6 +270,7 @@ export function StudentReports() {
       .catch((e) => show(e.message || '加载失败'))
       .finally(() => setLoading(false))
     get<any[]>('/api/student/report-files').then(setFiles).catch(() => { /* 无讲义静默 */ })
+    get<Handout[]>('/api/student/handouts').then(setHandouts).catch(() => { /* 无讲义静默 */ })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 讲义下载：带 token 取 blob → 临时链接下载（<a> 无法带 Authorization 头）
@@ -266,9 +292,29 @@ export function StudentReports() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">我的报告</h1>
+      {/* E：课次讲义（老师随课上传的 docx/pdf/pptx 等，点击下载） */}
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold text-slate-500 px-1">课次讲义{handouts.length > 0 && `（${handouts.length}）`}</h2>
+        {handouts.length === 0 ? (
+          <div className="card p-4 text-center text-xs text-slate-400">还没有课次讲义</div>
+        ) : (
+          handouts.map((h) => (
+            <div key={h.id} className="card p-4 flex items-center gap-3">
+              <span className="w-6 h-6 rounded-md bg-primary-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">{handoutExtBadge(h.ext)}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{h.title}</p>
+                <p className="text-[11px] text-slate-400 num">
+                  {h.log_date ? `${h.log_date} 课次 · ` : ''}{h.ext.replace('.', '').toUpperCase()}{h.size ? ` · ${(h.size / 1024).toFixed(0)} KB` : ''}
+                </p>
+              </div>
+              <button className="btn-outline !px-3 !py-1.5 text-xs shrink-0" onClick={() => downloadHandoutBlob(h, show)}>下载</button>
+            </div>
+          ))
+        )}
+      </section>
       {/* C4：老师讲义（docx/pdf 等，点击下载打开） */}
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-slate-500 px-1">老师讲义{files.length > 0 && `（${files.length}）`}</h2>
+        <h2 className="text-sm font-semibold text-slate-500 px-1">阶段报告讲义{files.length > 0 && `（${files.length}）`}</h2>
         {files.length === 0 ? (
           <div className="card p-4 text-center text-xs text-slate-400">老师还没有上传讲义</div>
         ) : (
@@ -360,12 +406,15 @@ export function StudentLogs() {
   const [loading, setLoading] = useState(true)
   // D2：图片放大预览（点击日志里的图片全屏查看）
   const [lightbox, setLightbox] = useState<string | null>(null)
+  // E：课次讲义（随日志上传的，按 log_id 归组显示「📎 讲义 N 份」可下载）
+  const [handouts, setHandouts] = useState<Handout[]>([])
 
   useEffect(() => {
     get<StudentLog[]>('/api/student/logs')
       .then(setRows)
       .catch((e) => show(e.message || '加载失败'))
       .finally(() => setLoading(false))
+    get<Handout[]>('/api/student/handouts').then(setHandouts).catch(() => { /* 无讲义静默 */ })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const imgsOf = (s: string): string[] => { try { return JSON.parse(s || '[]') } catch { return [] } }
@@ -405,6 +454,23 @@ export function StudentLogs() {
             {r.homework && (
               <div className="rounded-xl px-3 py-2 text-xs bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300">
                 📝 下次课作业布置：{r.homework}
+              </div>
+            )}
+            {/* E：本条日志附带的讲义（「📎 讲义 N 份」，逐份可点下载） */}
+            {handouts.filter((h) => h.log_id === r.id).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {handouts.filter((h) => h.log_id === r.id).map((h) => (
+                  <button
+                    key={h.id}
+                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-1 text-[11px] text-slate-600 dark:text-slate-300 hover:text-primary-600"
+                    title={`下载 ${h.filename}`}
+                    onClick={() => downloadHandoutBlob(h, show)}
+                  >
+                    <Paperclip className="w-3 h-3" />
+                    <span className="rounded-sm bg-primary-600 text-white px-1 leading-4 text-[9px] font-bold">{handoutExtBadge(h.ext)}</span>
+                    <span className="max-w-[9rem] truncate">{h.title}</span>
+                  </button>
+                ))}
               </div>
             )}
           </div>

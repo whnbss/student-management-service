@@ -152,8 +152,19 @@ export default async function studentRoutes(app: FastifyInstance) {
     const acc = requireReady(req, reply)
     if (!acc) return
     return db.prepare(
-      'SELECT id, title, filename, path, mime, size, created_at FROM report_files WHERE student_id = ? ORDER BY id DESC'
+      "SELECT id, title, filename, path, mime, size, created_at FROM report_files WHERE student_id = ? AND kind = 'report' ORDER BY id DESC"
     ).all(acc.student_id)
+  })
+
+  // E：我的课次讲义（学生只能看到自己的；下载走 /api/handouts/:id/file，仅本人，他人 403）
+  app.get('/api/student/handouts', async (req, reply) => {
+    const acc = requireReady(req, reply)
+    if (!acc) return
+    return db.prepare(`
+      SELECT f.id, f.student_id, f.log_id, f.kind, f.title, f.filename, f.path, f.mime, f.ext, f.size, f.created_at, l.date AS log_date
+      FROM report_files f LEFT JOIN study_logs l ON l.id = f.log_id
+      WHERE f.student_id = ? AND f.kind = 'handout'
+      ORDER BY f.id DESC`).all(acc.student_id)
   })
 
   // 我的报告：教师生成的阶段报告（分享链接同源数据），学生端只读

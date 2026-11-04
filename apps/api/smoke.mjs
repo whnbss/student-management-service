@@ -646,6 +646,160 @@ token = c3SavedTeacher
   log('C4 删除讲义', r.status === 200 && r.data?.ok)
 }
 
+// ---- E 批次：课次讲义（三格式上传/魔数校验/大小限额/RFC5987 中文下载/越权 403/日志关联与保留/删除清盘） ----
+{
+  const fsE = await import('node:fs')
+  const pathE = await import('node:path')
+  const mkBoundary = () => '----smokeE' + Date.now() + Math.random().toString(36).slice(2, 6)
+  // multipart 组包（字段顺序无关口径：fields 与 files 任意顺序）
+  const mpBody = (boundary, parts) => {
+    const chunks = []
+    for (const p of parts) {
+      if (p.bytes !== undefined) {
+        chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="${p.name}"\r\nContent-Type: application/octet-stream\r\n\r\n`), p.bytes, Buffer.from('\r\n'))
+      } else {
+        chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${p.name}"\r\n\r\n${p.value}\r\n`))
+      }
+    }
+    chunks.push(Buffer.from(`--${boundary}--\r\n`))
+    return Buffer.concat(chunks)
+  }
+  const upHandouts = async (parts, tok) => {
+    const boundary = mkBoundary()
+    const res = await fetch(BASE + `/api/students/${sid}/handouts`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tok ?? token}`, 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      body: new Uint8Array(mpBody(boundary, parts)),
+    })
+    return { status: res.status, data: await res.json().catch(() => null) }
+  }
+  const DOCX = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.from('smoke docx payload')])
+  const PDF = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.from('smoke pdf payload')])
+  const PPTX = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.from('smoke pptx payload')])
+
+  // E1. docx + pdf + pptx 三格式各 1 份一次上传
+  const up3 = await upHandouts([
+    { name: '期中复习讲义.docx', bytes: DOCX },
+    { name: '阶段测试卷.pdf', bytes: PDF },
+    { name: '课件演示.pptx', bytes: PPTX },
+  ])
+  log('E 三格式一次上传', up3.status === 200 && up3.data?.ok && up3.data?.ids?.length === 3, `ids=${JSON.stringify(up3.data?.ids)}`)
+  // E2. 教师端列表回读（含格式角标 ext 与路径归档 handouts/<学生ID>/）
+  r = await req('GET', `/api/students/${sid}/handouts`)
+  const eRows = r.data || []
+  log('E 教师端讲义列表', r.status === 200 && eRows.length === 3 && eRows.every((x) => x.kind === 'handout' && x.path.startsWith(`/uploads/handouts/${sid}/`)), `n=${eRows.length}`)
+  log('E ext/size/原始文件名回读', eRows.some((x) => x.ext === '.pdf' && x.filename === '阶段测试卷.pdf' && x.size === PDF.length))
+  // E3. C4 报告附件列表不被课次讲义污染（kind 隔离）
+  r = await req('GET', `/api/students/${sid}/report-files`)
+  log('E 报告附件列表与课次讲义隔离', r.status === 200 && (r.data || []).length === 0, `n=${r.data?.length}`)
+
+  // E4. 学生端列表（仅自己）+ 下载内容一致 + RFC 5987 中文名不乱码
+  const eSaved = token
+  token = c3StuToken
+  r = await req('GET', '/api/student/handouts')
+  log('E 学生端课次讲义列表', r.status === 200 && (r.data || []).length === 3, `n=${r.data?.length}`)
+  const eDlTarget = (r.data || []).find((x) => x.ext === '.docx')
+  const dlE = await fetch(BASE + `/api/handouts/${eDlTarget.id}/file`, { headers: { Authorization: `Bearer ${c3StuToken}` } })
+  const dlEText = dlE.headers.get('content-disposition') || ''
+  const dlEBody = Buffer.from(await dlE.arrayBuffer())
+  log('E 学生下载内容一致', dlE.status === 200 && dlEBody.equals(DOCX), `status=${dlE.status} len=${dlEBody.length}`)
+  log('E 下载头 RFC5987 filename*', dlEText.includes("filename*=UTF-8''") && decodeURIComponent(dlEText.split("filename*=UTF-8''")[1] || '').includes('期中复习讲义'), `cd=${dlEText.slice(0, 80)}`)
+  // E5. 未登录下载 → 401
+  const dlENoAuth = await fetch(BASE + `/api/handouts/${eDlTarget.id}/file`)
+  log('E 未登录下载 401', dlENoAuth.status === 401, `status=${dlENoAuth.status}`)
+  // E6. 他人学生：列表不含他人 + 下载 403 + 上传/删除 403
+  token = eSaved
+  r = await req('POST', '/api/students', { name: 'E越权测试生', grade: '高一', phone: '13855556666', status: '在读' })
+  const sidE = r.data?.id
+  await req('POST', `/api/students/${sidE}/packages`, { hours: 10, amount: 0, purchase_date: date }) // 保号：避免课时耗尽登录被拒
+  r = await req('POST', '/api/accounts', { student_id: sidE })
+  const accIdE = r.data?.id
+  r = await req('POST', '/api/auth/login', { username: 'E越权测试生', password: '13855556666' })
+  let tokE = r.data?.token
+  token = tokE
+  await req('PUT', '/api/student/password', { old_password: '13855556666', new_password: 'e123456789' })
+  r = await req('POST', '/api/auth/login', { username: 'E越权测试生', password: 'e123456789' })
+  tokE = r.data?.token
+  log('E 他人学生账号就绪', !!tokE)
+  r = await req('GET', '/api/student/handouts')
+  log('E 他人学生列表为空', r.status === 200 && (r.data || []).length === 0, `n=${r.data?.length}`)
+  const dlBad = await fetch(BASE + `/api/handouts/${eDlTarget.id}/file`, { headers: { Authorization: `Bearer ${tokE}` } })
+  log('E 他人下载 403', dlBad.status === 403, `status=${dlBad.status}`)
+  r = await req('POST', `/api/students/${sid}/handouts`, {})
+  log('E 学生上传讲义 403', r.status === 403, `status=${r.status}`)
+  r = await req('DELETE', `/api/handouts/${eDlTarget.id}`)
+  log('E 学生删除讲义 403', r.status === 403, `status=${r.status}`)
+
+  // E7. 魔数校验：exe 内容改名 docx → 400（教师 token）
+  token = eSaved
+  const upFake = await upHandouts([{ name: '伪装讲义.docx', bytes: Buffer.from('MZ\x90\x00fake-exe-content') }])
+  log('E 伪造扩展名拒绝', upFake.status === 400, `status=${upFake.status} err=${upFake.data?.error}`)
+  // E8. 不支持的格式 → 400
+  const upTxt = await upHandouts([{ name: '笔记.txt', bytes: Buffer.from('plain text') }])
+  log('E 不支持格式 400', upTxt.status === 400, `status=${upTxt.status}`)
+  // E9. 一次 6 个文件 → 400（≤5）
+  const six = Array.from({ length: 6 }, (_, i) => ({ name: `f${i}.pdf`, bytes: PDF }))
+  const up6 = await upHandouts(six)
+  log('E 超过5个文件 400', up6.status === 400, `status=${up6.status}`)
+  // E10. ≥5MB 大文件上传成功
+  const big5 = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(5 * 1024 * 1024, 0x61)])
+  const upBig = await upHandouts([{ name: '大文件讲义.docx', bytes: big5 }])
+  log('E 5MB 大文件上传', upBig.status === 200 && upBig.data?.ok, `status=${upBig.status}`)
+  // E11. >30MB → 413
+  const tooBig = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(30 * 1024 * 1024 + 1, 0x62)])
+  const upOver = await upHandouts([{ name: '超大讲义.docx', bytes: tooBig }])
+  log('E 超30MB 413', upOver.status === 413, `status=${upOver.status} err=${upOver.data?.error}`)
+  // 413 后连接状态可能受影响，重新拿一次列表确认服务正常
+  r = await req('GET', `/api/students/${sid}/handouts`)
+  log('E 413 后服务正常', r.status === 200 && Array.isArray(r.data))
+
+  // E12. 日志关联：先传讲义 → POST logs 带 handout_ids → 列表含 log_id/log_date
+  const upAttach = await upHandouts([{ name: '随课讲义.pdf', bytes: PDF }])
+  const attachId = upAttach.data?.ids?.[0]
+  r = await req('POST', `/api/students/${sid}/logs`, { date, type: '上课', content: 'E冒烟：带讲义的学情记录', handout_ids: [attachId] })
+  const eLogId = r.data?.id
+  log('E 日志携带讲义保存', r.status === 200 && !!eLogId, `log=${eLogId} handout=${attachId}`)
+  r = await req('GET', `/api/students/${sid}/handouts`)
+  const eAttached = (r.data || []).find((x) => x.id === attachId)
+  log('E 讲义关联日志回读', !!eAttached && eAttached.log_id === eLogId && !!eAttached.log_date, `log_id=${eAttached?.log_id} log_date=${eAttached?.log_date}`)
+  // E13. 编辑日志：移除讲义 → log_id 置空保留（文件还在、学生端仍可见）
+  r = await req('PUT', `/api/logs/${eLogId}`, { handout_ids: [] })
+  log('E 编辑移除讲义', r.status === 200 && r.data?.ok)
+  r = await req('GET', `/api/students/${sid}/handouts`)
+  const eDetached = (r.data || []).find((x) => x.id === attachId)
+  log('E 移除后讲义保留', !!eDetached && eDetached.log_id === null)
+  // 再挂回去，用于「删日志讲义保留」验证
+  await req('PUT', `/api/logs/${eLogId}`, { handout_ids: [attachId] })
+  // E14. 删除带讲义的日志 → 讲义保留（log_id 置空，学生端仍可见）
+  r = await req('DELETE', `/api/logs/${eLogId}`)
+  log('E 删除日志', r.status === 200)
+  r = await req('GET', `/api/students/${sid}/handouts`)
+  const eKept = (r.data || []).find((x) => x.id === attachId)
+  log('E 删日志后讲义保留', !!eKept && eKept.log_id === null)
+
+  // E15. 教师删除讲义 → 库记录与磁盘文件均消失
+  const delPath = eKept?.path || ''
+  const delAbs = pathE.join(SMOKE_DATA_ABS, 'uploads', delPath.replace(/^\/uploads\//, ''))
+  log('E 磁盘文件在删前存在', !!delPath && fsE.existsSync(delAbs), `path=${delPath}`)
+  token = eSaved
+  r = await req('DELETE', `/api/handouts/${attachId}`)
+  log('E 删除讲义', r.status === 200 && r.data?.ok)
+  r = await req('GET', `/api/students/${sid}/handouts`)
+  log('E 删除后列表无残留', r.status === 200 && !(r.data || []).some((x) => x.id === attachId))
+  log('E 磁盘文件已删', !fsE.existsSync(delAbs))
+  const dlGone = await fetch(BASE + `/api/handouts/${attachId}/file`, { headers: { Authorization: `Bearer ${c3StuToken}` } })
+  log('E 删除后下载 404', dlGone.status === 404, `status=${dlGone.status}`)
+
+  // E 清理：删除其余 4 份讲义（含磁盘文件）+ 越权测试生
+  r = await req('GET', `/api/students/${sid}/handouts`)
+  for (const h of r.data || []) await req('DELETE', `/api/handouts/${h.id}`)
+  r = await req('GET', `/api/students/${sid}/handouts`)
+  log('E 清理后列表清零', r.status === 200 && (r.data || []).length === 0, `n=${r.data?.length}`)
+  r = await req('DELETE', `/api/accounts/${accIdE}`)
+  r = await req('DELETE', `/api/students/${sidE}`)
+  log('E 清理越权测试生', r.status === 200)
+}
+
 // 32i3. 教师改学生手机号 → 登录账号同步：accounts.phone 跟上、重置密码用新手机号、新手机号可直接登录
 r = await req('PUT', `/api/students/${sid}`, { phone: '13811112222' })
 log('教师改学生手机号', r.status === 200)

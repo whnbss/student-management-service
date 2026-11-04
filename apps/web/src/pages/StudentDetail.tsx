@@ -1,7 +1,7 @@
 // 学生详情：看板 / 学情日志 / 课时缴费 / 课表 四个子 Tab
 // 桌面端两栏：左（当前 Tab 内容）/ 右（学情看板 + 快捷入口）
 import { useCallback, useEffect, useState } from 'react'
-import {BarChart3, BookOpen, CalendarClock, Camera, Download, Image as ImageIcon, Mail, PenLine, Pin, Printer, SquarePen, Wallet} from 'lucide-react'
+import {BarChart3, BookOpen, CalendarClock, Camera, Download, FileText, Image as ImageIcon, Mail, Paperclip, PenLine, Pin, Printer, SquarePen, Trash2, Wallet} from 'lucide-react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { get, post, put, del } from '@/lib/api'
 import { useToastStore, useAuthStore } from '@/stores/auth'
@@ -12,16 +12,29 @@ import { aggregateKp, KpMasteryBars, KP_LEGEND, MistakeTrend, ErrorTypeBars } fr
 import { TieredPracticeModal, ParentReportModal } from '@/components/Practice'
 import { printRedoSheet } from '@/lib/print'
 import { todayLocal } from '@workbench/shared'
-import type { Student, HourPackage, Payment, StudyLog, Schedule, Mistake, Settlement } from '@workbench/shared'
+import type { Student, HourPackage, Payment, StudyLog, Schedule, Mistake, Settlement, Handout } from '@workbench/shared'
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 const LOG_TYPES = ['上课', '作业', '考试', '其他']
+// E 批次：讲义白名单与限额（与后端一致，前端先挡一道给即时提示）
+const HANDOUT_ACCEPT = '.docx,.doc,.pdf,.pptx,.ppt'
+const HANDOUT_EXTS = ['.docx', '.doc', '.pdf', '.pptx', '.ppt']
+const HANDOUT_MAX_MB = 30
+const HANDOUT_MAX_COUNT = 5
+
+function handoutExtBadge(ext: string): string {
+  return ({ '.docx': 'D', '.doc': 'D', '.pdf': 'P', '.pptx': 'S', '.ppt': 'S' } as Record<string, string>)[ext] || 'F'
+}
+
+function handoutSizeText(n: number): string {
+  return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+}
+
+type SubTab = 'board' | 'logs' | 'hours' | 'schedule' | 'handouts'
 
 function kpOf(m: Mistake): string[] {
   try { return JSON.parse(m.knowledge_points || '[]') as string[] } catch { return [] }
 }
-
-type SubTab = 'board' | 'logs' | 'hours' | 'schedule'
 
 export default function StudentDetail() {
   const { id } = useParams()
@@ -35,6 +48,8 @@ export default function StudentDetail() {
   const [payments, setPayments] = useState<Payment[]>([])
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [mistakes, setMistakes] = useState<Mistake[]>([])
+  // E：该生全部课次讲义（时间线 chips + 「讲义资料」汇总区共用）
+  const [handouts, setHandouts] = useState<Handout[]>([])
   const [loading, setLoading] = useState(true)
   // 一课一结算：结算记录（按月过滤）与导账单
   const [settleMonth, setSettleMonth] = useState(todayLocal().slice(0, 7))
@@ -47,6 +62,13 @@ export default function StudentDetail() {
   // D2：新增学情记录支持图片（上传/粘贴多张，存 /uploads/<学生ID>/<日期>/）
   const [logImages, setLogImages] = useState<string[]>([])
   const [logImgBusy, setLogImgBusy] = useState(false)
+  // E：新增学情记录的「教学讲义」待传文件（保存日志时先上传拿 id，再随日志关联）
+  const [logHandoutFiles, setLogHandoutFiles] = useState<File[]>([])
+  // E：编辑日志时的讲义 id 列表（null=未进入编辑；数组=编辑中，保存时整体替换关联）
+  const [logEditHandoutIds, setLogEditHandoutIds] = useState<number[] | null>(null)
+  const [logHandoutBusy, setLogHandoutBusy] = useState(false)
+  // E：「讲义资料」独立上传
+  const [handoutBusy, setHandoutBusy] = useState(false)
   // C3：日志卡内编辑作业布置（补填/修改）
   const [editingLogId, setEditingLogId] = useState<number | null>(null)
   const [logEditForm, setLogEditForm] = useState({ homework: '', next_class_key: '' })
@@ -67,13 +89,14 @@ export default function StudentDetail() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [s, l, p, pay, sch, mk] = await Promise.all([
+      const [s, l, p, pay, sch, mk, hd] = await Promise.all([
         get<Student>(`/api/students/${id}`),
         get<StudyLog[]>(`/api/students/${id}/logs`),
         get<HourPackage[]>(`/api/students/${id}/packages`),
         get<Payment[]>(`/api/students/${id}/payments`),
         get<Schedule[]>(`/api/students/${id}/schedules`),
         get<Mistake[]>(`/api/mistakes?student_id=${id}`),
+        get<Handout[]>(`/api/students/${id}/handouts`),
       ])
       setStudent(s)
       setLogs(l)
@@ -81,6 +104,7 @@ export default function StudentDetail() {
       setPayments(pay)
       setSchedules(sch)
       setMistakes(mk)
+      setHandouts(hd)
     } catch (e: any) {
       show(e.message || '加载失败')
     } finally {
@@ -157,14 +181,79 @@ export default function StudentDetail() {
     if (fs.length) { e.preventDefault(); addLogImages(fs, target) }
   }
 
+  // E：把讲义文件上传到该生名下（kind='handout'），返回讲义 id 列表
+  const uploadHandoutFiles = async (fl: File[]): Promise<number[]> => {
+    const token = useAuthStore.getState().token || ''
+    const ids: number[] = []
+    for (const f of fl) {
+      const fd = new FormData()
+      fd.append('file', f)
+      const res = await fetch(`/api/students/${id}/handouts`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `「${f.name}」上传失败`)
+      ids.push(...(data.ids || []))
+    }
+    return ids
+  }
+
+  // E：选择讲义文件（新增表单待传列表 / 编辑表单与「讲义资料」区立即上传）
+  const addHandoutFiles = async (fl: FileList | File[], target: 'new' | 'edit' | 'standalone') => {
+    const arr = Array.from(fl)
+    const bad = arr.find((f) => !HANDOUT_EXTS.includes('.' + (f.name.split('.').pop() || '').toLowerCase()))
+    if (bad) { show(`「${bad.name}」格式不支持，只支持 docx / doc / pdf / pptx / ppt`); return }
+    const big = arr.find((f) => f.size > HANDOUT_MAX_MB * 1024 * 1024)
+    if (big) { show(`「${big.name}」超过 ${HANDOUT_MAX_MB}MB 上限`); return }
+    if (target === 'new') {
+      if (logHandoutFiles.length + arr.length > HANDOUT_MAX_COUNT) { show(`一次最多 ${HANDOUT_MAX_COUNT} 个讲义文件`); return }
+      setLogHandoutFiles((prev) => [...prev, ...arr])
+      return
+    }
+    setLogHandoutBusy(true)
+    try {
+      const ids = await uploadHandoutFiles(arr)
+      if (target === 'edit') setLogEditHandoutIds((prev) => [...(prev || []), ...ids])
+      else load()
+      show('讲义已上传')
+    } catch (e: any) {
+      show(e.message || '讲义上传失败')
+    } finally {
+      setLogHandoutBusy(false)
+    }
+  }
+
+  // E：下载讲义（带 token 取 blob，文件名用上传时的原始名）
+  const downloadHandout = async (h: { id: number; filename: string; title: string }) => {
+    try {
+      const res = await fetch(`/api/handouts/${h.id}/file`, {
+        headers: { Authorization: `Bearer ${useAuthStore.getState().token}` },
+      })
+      if (!res.ok) throw new Error(res.status === 404 ? '讲义文件不存在' : '下载失败')
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = h.filename || h.title || '讲义'
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e: any) {
+      show(e.message || '下载失败')
+    }
+  }
+
   const saveLog = async () => {
     if (!logForm.content.trim()) { show('请填写记录内容'); return }
     setLogSaving(true)
     try {
-      await post(`/api/students/${id}/logs`, { ...logForm, images: logImages })
+      // E：先上传随日志选择的讲义文件拿 id，落库时一并关联
+      const handoutIds = logHandoutFiles.length ? await uploadHandoutFiles(logHandoutFiles) : []
+      await post(`/api/students/${id}/logs`, { ...logForm, images: logImages, ...(handoutIds.length ? { handout_ids: handoutIds } : {}) })
       show('已记录')
       setLogForm({ ...logForm, content: '', next_class_key: '', homework: '' })
       setLogImages([])
+      setLogHandoutFiles([])
       load()
     } catch (e: any) {
       show(e.message || '保存失败')
@@ -181,6 +270,8 @@ export default function StudentDetail() {
     let imgs: string[] = []
     try { imgs = JSON.parse(log.images || '[]') } catch { /* 忽略 */ }
     setLogEditImages(Array.isArray(imgs) ? imgs : [])
+    // E：讲义关联一并初始化（编辑时可补传/移除，保存时整体替换）
+    setLogEditHandoutIds(handouts.filter((h) => h.log_id === log.id).map((h) => h.id))
   }
 
   const saveLogEdit = async (logId: number) => {
@@ -190,10 +281,12 @@ export default function StudentDetail() {
         homework: logEditForm.homework,
         next_class_key: logEditForm.next_class_key,
         ...(logEditImages !== null ? { images: logEditImages } : {}),
+        ...(logEditHandoutIds !== null ? { handout_ids: logEditHandoutIds } : {}),
       })
       show('已保存')
       setEditingLogId(null)
       setLogEditImages(null)
+      setLogEditHandoutIds(null)
       load()
     } catch (e: any) {
       show(e.message || '保存失败')
@@ -318,7 +411,7 @@ export default function StudentDetail() {
 
       {/* 子 Tab */}
       <div className="flex gap-1 bg-slate-200/60 dark:bg-slate-800/60 rounded-xl p-1 text-sm">
-        {([['board', '学情看板'], ['logs', '学情日志'], ['hours', '课时缴费'], ['schedule', '课表']] as const).map(([key, label]) => (
+        {([['board', '学情看板'], ['logs', '学情日志'], ['hours', '课时缴费'], ['schedule', '课表'], ['handouts', '讲义资料']] as const).map(([key, label]) => (
           <button
             key={key}
             className={`flex-1 py-2 rounded-lg font-medium ${tab === key ? 'bg-white dark:bg-slate-900 shadow-sm' : 'text-slate-500'}`}
@@ -338,6 +431,55 @@ export default function StudentDetail() {
         <div className="min-w-0">
       {/* 学情看板（移动端/选中时整栏展示） */}
       {tab === 'board' && <MasteryBoard mistakes={mistakes} />}
+
+      {/* 讲义资料（E）：该生全部课次讲义汇总（含随日志上传 + 独立上传），学生端可下载 */}
+      {tab === 'handouts' && (
+        <div className="card p-4 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="font-semibold text-sm">讲义资料</h2>
+            <span className="text-xs text-slate-400 num">共 {handouts.length} 份</span>
+            <span className="flex-1" />
+            <label className="btn-primary !px-3 !py-1.5 text-xs cursor-pointer">
+              {handoutBusy || logHandoutBusy ? '上传中…' : <><Paperclip className="w-4 h-4 inline-block align-[-2px]" /> 上传讲义</>}
+              <input type="file" accept={HANDOUT_ACCEPT} multiple className="hidden" disabled={handoutBusy || logHandoutBusy}
+                onChange={(e) => { if (e.target.files) addHandoutFiles(e.target.files, 'standalone'); e.currentTarget.value = '' }} />
+            </label>
+          </div>
+          <p className="text-[11px] text-slate-400">
+            支持 docx / doc / pdf / pptx / ppt，一次 ≤{HANDOUT_MAX_COUNT} 个、单个 ≤{HANDOUT_MAX_MB}MB；随学情日志上传的讲义也汇总在此，学生端「讲义资料」可下载。
+          </p>
+          {handouts.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-6">还没有讲义。可在此独立上传，或在「学情日志」表单里随记录上传。</p>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {handouts.map((h) => (
+                <div key={h.id} className="flex items-center gap-3 py-2.5 text-sm">
+                  <span className="w-6 h-6 rounded-md bg-primary-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">{handoutExtBadge(h.ext)}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="truncate font-medium">{h.title}</p>
+                    <p className="text-[11px] text-slate-400 num">
+                      {h.ext.replace('.', '').toUpperCase()} · {handoutSizeText(h.size)} · {String(h.created_at).slice(0, 10)}
+                      {h.log_date ? ` · 关联课次 ${h.log_date}` : ' · 独立讲义'}
+                    </p>
+                  </div>
+                  <button className="btn-outline !px-3 !py-1.5 text-xs shrink-0" onClick={() => downloadHandout(h)}>
+                    <Download className="w-3.5 h-3.5 inline-block align-[-2px]" /> 下载
+                  </button>
+                  <button
+                    className="text-xs text-slate-400 hover:text-red-500 shrink-0"
+                    onClick={async () => {
+                      if (!confirm(`确定删除讲义「${h.title}」？磁盘文件将一并删除，不可恢复`)) return
+                      try { await del(`/api/handouts/${h.id}`); show('讲义已删除'); load() } catch (e: any) { show(e.message || '删除失败') }
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5 inline-block" /> 删除
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 学情日志 */}
       {tab === 'logs' && (
@@ -368,6 +510,25 @@ export default function StudentDetail() {
                     <img src={p} className="h-20 rounded-lg border border-slate-200 dark:border-slate-700 object-cover cursor-zoom-in" onClick={() => setLightbox(p)} />
                     <button className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/60 text-white text-xs" onClick={() => setLogImages((prev) => prev.filter((_, j) => j !== i))}>×</button>
                   </div>
+                ))}
+              </div>
+            )}
+            {/* E：教学讲义（可选，随日志保存关联，学生端「讲义资料」可下载） */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <label className="btn-outline !px-3 !py-1.5 cursor-pointer">
+                <Paperclip className="w-4 h-4 inline-block align-[-2px]" /> 上传讲义
+                <input type="file" accept={HANDOUT_ACCEPT} multiple className="hidden" onChange={(e) => { if (e.target.files) addHandoutFiles(e.target.files, 'new'); e.currentTarget.value = '' }} />
+              </label>
+              <span className="text-slate-400">docx / doc / pdf / pptx / ppt，≤{HANDOUT_MAX_COUNT} 个，单个 ≤{HANDOUT_MAX_MB}MB</span>
+            </div>
+            {logHandoutFiles.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {logHandoutFiles.map((f, i) => (
+                  <span key={f.name + i} className="inline-flex items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[11px]">
+                    <span className="rounded-sm bg-primary-600 text-white px-1 leading-4 text-[9px] font-bold">{handoutExtBadge('.' + (f.name.split('.').pop() || '').toLowerCase())}</span>
+                    <span className="max-w-[10rem] truncate">{f.name}</span>
+                    <button className="text-slate-400 hover:text-red-500" title="移除该文件" onClick={() => setLogHandoutFiles((prev) => prev.filter((_, j) => j !== i))}>×</button>
+                  </span>
                 ))}
               </div>
             )}
@@ -429,6 +590,10 @@ export default function StudentDetail() {
                           <Pin className="w-3.5 h-3.5 inline-block align-[-2px]" /> 下次课重点：<NextKeyText text={log.next_class_key} />
                         </p>
                       )}
+                      {/* E：随日志上传的讲义 chips（格式角标 + 文件名，点击下载） */}
+                      <div className="mt-2">
+                        <HandoutChips items={handouts.filter((h) => h.log_id === log.id)} onDownload={downloadHandout} />
+                      </div>
                       {/* C3：下次课作业布置（可选，学生端「日志」Tab 同步展示） */}
                       {(log.homework || editingLogId === log.id) && (
                         <div className="text-xs mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
@@ -452,6 +617,29 @@ export default function StudentDetail() {
                                       <button className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/60 text-white text-xs" title="移除此图" onClick={() => setLogEditImages((prev) => (prev || []).filter((_, j) => j !== i))}>×</button>
                                     </div>
                                   ))}
+                                </div>
+                              )}
+                              {/* E：编辑时补传/移除讲义（移除仅解除关联，文件保留变独立讲义） */}
+                              <div className="flex flex-wrap items-center gap-2">
+                                <label className="btn-outline !px-3 !py-1.5 cursor-pointer">
+                                  {logHandoutBusy ? '上传中…' : <><Paperclip className="w-4 h-4 inline-block align-[-2px]" /> 上传讲义</>}
+                                  <input type="file" accept={HANDOUT_ACCEPT} multiple className="hidden" disabled={logHandoutBusy} onChange={(e) => { if (e.target.files) addHandoutFiles(e.target.files, 'edit'); e.currentTarget.value = '' }} />
+                                </label>
+                                <span className="text-slate-400">docx / doc / pdf / pptx / ppt</span>
+                              </div>
+                              {(logEditHandoutIds || []).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {(logEditHandoutIds || []).map((hid) => {
+                                    const h = handouts.find((x) => x.id === hid)
+                                    if (!h) return null
+                                    return (
+                                      <span key={hid} className="inline-flex items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[11px]">
+                                        <span className="rounded-sm bg-primary-600 text-white px-1 leading-4 text-[9px] font-bold">{handoutExtBadge(h.ext)}</span>
+                                        <span className="max-w-[10rem] truncate">{h.title}</span>
+                                        <button className="text-slate-400 hover:text-red-500" title="移除该讲义（解除关联，文件保留）" onClick={() => setLogEditHandoutIds((prev) => (prev || []).filter((x) => x !== hid))}>×</button>
+                                      </span>
+                                    )
+                                  })}
                                 </div>
                               )}
                               <div className="flex gap-2">
@@ -678,6 +866,27 @@ export default function StudentDetail() {
           <img src={lightbox} className="max-w-full max-h-full object-contain" />
         </div>
       )}
+    </div>
+  )
+}
+
+/** E：讲义 chips（格式角标 + 文件名，点击下载）；时间线卡片与编辑态共用 */
+function HandoutChips({ items, onDownload }: { items: Handout[]; onDownload: (h: Handout) => void }) {
+  if (!items.length) return null
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((h) => (
+        <button
+          key={h.id}
+          className="inline-flex items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[11px] text-slate-600 dark:text-slate-300 hover:text-primary-600"
+          title={`下载 ${h.filename}`}
+          onClick={() => onDownload(h)}
+        >
+          <span className="rounded-sm bg-primary-600 text-white px-1 leading-4 text-[9px] font-bold">{handoutExtBadge(h.ext)}</span>
+          <span className="max-w-[10rem] truncate">{h.title}</span>
+          <Paperclip className="w-3 h-3" />
+        </button>
+      ))}
     </div>
   )
 }

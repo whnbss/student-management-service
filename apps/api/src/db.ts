@@ -252,6 +252,18 @@ function migrateSchema() {
     created_at TEXT NOT NULL
   );
   `)
+  // E 批次：report_files 扩展为统一讲义表——kind 区分 'report'（C4 阶段报告附件，存量默认值）/
+  // 'handout'（E 批次课次讲义，可关联学情日志 log_id）；ext 存格式角标；共用同一套文件管线，不另起两套
+  cols = db.prepare('PRAGMA table_info(report_files)').all() as Array<{ name: string }>
+  if (!cols.some((c) => c.name === 'kind')) {
+    db.exec("ALTER TABLE report_files ADD COLUMN kind TEXT NOT NULL DEFAULT 'report'")
+  }
+  if (!cols.some((c) => c.name === 'log_id')) {
+    db.exec('ALTER TABLE report_files ADD COLUMN log_id INTEGER')
+  }
+  if (!cols.some((c) => c.name === 'ext')) {
+    db.exec("ALTER TABLE report_files ADD COLUMN ext TEXT NOT NULL DEFAULT ''")
+  }
   // 存量题目一次性清洗：字面 \n → 真实换行、字面 \\ → \（只跑一次，标记在 settings）
   if (!getSetting('question_text_sanitized_v1')) {
     const rows = db.prepare('SELECT id, stem, answer, solution, pitfall FROM questions').all() as Array<{

@@ -184,6 +184,8 @@ export default async function studentRoutes(app: FastifyInstance) {
       out.mistakes = db.prepare('DELETE FROM mistakes WHERE student_id = ?').run(id).changes
     }
     if (b.logs) {
+      // E：随日志上传的课次讲义保留（log_id 置空变独立讲义），不静默删文件
+      db.prepare("UPDATE report_files SET log_id = NULL WHERE student_id = ? AND kind = 'handout' AND log_id IS NOT NULL").run(id)
       out.logs = db.prepare('DELETE FROM study_logs WHERE student_id = ?').run(id).changes
     }
     if (b.billing) {
