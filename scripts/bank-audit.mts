@@ -231,6 +231,38 @@ for (const r of rows) {
 if (ansSolBad.length) { hardFail++; console.log(`✗ 答案/解析一致：${ansSolBad.length} 题 answer 含 solution 中找不到的数值（P1-123 家族口径，需人工复核）→ ${ansSolBad.join(' ')}`) }
 else console.log('✓ 答案/解析一致：全部题 answer 数值均可在 solution（或题干已知量）中溯源')
 
+// ---------- 2h. 题干场景 ↔ figure 图元关联守卫（验收 #77 P1-126 建议落地：零 AI，观察项） ----------
+// 题干点名某装置/场景词时，配图内应出现对应中文标注（图元特征），缺失=疑配错模板图。
+// 只报观察不硬失败（实验简化图、合法示意可经人工甄别豁免，见 docs/P1-126-2g观察族甄别清单.md）；
+// 与 2g 底板指纹互补：2g 观察族仅保留「族内存在 2h 违例成员」的族，合法同模板族经甄别放行，防新出题复发。
+const SCENE_RULES_2H: { re: RegExp; need: RegExp; name: string; geo?: (svg: string) => boolean }[] = [
+  { re: /斜面/, need: /斜面|°|θ/, name: '斜面' },
+  { re: /导轨/, need: /导轨|金属棒|导体棒|棒|ab|cd/, name: '导轨' },
+  // 传送带：无文字标注时几何回退——图中同时存在 ≥2 圆（传动轮）与 ≥1 矩形（物块）即视为画出皮带轮
+  { re: /传送带/, need: /传送带/, name: '传送带', geo: (svg) => (svg.match(/<circle\b/g) || []).length >= 2 && (svg.match(/<rect\b/g) || []).length >= 1 },
+  { re: /气缸|汽缸/, need: /气缸|汽缸|活塞/, name: '气缸' },
+  { re: /变压器|原线圈|副线圈/, need: /原|副|线圈/, name: '变压器' },
+  { re: /磁铁/, need: /磁铁|N|S/, name: '磁铁' },
+  { re: /打点计时器/, need: /打点计时器|纸带/, name: '打点计时器' },
+  { re: /光电门/, need: /光电门/, name: '光电门' },
+  { re: /圆盘|转盘/, need: /盘|轴/, name: '转盘' },
+]
+const sceneViolations = new Map<number, string[]>()
+for (const r of rows) {
+  let fig: any = null
+  try { fig = JSON.parse(String(r.figure || 'null')) } catch { continue }
+  if (!fig || fig.kind !== 'svg') continue
+  const svg2h = String(fig.data)
+  const texts = [...svg2h.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]).join(' ')
+  const stem = String(r.stem || '')
+  const miss = SCENE_RULES_2H.filter((rule) => rule.re.test(stem) && !rule.need.test(texts) && !(rule.geo && rule.geo(svg2h))).map((rule) => rule.name)
+  if (miss.length) sceneViolations.set(Number(r.id), miss)
+}
+if (sceneViolations.size) {
+  const list2h = [...sceneViolations.entries()].map(([id, miss]) => `#${id}(缺:${miss.join('/')})`)
+  console.log(`⚠ 场景图元：${sceneViolations.size} 题题干点名装置但图内无对应标注（2h 观察，待甄别/补图）→ ${list2h.slice(0, 12).join(' ')}${list2h.length > 12 ? ` …共${list2h.length}题` : ''}`)
+} else console.log('✓ 场景图元：题干点名装置均有对应图元标注')
+
 // ---------- 2g. figure 底板指纹守卫（验收 #75 P1-125：23 题同底板仅换文字标注的「换皮图」） ----------
 // 两层（零 AI 纯结构比对）：
 // ① 硬失败（回归钉）：P1-125 坏底板（虚线矩形「B / E（匀强场区）」+ 向上箭头 + +q 黄圆）除留观察的
@@ -289,6 +321,7 @@ for (const it of svgRows2g) {
   fpGroups.get(key)!.push(it.id)
 }
 const skinFams: string[] = []
+let legalFams2g = 0 // 经 2h 场景校验甄别为合法同模板族（族内无 2h 违例成员）的数量
 for (const members of fpGroups.values()) {
   if (members.length < 2) continue
   let minSim = 1
@@ -302,11 +335,17 @@ for (const members of fpGroups.values()) {
       if (uni > 0 && inter / uni < minSim) minSim = inter / uni
     }
   }
-  if (minSim < 0.1) skinFams.push(`{${members.slice(0, 6).map((i) => '#' + i).join(' ')}${members.length > 6 ? ` …共${members.length}题` : ''}}(最小bigram=${minSim.toFixed(3)})`)
+  if (minSim < 0.1) {
+    // #77 P1-126：bigram 弱信号族先过 2h 场景图元校验——族内无违例成员 = 甄别通过放行；
+    // 有违例成员 = 真疑似换皮，保留观察
+    if (members.some((id) => sceneViolations.has(id))) {
+      skinFams.push(`{${members.slice(0, 6).map((i) => '#' + i).join(' ')}${members.length > 6 ? ` …共${members.length}题` : ''}}(违例:${members.filter((id) => sceneViolations.has(id)).map((i) => '#' + i).join(',')})`)
+    } else legalFams2g++
+  }
 }
 if (skinFams.length) {
-  console.log(`⚠ 底板指纹观察：${skinFams.length} 个同指纹族族内题干场景差异大（同底板换皮疑似，待人工甄别，不计硬失败）→ ${skinFams.slice(0, 8).join(' ')}`)
-} else console.log(`✓ 底板指纹观察：${svgRows2g.length} 张 svg 图无「同底板 + 不相干场景」族`)
+  console.log(`⚠ 底板指纹观察：${skinFams.length} 个同指纹族含场景图元违例成员（同底板换皮疑似，待人工甄别，不计硬失败）→ ${skinFams.slice(0, 8).join(' ')}${skinFams.length > 8 ? ` …共${skinFams.length}族` : ''}；另 ${legalFams2g} 族经 2h 场景校验甄别为合法同模板族放行`)
+} else console.log(`✓ 底板指纹观察：${svgRows2g.length} 张 svg 图无「同底板 + 场景违例」族（另 ${legalFams2g} 族合法同模板放行）`)
 
 // ---------- 3. 字面 \n（后非字母） ----------
 const litIds: string[] = []
