@@ -237,7 +237,9 @@ else console.log('✓ 答案/解析一致：全部题 answer 数值均可在 sol
 // 与 2g 底板指纹互补：2g 观察族仅保留「族内存在 2h 违例成员」的族，合法同模板族经甄别放行，防新出题复发。
 const SCENE_RULES_2H: { re: RegExp; need: RegExp; name: string; geo?: (svg: string) => boolean }[] = [
   { re: /斜面/, need: /斜面|°|θ/, name: '斜面' },
-  { re: /导轨/, need: /导轨|金属棒|导体棒|棒|ab|cd/, name: '导轨' },
+  // #793 对账（验收 #78）：#793 图内为分立标签「a」「b」（题干亦分立定义 a、b 棒），实测为好图——
+  // 导轨规则放行「分立 a b」写法（texts 以空格拼接，ab 连写仍直接命中），避免分立标签误报。
+  { re: /导轨/, need: /导轨|金属棒|导体棒|棒|ab|cd|(?:^|\s)a\s+b(?:\s|$)/, name: '导轨' },
   // 传送带：无文字标注时几何回退——图中同时存在 ≥2 圆（传动轮）与 ≥1 矩形（物块）即视为画出皮带轮
   { re: /传送带/, need: /传送带/, name: '传送带', geo: (svg) => (svg.match(/<circle\b/g) || []).length >= 2 && (svg.match(/<rect\b/g) || []).length >= 1 },
   { re: /气缸|汽缸/, need: /气缸|汽缸|活塞/, name: '气缸' },
